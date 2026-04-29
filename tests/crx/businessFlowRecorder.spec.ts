@@ -17,6 +17,8 @@
 import type { Page, BrowserContext } from 'playwright-core';
 import { test, expect } from './crxRecorderTest';
 
+test.describe.configure({ mode: 'serial' });
+
 test('records an AntD business flow through the plugin UI, exports it, and replays generated Playwright code @smoke', async ({ context, page, attachRecorder, baseURL, mockPaths }) => {
   test.setTimeout(120_000);
 
@@ -79,6 +81,63 @@ test('records an AntD business flow through the plugin UI, exports it, and repla
   expect(flow.artifacts.playwrightCode).toContain('data-row-key=\\"user-42\\"');
   expect(exportedYaml).toContain('AntD 用户流程 E2E');
   expect(exportedYaml).toContain('user-42');
+
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+});
+
+test('records a real AntD ProComponents async create-and-use flow @smoke', async ({ context, page, attachRecorder, baseURL }) => {
+  test.setTimeout(120_000);
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page);
+  recorderPage.on('dialog', dialog => dialog.accept());
+
+  await beginNewFlowFromLibrary(recorderPage);
+  await fillFlowMeta(recorderPage, '流程名称', '真实 AntD ProComponents 条目流程');
+  await fillFlowMeta(recorderPage, '应用', 'AntD Pro');
+  await fillFlowMeta(recorderPage, '模块', '条目管理');
+  await fillFlowMeta(recorderPage, '页面', '真实组件页');
+  await fillFlowMeta(recorderPage, '角色', '运营');
+  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.goto(`${baseURL}/antd-pro-real.html`);
+  await expect(page.getByText('真实 AntD ProComponents 页面')).toBeVisible();
+  await expect(page.getByTestId('real-create-item')).toBeVisible();
+
+  await page.getByTestId('real-create-item').locator('svg').click();
+  await page.getByPlaceholder('请输入条目名称').fill('real-item-a');
+  await page.getByPlaceholder('请输入负责人').fill('真实运营');
+  await page.getByRole('button', { name: /保\s*存/ }).click();
+  await expect(page.getByRole('row', { name: /real-item-a/ })).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('real-used-item-select').click();
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content').filter({ hasText: 'real-item-a' }).click();
+  await page.getByPlaceholder('填写使用备注').fill('下方表单使用刚保存的条目');
+
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(7);
+  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('real-create-item');
+  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('real-item-a');
+  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('下方表单使用条目');
+
+  await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+
+  const exportedJson = await downloadTextAfterClick(
+      recorderPage,
+      recorderPage.getByRole('button', { name: '导出流程 JSON' }).last(),
+  );
+  const flow = JSON.parse(exportedJson);
+
+  expect(flow.flow.name).toBe('真实 AntD ProComponents 条目流程');
+  expect(flow.steps.length).toBeGreaterThanOrEqual(7);
+  expect(flow.steps.some((step: any) => step.target?.testId === 'real-create-item')).toBeTruthy();
+  expect(flow.steps.some((step: any) => step.target?.label === '条目名称' || step.target?.placeholder === '请输入条目名称')).toBeTruthy();
+  expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.placeholder, step.target?.testId].some(value => /下方表单使用条目|选择刚保存的条目|real-used-item-select/.test(String(value || ''))))).toBeTruthy();
+  expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
+  expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
+  expect(flow.artifacts.playwrightCode).toContain('real-item-a');
+  expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
 });

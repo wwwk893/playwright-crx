@@ -77,19 +77,24 @@ export function repeatSegmentStats(flow: BusinessFlow) {
 
 function inferRepeatParameters(steps: FlowStep[]): FlowRepeatParameter[] {
   const usedNames = new Map<string, number>();
+  const variableNameByValue = new Map<string, string>();
   return steps
       .filter(step => (step.action === 'fill' || step.action === 'select') && !!step.value?.trim())
       .map((step, index) => {
         const label = parameterLabel(step);
-        const baseVariableName = variableNameFor(label, step.value);
+        const currentValue = step.value?.trim() || '';
+        const sharedVariableName = currentValue ? variableNameByValue.get(currentValue) : undefined;
+        const baseVariableName = sharedVariableName || variableNameFor(label, currentValue);
+        if (currentValue && !sharedVariableName)
+          variableNameByValue.set(currentValue, baseVariableName);
         const count = usedNames.get(baseVariableName) ?? 0;
-        usedNames.set(baseVariableName, count + 1);
+        usedNames.set(baseVariableName, count + (sharedVariableName ? 0 : 1));
         return {
           id: `p${String(index + 1).padStart(3, '0')}`,
           label,
           sourceStepId: step.id,
-          currentValue: step.value?.trim() || '',
-          variableName: count ? `${baseVariableName}${count + 1}` : baseVariableName,
+          currentValue,
+          variableName: sharedVariableName || (count ? `${baseVariableName}${count + 1}` : baseVariableName),
           enabled: true,
         };
       });
@@ -141,6 +146,8 @@ function variableNameFor(label: string, value?: string) {
     return 'poolName';
   if (/用户名|用户|账号|account|user/i.test(source))
     return 'userName';
+  if (/条目|项目|记录|名称|name/i.test(source))
+    return 'name';
   if (/描述|备注|comment|description/i.test(source))
     return 'description';
   if (/wan/i.test(source))

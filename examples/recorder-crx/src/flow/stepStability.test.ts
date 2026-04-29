@@ -101,6 +101,36 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'manual wait after async save waits for page stability before timeout',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        fillAction('条目名称', 'item-a'),
+        clickAction('保存'),
+        fillAction('下方表单使用条目', 'item-a'),
+      ], [], {});
+      const inserted = insertWaitStepAfter(initial, 's002', 2000);
+      const waitStep = inserted.steps.find(step => step.action === 'wait');
+      const code = generateBusinessFlowPlaywrightCode(inserted);
+
+      assertEqual(waitStep?.intent, '等待保存完成，页面稳定后继续');
+      assert(code.includes("await page.waitForLoadState('networkidle').catch(() => {});"), 'wait step should wait for network idle before continuing');
+      assert(code.includes('await page.waitForTimeout(2000);'), 'wait step should still include explicit timeout fallback');
+    },
+  },
+  {
+    name: 'rule intent is generated without AI for common business actions',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [
+        clickAction('新建'),
+        fillAction('条目名称', 'item-a'),
+        clickAction('保存'),
+      ], [], {});
+
+      assertEqual(flow.steps.map(step => step.intentSource), ['rule', 'rule', 'rule']);
+      assertEqual(flow.steps.map(step => step.intent), ['打开新建入口', '填写条目名称', '保存当前配置']);
+    },
+  },
+  {
     name: 'middle inserted recording keeps following steps and advances the anchor between batches',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -1116,6 +1146,60 @@ test('demo', async ({ page }) => {
 
       assert(loopCloseIndex > 0, 'repeat loop should be emitted');
       assert(postRepeatStepIndex > loopCloseIndex, 'post-repeat step should be emitted after the loop closes');
+    },
+  },
+  {
+    name: 'repeat segment reuses saved item parameter when the item is used later in the same business loop',
+    run: () => {
+      let initial = mergeActionsIntoFlow(undefined, [
+        clickAction('新建条目'),
+        fillAction('条目名称', 'item-a'),
+        clickAction('保存'),
+        fillAction('下方表单使用条目', 'item-a'),
+      ], recordedSource([
+        `await page.getByRole('button', { name: '新建条目' }).click();`,
+        `await page.getByLabel('条目名称').fill('item-a');`,
+        `await page.getByRole('button', { name: '保存' }).click();`,
+        `await page.getByLabel('下方表单使用条目').fill('item-a');`,
+      ]), {});
+      initial = insertWaitStepAfter(initial, 's003', 2000);
+      const segment = createRepeatSegment(initial, ['s001', 's002', 's003', 's005', 's004']);
+      const flow: BusinessFlow = {
+        ...initial,
+        repeatSegments: [segment],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const itemParameters = segment.parameters.filter(parameter => parameter.currentValue === 'item-a');
+
+      assertEqual(itemParameters.length, 2);
+      assertEqual([...new Set(itemParameters.map(parameter => parameter.variableName))], ['name']);
+      assert(code.includes('for (const row of'), 'repeat segment should emit a loop');
+      assert(code.includes(`.fill(String(row.name));`), 'both create and downstream use steps should reference the same row.name parameter');
+      assert(code.includes("await page.waitForLoadState('networkidle').catch(() => {});"), 'repeat loop should keep async save wait before using the saved item');
+    },
+  },
+  {
+    name: 'wrong middle step can be deleted and rerecorded between existing neighbors',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('打开表单'),
+        fillAction('错误字段', 'bad-value'),
+        clickAction('保存'),
+      ], [], {});
+      const deletedWrongStep = deleteStepFromFlow(initial, 's002');
+      const rerecorded = mergeActionsIntoFlow(deletedWrongStep, [
+        clickAction('打开表单'),
+        fillAction('错误字段', 'bad-value'),
+        clickAction('保存'),
+        fillAction('正确字段', 'good-value'),
+      ], [], {
+        insertAfterStepId: 's001',
+        insertBaseActionCount: 3,
+      });
+
+      assertEqual(rerecorded.steps.map(step => step.id), ['s001', 's004', 's003']);
+      assertEqual(rerecorded.steps.map(step => step.value), [undefined, 'good-value', undefined]);
+      assert(!rerecorded.steps.some(step => step.value === 'bad-value'), 'deleted wrong action should not revive when rerecording in the middle');
     },
   },
   {

@@ -218,7 +218,7 @@ function renderRawActionSource(step: FlowStep) {
       return selector ? `await ${locatorExpressionForSelector(selector)}.press(${stringLiteral(action.key ?? step.value ?? '')});` : undefined;
     case 'wait':
     case 'waitForTimeout':
-      return `await page.waitForTimeout(${waitMilliseconds(step.value ?? action.timeout ?? action.value ?? action.text)});`;
+      return renderStableWaitSource(waitMilliseconds(step.value ?? action.timeout ?? action.value ?? action.text));
     case 'check':
       return selector ? `await ${locatorExpressionForSelector(selector)}.check();` : undefined;
     case 'uncheck':
@@ -241,6 +241,13 @@ function waitMilliseconds(value: unknown) {
   return Math.max(0, Math.round(numeric));
 }
 
+function renderStableWaitSource(milliseconds: number) {
+  return [
+    `await page.waitForLoadState('networkidle').catch(() => {});`,
+    `await page.waitForTimeout(${milliseconds});`,
+  ].join('\n');
+}
+
 function targetClickFallback(step: FlowStep) {
   const preferred = preferredTargetLocator(step);
   if (preferred)
@@ -253,8 +260,8 @@ function preferredTargetLocator(step: FlowStep) {
   return globalTestIdLocator(step) ||
     tableScopedLocator(step) ||
     dialogScopedLocator(step) ||
-    sectionScopedLocator(step) ||
     fieldLocator(step) ||
+    sectionScopedLocator(step) ||
     globalRoleLocator(step) ||
     fallbackTextLocator(step);
 }
@@ -322,8 +329,12 @@ function sectionScopedLocator(step: FlowStep) {
 }
 
 function fieldLocator(step: FlowStep) {
-  if (step.target?.label)
-    return `page.getByLabel(${stringLiteral(step.target.label)})`;
+  const label = step.target?.label || step.target?.scope?.form?.label || step.context?.before.form?.label;
+  const controlType = step.context?.before.target?.controlType;
+  if (label && (controlType === 'select' || controlType === 'tree-select' || step.target?.role === 'combobox'))
+    return `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;
+  if (label)
+    return `page.getByLabel(${stringLiteral(label)})`;
   if (step.target?.placeholder)
     return `page.getByPlaceholder(${stringLiteral(step.target.placeholder)})`;
   return undefined;

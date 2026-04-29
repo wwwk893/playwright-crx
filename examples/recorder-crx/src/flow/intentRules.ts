@@ -14,6 +14,32 @@
 import type { PageContextEvent, IntentProvenance, IntentSuggestion, StepContextSnapshot } from './pageContextTypes';
 import type { FlowStep } from './types';
 
+export function suggestBasicIntent(step: FlowStep): IntentSuggestion | undefined {
+  const targetText = firstText(step.target?.displayName, step.target?.name, step.target?.label, step.target?.placeholder, step.target?.text, step.target?.testId);
+  if (step.action === 'click' && targetText && /新建|新增|添加|创建/i.test(targetText))
+    return makeSuggestion('打开新建入口', 0.68, 'basic.click.create', provenance('target', targetText));
+  if (step.action === 'click' && targetText && /保存|提交|确定|确认|完成/i.test(targetText))
+    return makeSuggestion(/保存|提交/i.test(targetText) ? '保存当前配置' : `确认${targetText}`, 0.68, 'basic.click.save', provenance('target', targetText));
+  if (step.action === 'click' && targetText && /编辑|修改/i.test(targetText))
+    return makeSuggestion('编辑当前记录', 0.64, 'basic.click.edit', provenance('target', targetText));
+  if (step.action === 'click' && targetText && /删除|移除/i.test(targetText))
+    return makeSuggestion('删除当前记录', 0.64, 'basic.click.delete', provenance('target', targetText));
+  if (step.action === 'fill' && targetText)
+    return makeSuggestion(`填写${targetText}`, 0.7, 'basic.fill.field', provenance('field', targetText, 'value', step.value));
+  if (step.action === 'select' && targetText)
+    return makeSuggestion(`选择${step.value || targetText}`, 0.66, 'basic.select.option', provenance('field', targetText, 'value', step.value));
+  if (step.action === 'wait')
+    return makeSuggestion('等待页面稳定后继续', 0.64, 'basic.wait.stable', provenance('milliseconds', step.value));
+  return undefined;
+}
+
+export function suggestWaitIntent(previousStep?: FlowStep): IntentSuggestion {
+  const previousTarget = firstText(previousStep?.target?.displayName, previousStep?.target?.name, previousStep?.target?.label, previousStep?.target?.text);
+  if (previousStep?.action === 'click' && previousTarget && /保存|提交|确定|确认|完成/i.test(previousTarget))
+    return makeSuggestion('等待保存完成，页面稳定后继续', 0.78, 'wait.after-save.stable', provenance('previousStep', previousStep.id, 'target', previousTarget));
+  return makeSuggestion('等待页面稳定后继续', 0.64, 'wait.stable', provenance('previousStep', previousStep?.id));
+}
+
 export function suggestIntent(step: FlowStep, context: StepContextSnapshot): IntentSuggestion | undefined {
   const before = context.before;
   const after = context.after;

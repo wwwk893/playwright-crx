@@ -8,6 +8,7 @@ import type { Source } from '@recorder/recorderTypes';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import type { BusinessFlow, FlowActionType, FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowRecorderState, FlowRepeatSegment, FlowStep, FlowTarget, RecordedActionEntry, RecordingSession } from './types';
 import type { ElementContext, PageContextEvent } from './pageContextTypes';
+import { suggestBasicIntent, suggestWaitIntent } from './intentRules';
 import { createEmptyBusinessFlow, flowAssertionId } from './types';
 import { migrateFlowToStableStepModel } from './flowMigration';
 import { cloneRecorderState, withRecorderState } from './recorderState';
@@ -181,17 +182,21 @@ export function insertWaitStepAfter(flow: BusinessFlow, afterStepId: string, mil
   const base = migrateFlowToStableStepModel(flow);
   const recorder = cloneRecorderState(base);
   const waitMilliseconds = normalizeWaitMilliseconds(milliseconds);
+  const previousStep = base.steps.find(candidate => candidate.id === afterStepId);
+  const suggestion = suggestWaitIntent(previousStep);
   const step: FlowStep = {
     id: nextStableStepId(recorder),
     order: 0,
     kind: 'manual',
     sourceActionIds: [],
     action: 'wait',
-    intent: `等待 ${formatWaitSeconds(waitMilliseconds)} 秒`,
+    intent: suggestion.text,
+    intentSource: 'rule',
+    intentSuggestion: suggestion,
     comment: '等待页面状态稳定后继续执行。',
     value: String(waitMilliseconds),
     assertions: [],
-    sourceCode: `await page.waitForTimeout(${waitMilliseconds});`,
+    sourceCode: renderStableWaitSource(waitMilliseconds),
   };
   const insertAt = Math.max(0, base.steps.findIndex(candidate => candidate.id === afterStepId) + 1);
   const steps = [...base.steps];
@@ -647,7 +652,7 @@ function buildStepFromEntry(recorder: FlowRecorderState, entry: RecordedActionEn
   const value = extractValue(action);
   const assertions = defaultAssertions(action, assertionIndex.value, target, url, value);
   assertionIndex.value += Math.max(assertions.length, 1);
-  return {
+  return withBasicIntent({
     id: nextStableStepId(recorder),
     order: 0,
     kind: 'recorded',
@@ -659,7 +664,7 @@ function buildStepFromEntry(recorder: FlowRecorderState, entry: RecordedActionEn
     assertions,
     rawAction: entry.rawAction,
     sourceCode: entry.sourceCode,
-  };
+  });
 }
 
 function compactStepDrafts(drafts: StepDraft[]): StepDraft[] {
@@ -1187,7 +1192,7 @@ function renderActionSource(action: ActionLike) {
       return action.selector ? `await ${locatorExpression(action.selector)}.press(${stringLiteral(action.key ?? '')});` : undefined;
     case 'wait':
     case 'waitForTimeout':
-      return `await page.waitForTimeout(${normalizeWaitMilliseconds(Number(extractValue(action) ?? action.value ?? action.text))});`;
+      return renderStableWaitSource(normalizeWaitMilliseconds(Number(extractValue(action) ?? action.value ?? action.text)));
     case 'check':
       return action.selector ? `await ${locatorExpression(action.selector)}.check();` : undefined;
     case 'uncheck':
@@ -1208,9 +1213,25 @@ function normalizeWaitMilliseconds(value: number) {
   return Math.max(0, Math.round(value));
 }
 
-function formatWaitSeconds(milliseconds: number) {
-  const seconds = milliseconds / 1000;
-  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1).replace(/\.0$/, '');
+function renderStableWaitSource(milliseconds: number) {
+  return [
+    `await page.waitForLoadState('networkidle').catch(() => {});`,
+    `await page.waitForTimeout(${milliseconds});`,
+  ].join('\n');
+}
+
+function withBasicIntent(step: FlowStep): FlowStep {
+  if (step.intentSource === 'user' || step.intent)
+    return step;
+  const suggestion = suggestBasicIntent(step);
+  if (!suggestion || suggestion.confidence < 0.6)
+    return step;
+  return {
+    ...step,
+    intent: suggestion.text,
+    intentSource: 'rule',
+    intentSuggestion: suggestion,
+  };
 }
 
 function locatorExpression(selector: string) {
