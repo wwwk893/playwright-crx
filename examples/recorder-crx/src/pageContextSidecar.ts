@@ -31,7 +31,7 @@ if (!(window as any)[installKey]) {
 
 function recordEvent(kind: ContextEventKind, event: Event) {
   const target = event.target instanceof Element ? event.target : undefined;
-  if (!target || shouldIgnoreTarget(target))
+  if (!target || shouldIgnoreTarget(target, kind))
     return;
 
   const time = performance.now();
@@ -103,9 +103,14 @@ function collectElement(element: Element) {
 }
 
 function actionAnchorForElement(element: Element) {
-  if (isDirectActionTarget(element))
-    return element;
-  return closestWithin(element, 'button, a, [role="button"], [role="menuitem"], [role="option"], [data-testid], [data-test-id], [data-e2e]') ?? element;
+  const candidates = [
+    element,
+    closestWithin(element, 'button, a, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]'),
+    closestWithin(element, '[data-testid], [data-test-id], [data-e2e]'),
+    closestWithin(element, 'input, textarea, select, [role="combobox"], [role="textbox"]'),
+  ].filter(Boolean) as Element[];
+
+  return candidates.sort((a, b) => anchorScore(b) - anchorScore(a))[0] ?? element;
 }
 
 function isDirectActionTarget(element: Element) {
@@ -113,8 +118,24 @@ function isDirectActionTarget(element: Element) {
   return tag === 'input' ||
     tag === 'textarea' ||
     tag === 'select' ||
-    !!element.getAttribute('role') ||
+    isInteractiveRole(element.getAttribute('role')) ||
     !!testIdOf(element);
+}
+
+function isInteractiveRole(role?: string | null) {
+  return !!role && /^(button|link|menuitem|option|tab|checkbox|radio|switch|combobox|textbox)$/i.test(role);
+}
+
+function anchorScore(element: Element) {
+  const tag = element.tagName.toLowerCase();
+  const role = element.getAttribute('role');
+  return (testIdOf(element) ? 100 : 0) +
+    (tag === 'button' ? 50 : 0) +
+    (role === 'button' ? 40 : 0) +
+    (tag === 'input' || tag === 'textarea' || tag === 'select' ? 30 : 0) +
+    (isInteractiveRole(role) ? 20 : 0) +
+    (elementText(element) ? 10 : 0) +
+    (isDirectActionTarget(element) ? 5 : 0);
 }
 
 function collectDialog(target: Element) {
@@ -303,7 +324,9 @@ function firstToken(value?: string) {
   return value?.split(/\s+/).find(token => token.length <= 40 && !/^(编辑|删除|操作)$/.test(token));
 }
 
-function shouldIgnoreTarget(element: Element) {
+function shouldIgnoreTarget(element: Element, kind?: ContextEventKind) {
+  if (kind === 'keydown' && (element === document.body || element === document.documentElement))
+    return true;
   const input = element.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
   return !!input && (sensitivePattern.test(input.name || input.id || input.placeholder || '') || input.type === 'password');
 }

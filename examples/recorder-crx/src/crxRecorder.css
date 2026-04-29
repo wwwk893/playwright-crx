@@ -1904,6 +1904,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 5px;
   overflow: visible;
+  user-select: none;
 }
 
 .review-step-row {
@@ -1914,6 +1915,7 @@
   padding: 10px 8px;
   border-bottom: 1px solid #eef2f7;
   background: #fff;
+  cursor: default;
 }
 
 .review-step-row.selected-for-repeat {
@@ -1963,10 +1965,11 @@
   grid-template-columns: 28px 1fr;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
-  padding: 6px 8px;
+  min-height: 14px;
+  padding: 0 8px;
   border-bottom: 1px solid #eef2f7;
   background: #fbfdff;
+  transition: min-height 0.16s ease, padding 0.16s ease, background 0.16s ease;
 }
 
 .review-insert-slot::before {
@@ -1977,6 +1980,8 @@
   border: 1px solid #1677ff;
   border-radius: 50%;
   background: #fff;
+  opacity: 0;
+  transition: opacity 0.16s ease;
 }
 
 .review-insert-slot > button {
@@ -1988,6 +1993,25 @@
   color: #1677ff;
   cursor: pointer;
   font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.review-insert-slot:hover,
+.review-insert-slot.active {
+  min-height: 44px;
+  padding: 6px 8px;
+}
+
+.review-insert-slot:hover::before,
+.review-insert-slot.active::before,
+.review-insert-slot:hover > button,
+.review-insert-slot.active > button {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .review-insert-slot > button span {
@@ -2170,7 +2194,7 @@
 .repeat-create-actions {
   display: grid;
   flex: none;
-  grid-template-columns: auto auto auto;
+  grid-template-columns: auto auto auto auto;
   gap: 6px;
 }
 
@@ -2184,6 +2208,11 @@
 .repeat-create-actions .primary {
   background: #1677ff;
   color: #fff;
+}
+
+.repeat-create-actions .danger-outline {
+  border-color: #fecaca;
+  color: #ef4444;
 }
 
 .repeat-create-actions button:disabled {

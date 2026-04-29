@@ -7,7 +7,7 @@
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
-import { appendSyntheticPageContextSteps, deleteStepFromFlow, insertEmptyStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { createRepeatSegment } from './repeatSegments';
 import type { PageContextEvent, ElementContext } from './pageContextTypes';
 import type { BusinessFlow } from './types';
@@ -590,7 +590,33 @@ test('demo', async ({ page }) => {
     },
   },
   {
-    name: 'late recorder click replaces a synthetic page context click for the same target',
+    name: 'page context duplicate nested targets choose button test id in one arbitration window',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('保存配置'),
+      ], [], {});
+      const wallTime = Date.now() - 2000;
+      const spanEvent = pageClickEventWithTarget('ctx-span', wallTime, {
+        tag: 'span',
+        text: '新建',
+        normalizedText: '新建',
+      });
+      const buttonEvent = pageClickEventWithTarget('ctx-button', wallTime + 200, {
+        tag: 'button',
+        role: 'button',
+        testId: 'site-ip-port-pool-create-button',
+        text: '新建',
+        normalizedText: '新建',
+      });
+      const result = appendSyntheticPageContextStepsWithResult(initial, [spanEvent, buttonEvent]);
+
+      assertEqual(result.insertedStepIds.length, 1);
+      assertEqual(result.flow.steps.map(step => step.id), ['s001', 's002']);
+      assertEqual(result.flow.steps[1].target?.testId, 'site-ip-port-pool-create-button');
+    },
+  },
+  {
+    name: 'late recorder click upgrades a synthetic page context click in place',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
         clickAction('保存配置'),
@@ -613,10 +639,10 @@ test('demo', async ({ page }) => {
         insertBaseActionCount: 1,
       });
 
-      assertEqual(recorded.steps.map(step => step.id), ['s001', 's003']);
+      assertEqual(recorded.steps.map(step => step.id), ['s001', 's002']);
       assertEqual(recorded.steps[1].kind, 'recorded');
       assertEqual(recorded.steps[1].target?.testId, 'site-ip-port-pool-create-button');
-      assert(!recorded.steps.some(step => step.id === 's002'), 'covered synthetic step should be removed');
+      assertEqual(recorded.steps[1].sourceActionIds?.length, 1);
     },
   },
   {
@@ -630,6 +656,48 @@ test('demo', async ({ page }) => {
 
       assertEqual(withSynthetic.steps.length, 1);
       assertEqual(withSynthetic.steps[0].target?.name, '新建');
+    },
+  },
+  {
+    name: 'weak page context text click is suppressed by nearby strong recorder click',
+    run: () => {
+      const wallTime = Date.now();
+      const initial = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('site-ip-port-pool-create-button', wallTime),
+      ], [], {});
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [
+        pageClickEventWithTarget('ctx-weak-new', wallTime + 260, {
+          tag: 'span',
+          text: '新建',
+          normalizedText: '新建',
+        }),
+      ]);
+
+      assertEqual(withSynthetic.steps.length, 1);
+      assertEqual(withSynthetic.steps[0].target?.testId, 'site-ip-port-pool-create-button');
+    },
+  },
+  {
+    name: 'synthetic page context insert respects the requested anchor',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('保存配置'),
+        clickAction('打开端口池'),
+      ], [], {});
+      const result = appendSyntheticPageContextStepsWithResult(initial, [
+        pageClickEventWithTarget('ctx-new-port-pool', Date.now() - 2000, {
+          tag: 'button',
+          role: 'button',
+          testId: 'site-ip-port-pool-create-button',
+          text: '新建',
+          normalizedText: '新建',
+        }),
+      ], { insertAfterStepId: 's001' });
+
+      assertEqual(result.insertedStepIds.length, 1);
+      assertEqual(result.flow.steps.map(step => step.id), ['s001', 's003', 's002']);
+      assertEqual(result.flow.steps[1].target?.testId, 'site-ip-port-pool-create-button');
+      assertEqual(result.flow.steps.find(step => step.id === 's002')?.target?.name, '打开端口池');
     },
   },
   {
@@ -695,6 +763,18 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes(`getByRole('button', { name: '新建' })`), 's001 should use its own button locator');
       assert(firstStep.includes('.click();'), 's001 should render a click action');
       assert(!firstStep.includes('.fill('), 's001 should not reuse the stale fill source');
+    },
+  },
+  {
+    name: 'recorded source line is validated before it is written to a step',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('site-save-button'),
+      ], recordedSource([
+        `await page.getByTestId('site-ip-port-pool-create-button').click();`,
+      ]), {});
+
+      assertEqual(flow.steps[0].sourceCode, `await page.getByTestId('site-save-button').click();`);
     },
   },
   {

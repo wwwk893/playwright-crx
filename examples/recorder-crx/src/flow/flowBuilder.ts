@@ -59,6 +59,20 @@ type RefreshResult = {
   changed: boolean;
 };
 
+export type SyntheticAppendOptions = {
+  insertAfterStepId?: string;
+  diagnostics?: (event: MergeDiagnosticEvent) => void;
+};
+
+export type SyntheticAppendResult = {
+  flow: BusinessFlow;
+  insertedStepIds: string[];
+  upgradedStepIds: string[];
+  skippedEventIds: string[];
+};
+
+const syntheticPageClickComment = '页面侧已捕获点击，并根据页面上下文自动补录为业务步骤。';
+
 export function mergeActionsIntoFlow(prev: BusinessFlow | undefined, actions: unknown[], sources: unknown[], options: MergeActionsOptions = {}): BusinessFlow {
   const base = migrateFlowToStableStepModel(prev ?? createEmptyBusinessFlow());
   const recorder = cloneRecorderState(base);
@@ -110,7 +124,7 @@ export function mergeActionsIntoFlow(prev: BusinessFlow | undefined, actions: un
   recorder.actionLog.push(...entries);
   recorder.sessions.push({ ...session, committedAt: new Date().toISOString() });
 
-  const next = insertProjectedSteps(refreshed.flow, drafts, options.insertAfterStepId);
+  const next = insertProjectedSteps(refreshed.flow, drafts, options.insertAfterStepId, options);
   emitDiagnostic(options, 'merge.commit', '业务步骤合并完成', {
     beforeStepCount: refreshed.flow.steps.length,
     afterStepCount: next.steps.length,
@@ -171,32 +185,56 @@ export function nextAssertionId(flow: BusinessFlow) {
 }
 
 export function appendSyntheticPageContextSteps(flow: BusinessFlow, events: PageContextEvent[], diagnostics?: (event: MergeDiagnosticEvent) => void): BusinessFlow {
+  return appendSyntheticPageContextStepsWithResult(flow, events, { diagnostics }).flow;
+}
+
+export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, events: PageContextEvent[], options: SyntheticAppendOptions = {}): SyntheticAppendResult {
   let base = migrateFlowToStableStepModel(flow);
   const recorder = cloneRecorderState(base);
   const steps = [...base.steps];
   const addedStepIds: string[] = [];
+  const skippedEventIds: string[] = [];
   for (const event of dedupeSyntheticClickEvents(events)) {
-    if (event.kind !== 'click' || !event.wallTime)
+    if (event.kind !== 'click' || !event.wallTime || !shouldCreateSyntheticClick(event)) {
+      skippedEventIds.push(event.id);
       continue;
-    if (hasSyntheticStepForEvent(steps, event) || hasRecordedClickNearEvent(recorder, event))
+    }
+    if (hasSyntheticStepForEvent(steps, event) || hasRecordedClickForEvent(recorder, event)) {
+      skippedEventIds.push(event.id);
       continue;
+    }
     const step = buildSyntheticClickStep(recorder, event);
-    steps.push(step);
+    const insertAt = options.insertAfterStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === options.insertAfterStepId) + 1) : steps.length;
+    steps.splice(insertAt, 0, step);
     addedStepIds.push(step.id);
+    options.insertAfterStepId = step.id;
   }
-  if (!addedStepIds.length)
-    return flow;
+  if (!addedStepIds.length) {
+    return {
+      flow,
+      insertedStepIds: [],
+      upgradedStepIds: [],
+      skippedEventIds,
+    };
+  }
 
   base = {
     ...base,
     steps: recomputeOrders(steps),
     updatedAt: new Date().toISOString(),
   };
-  emitDiagnostic({ diagnostics }, 'merge.synthetic-page-click', '页面侧 click 已根据上下文合成业务步骤', {
+  emitDiagnostic({ diagnostics: options.diagnostics }, 'merge.synthetic-page-click', '页面侧 click 已根据上下文合成业务步骤', {
     addedStepIds,
+    skippedEventIds,
     eventIds: events.map(event => event.id),
+    insertAfterStepId: options.insertAfterStepId,
   }, 'warn');
-  return withRecorderState(base, recorder);
+  return {
+    flow: withRecorderState(base, recorder),
+    insertedStepIds: addedStepIds,
+    upgradedStepIds: [],
+    skippedEventIds,
+  };
 }
 
 export function createAssertion(type: FlowAssertionType, id: string, step?: FlowStep): FlowAssertion {
@@ -245,7 +283,7 @@ function extractNewActionEntries(recorder: FlowRecorderState, actions: unknown[]
       recorderIndex,
       signature: actionSignature(rawAction) || `${session.id}:${offset}`,
       rawAction,
-      sourceCode: sourceActions[recorderIndex] ?? renderActionSource(action),
+      sourceCode: sourceCodeForRecordedAction(sourceActions[recorderIndex], action),
       wallTime: typeof actionInContext.wallTime === 'number' ? actionInContext.wallTime : undefined,
       endWallTime: typeof actionInContext.endWallTime === 'number' ? actionInContext.endWallTime : undefined,
       createdAt: new Date().toISOString(),
@@ -265,8 +303,9 @@ function refreshExistingActionEntries(flow: BusinessFlow, recorder: FlowRecorder
     if (entry.recorderIndex < 0 || entry.recorderIndex >= actions.length)
       continue;
     const rawAction = actions[entry.recorderIndex];
+    const action = normalizeAction(asRecord(rawAction) as ActionInContextLike);
     const nextSignature = actionSignature(rawAction) || entry.signature;
-    const nextSourceCode = sourceActions[entry.recorderIndex] ?? renderActionSource(normalizeAction(asRecord(rawAction) as ActionInContextLike));
+    const nextSourceCode = sourceCodeForRecordedAction(sourceActions[entry.recorderIndex], action);
     if (entry.signature === nextSignature && entry.sourceCode === nextSourceCode)
       continue;
 
@@ -359,19 +398,63 @@ function filterIncidentalContinuationNavigations(actions: unknown[], start: numb
 }
 
 function dedupeSyntheticClickEvents(events: PageContextEvent[]) {
-  const result: PageContextEvent[] = [];
-  for (const event of events) {
+  const sorted = events
+      .filter(event => event.kind === 'click' && event.wallTime)
+      .sort((a, b) => Number(a.wallTime) - Number(b.wallTime));
+  const groups: PageContextEvent[][] = [];
+  for (const event of sorted) {
     if (event.kind !== 'click')
       continue;
-    const signature = pageContextTargetSignature(event.before.target);
-    const isDuplicate = result.some(existing => {
-      return pageContextTargetSignature(existing.before.target) === signature &&
-        Math.abs((existing.wallTime ?? 0) - (event.wallTime ?? 0)) < 750;
-    });
-    if (!isDuplicate)
-      result.push(event);
+    const last = groups[groups.length - 1];
+    const previous = last?.[last.length - 1];
+    if (previous && sameClickCluster(previous, event))
+      last.push(event);
+    else
+      groups.push([event]);
   }
-  return result;
+  return groups.map(bestPageContextEvent);
+}
+
+function sameClickCluster(left: PageContextEvent, right: PageContextEvent) {
+  const timeClose = Math.abs(Number(left.wallTime ?? 0) - Number(right.wallTime ?? 0)) < 600;
+  if (!timeClose)
+    return false;
+
+  const leftText = left.before.target ? targetComparableText(left.before.target) : undefined;
+  const rightText = right.before.target ? targetComparableText(right.before.target) : undefined;
+  if (leftText && rightText && leftText === rightText)
+    return true;
+  if (left.before.target?.testId && left.before.target.testId === right.before.target?.testId)
+    return true;
+  return !!left.before.dialog?.title && left.before.dialog.title === right.before.dialog?.title;
+}
+
+function bestPageContextEvent(events: PageContextEvent[]) {
+  return [...events].sort((a, b) => contextEventScore(b) - contextEventScore(a))[0];
+}
+
+function contextEventScore(event: PageContextEvent) {
+  const target = event.before.target;
+  return (target?.testId ? 100 : 0) +
+    (target?.role === 'button' ? 30 : 0) +
+    (target?.text ? 20 : 0) +
+    (target?.ariaLabel ? 15 : 0) +
+    (target?.placeholder ? 10 : 0) +
+    (event.before.form?.label ? 8 : 0) +
+    (event.before.dialog?.title ? 5 : 0);
+}
+
+function shouldCreateSyntheticClick(event: PageContextEvent) {
+  const target = event.before.target;
+  if (!target)
+    return false;
+  return !!target.testId ||
+    !!target.text ||
+    !!target.ariaLabel ||
+    !!target.placeholder ||
+    target.role === 'button' ||
+    target.role === 'menuitem' ||
+    target.role === 'option';
 }
 
 function hasSyntheticStepForEvent(steps: FlowStep[], event: PageContextEvent) {
@@ -386,14 +469,34 @@ function hasSyntheticStepForEvent(steps: FlowStep[], event: PageContextEvent) {
   });
 }
 
-function hasRecordedClickNearEvent(recorder: FlowRecorderState, event: PageContextEvent) {
-  return recorder.actionLog.some(entry => {
-    const action = normalizeAction(asRecord(entry.rawAction) as ActionInContextLike);
-    return action.name === 'click' &&
-      typeof entry.wallTime === 'number' &&
-      typeof event.wallTime === 'number' &&
-      Math.abs(entry.wallTime - event.wallTime) < 1500;
-  });
+function hasRecordedClickForEvent(recorder: FlowRecorderState, event: PageContextEvent) {
+  return recorder.actionLog.some(entry => recordedEntryCoversContextEvent(entry, event));
+}
+
+function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: PageContextEvent) {
+  const action = normalizeAction(asRecord(entry.rawAction) as ActionInContextLike);
+  if (action.name !== 'click')
+    return false;
+  if (typeof entry.wallTime !== 'number' || typeof event.wallTime !== 'number')
+    return false;
+  const diff = Math.abs(entry.wallTime - event.wallTime);
+  if (diff > 2000)
+    return false;
+  const target = extractTarget(action);
+  if (targetsLikelySame(target, event.before.target))
+    return true;
+  if (diff < 800 && isWeakPageContextClickTarget(event.before.target))
+    return true;
+  return diff < 400 && !target?.testId && !event.before.target?.testId;
+}
+
+function isWeakPageContextClickTarget(target?: ElementContext) {
+  if (!target)
+    return true;
+  return !target.testId &&
+    !target.ariaLabel &&
+    !target.placeholder &&
+    !!target.text;
 }
 
 function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContextEvent): FlowStep {
@@ -406,7 +509,7 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
     sourceActionIds: [],
     action: 'click',
     intent: '',
-    comment: '页面侧已捕获点击，并根据页面上下文自动补录为业务步骤。',
+    comment: syntheticPageClickComment,
     context: {
       eventId: event.id,
       capturedAt: event.wallTime ?? Date.now(),
@@ -543,9 +646,16 @@ function compactStepDrafts(drafts: StepDraft[]): StepDraft[] {
   return compacted;
 }
 
-function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStepId?: string): BusinessFlow {
-  const coveredSyntheticStepIds = syntheticStepsCoveredByRecordedDrafts(flow.steps, drafts);
-  const steps = coveredSyntheticStepIds.size ? flow.steps.filter(step => !coveredSyntheticStepIds.has(step.id)) : [...flow.steps];
+function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStepId?: string, options?: MergeActionsOptions): BusinessFlow {
+  const reconciled = upgradeSyntheticStepsCoveredByRecordedDrafts(flow.steps, drafts);
+  const steps = reconciled.steps;
+  drafts = reconciled.remainingDrafts;
+  if (reconciled.upgradedStepIds.length) {
+    emitDiagnostic(options ?? {}, 'merge.synthetic-upgrade', '迟到 recorder action 已原地升级页面侧补录步骤', {
+      upgradedStepIds: reconciled.upgradedStepIds,
+      recordedActionIds: reconciled.upgradedActionIds,
+    });
+  }
   const insertAt = afterStepId ? Math.max(0, steps.findIndex(step => step.id === afterStepId) + 1) : steps.length;
   while (drafts.length) {
     const previous = steps[insertAt - 1];
@@ -577,15 +687,74 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
   };
 }
 
-function syntheticStepsCoveredByRecordedDrafts(steps: FlowStep[], drafts: StepDraft[]) {
-  const recordedClicks = drafts.filter(draft => draft.step.kind === 'recorded' && draft.step.action === 'click');
-  if (!recordedClicks.length)
-    return new Set<string>();
+function upgradeSyntheticStepsCoveredByRecordedDrafts(steps: FlowStep[], drafts: StepDraft[]) {
+  const nextSteps = [...steps];
+  const remainingDrafts: StepDraft[] = [];
+  const upgradedStepIds: string[] = [];
 
-  return new Set(steps
-      .filter(step => step.kind === 'manual' && step.action === 'click' && step.rawAction && asRecord(step.rawAction).syntheticContextEventId)
-      .filter(step => recordedClicks.some(draft => syntheticClickCoveredByRecordedStep(step, draft)))
-      .map(step => step.id));
+  for (const draft of drafts) {
+    if (draft.step.kind !== 'recorded' || draft.step.action !== 'click') {
+      remainingDrafts.push(draft);
+      continue;
+    }
+    const syntheticIndex = nextSteps.findIndex(step => isSyntheticClickStep(step) && syntheticClickCoveredByRecordedStep(step, draft));
+    if (syntheticIndex < 0) {
+      remainingDrafts.push(draft);
+      continue;
+    }
+    nextSteps[syntheticIndex] = upgradeSyntheticStep(nextSteps[syntheticIndex], draft);
+    upgradedStepIds.push(nextSteps[syntheticIndex].id);
+  }
+
+  return {
+    steps: nextSteps,
+    remainingDrafts,
+    upgradedStepIds,
+    upgradedActionIds: upgradedStepIds.flatMap(stepId => nextSteps.find(step => step.id === stepId)?.sourceActionIds ?? []),
+  };
+}
+
+function isSyntheticClickStep(step: FlowStep) {
+  return step.kind === 'manual' &&
+    step.action === 'click' &&
+    !!asRecord(step.rawAction).syntheticContextEventId;
+}
+
+function upgradeSyntheticStep(synthetic: FlowStep, draft: StepDraft): FlowStep {
+  const recorded = draft.step;
+  return {
+    ...synthetic,
+    kind: 'recorded',
+    sourceActionIds: unique([...(synthetic.sourceActionIds ?? []), ...(recorded.sourceActionIds ?? [])]),
+    action: recorded.action,
+    target: mergeRecordedAndSyntheticTarget(recorded.target, synthetic.target),
+    value: recorded.value,
+    url: recorded.url,
+    assertions: synthetic.assertions.length ? synthetic.assertions : recorded.assertions,
+    rawAction: recorded.rawAction,
+    sourceCode: recorded.sourceCode,
+    comment: synthetic.comment === syntheticPageClickComment ? undefined : synthetic.comment,
+  };
+}
+
+function mergeRecordedAndSyntheticTarget(recorded?: FlowTarget, synthetic?: FlowTarget): FlowTarget | undefined {
+  if (!recorded)
+    return synthetic;
+  if (!synthetic)
+    return recorded;
+  return {
+    ...recorded,
+    testId: recorded.testId || synthetic.testId,
+    role: recorded.role || synthetic.role,
+    name: recorded.name || synthetic.name,
+    displayName: recorded.displayName || synthetic.displayName,
+    text: recorded.text || synthetic.text,
+    placeholder: recorded.placeholder || synthetic.placeholder,
+    raw: {
+      recorded: recorded.raw,
+      synthetic: synthetic.raw,
+    },
+  };
 }
 
 function syntheticClickCoveredByRecordedStep(syntheticStep: FlowStep, draft: StepDraft) {
@@ -912,6 +1081,42 @@ function extractRunnableSourceLines(text?: string) {
 
 function isRunnableActionSourceLine(line: string) {
   return /^(await|const|let|var)\s/.test(line) && !line.includes(' has no runnable Playwright action source');
+}
+
+function sourceCodeForRecordedAction(candidate: string | undefined, action: ActionLike) {
+  return sourceCodeMatchesAction(candidate, action) ? candidate : renderActionSource(action);
+}
+
+function sourceCodeMatchesAction(sourceCode: string | undefined, action: ActionLike) {
+  if (!sourceCode)
+    return false;
+
+  if (action.name === 'click' && !/\.click\(/.test(sourceCode))
+    return false;
+  if (action.name === 'fill' && !/\.fill\(/.test(sourceCode))
+    return false;
+  if (action.name === 'press' && !/\.press\(/.test(sourceCode))
+    return false;
+  if ((action.name === 'select' || action.name === 'selectOption') && !/\.selectOption\(/.test(sourceCode))
+    return false;
+
+  const target = extractTarget(action);
+  if (target?.testId)
+    return sourceCode.includes(target.testId);
+  if (action.name === 'click' && /getByTestId\(/.test(sourceCode))
+    return true;
+
+  const tokens = [
+    target?.name,
+    target?.label,
+    target?.text,
+    target?.placeholder,
+    action.text,
+    action.value,
+    action.key,
+    ...(action.options ?? []),
+  ].filter(Boolean) as string[];
+  return !tokens.length || tokens.some(token => sourceCode.includes(token));
 }
 
 function renderActionSource(action: ActionLike) {

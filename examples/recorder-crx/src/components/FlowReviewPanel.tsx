@@ -24,6 +24,7 @@ export const FlowReviewPanel: React.FC<{
   redactionEnabled: boolean;
   onAddAssertion: (stepId: string) => void;
   onDeleteStep: (stepId: string) => void;
+  onDeleteSteps: (stepIds: string[]) => void;
   onContinueRecording: () => void;
   onContinueRecordingFrom: (afterStepId: string) => void;
   onInsertEmptyStep: (afterStepId: string) => void;
@@ -33,7 +34,7 @@ export const FlowReviewPanel: React.FC<{
   onExportYaml: () => void;
   onSaveRepeatSegment: (segment: FlowRepeatSegment) => void;
   onDeleteRepeatSegment: (segmentId: string) => void;
-}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
+}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
   const stats = flowStats(flow);
   const repeatStats = repeatSegmentStats(flow);
   const [activeInsertStepId, setActiveInsertStepId] = React.useState<string>();
@@ -42,10 +43,19 @@ export const FlowReviewPanel: React.FC<{
   const visibleSteps = React.useMemo(() => flow.steps.filter(step => !coveredRepeatStepIds.has(step.id)), [coveredRepeatStepIds, flow.steps]);
   const [selectedRepeatStepIds, setSelectedRepeatStepIds] = React.useState<string[]>([]);
   const selectionState = React.useMemo(() => repeatSelectionState(visibleSteps, selectedRepeatStepIds), [selectedRepeatStepIds, visibleSteps]);
+  const [dragSelectionAnchorId, setDragSelectionAnchorId] = React.useState<string>();
 
   React.useEffect(() => {
     setSelectedRepeatStepIds(stepIds => stepIds.filter(stepId => visibleSteps.some(step => step.id === stepId)));
   }, [visibleSteps]);
+
+  React.useEffect(() => {
+    if (!dragSelectionAnchorId)
+      return;
+    const stopDragging = () => setDragSelectionAnchorId(undefined);
+    window.addEventListener('pointerup', stopDragging);
+    return () => window.removeEventListener('pointerup', stopDragging);
+  }, [dragSelectionAnchorId]);
 
   const insertFrom = React.useCallback((stepId: string) => {
     onContinueRecordingFrom(stepId);
@@ -63,6 +73,28 @@ export const FlowReviewPanel: React.FC<{
       return sortStepIdsByVisibleOrder(visibleSteps, next);
     });
   }, [visibleSteps]);
+
+  const beginDragSelect = React.useCallback((event: React.PointerEvent, stepId: string) => {
+    if (isInteractiveTarget(event.target))
+      return;
+    setDragSelectionAnchorId(stepId);
+    setSelectedRepeatStepIds([stepId]);
+  }, []);
+
+  const extendDragSelect = React.useCallback((stepId: string) => {
+    if (!dragSelectionAnchorId)
+      return;
+    setSelectedRepeatStepIds(stepRangeIds(visibleSteps, dragSelectionAnchorId, stepId));
+  }, [dragSelectionAnchorId, visibleSteps]);
+
+  const deleteSelectedSteps = React.useCallback(() => {
+    if (!selectedRepeatStepIds.length)
+      return;
+    if (!window.confirm(`删除选中的 ${selectedRepeatStepIds.length} 个步骤？删除后会同时移除这些步骤的断言和循环引用。`))
+      return;
+    onDeleteSteps(selectedRepeatStepIds);
+    setSelectedRepeatStepIds([]);
+  }, [onDeleteSteps, selectedRepeatStepIds]);
 
   if (editingRepeatSegment) {
     return <RepeatSegmentEditor
@@ -97,6 +129,7 @@ export const FlowReviewPanel: React.FC<{
       <div className='repeat-create-actions'>
         <button type='button' onClick={() => setSelectedRepeatStepIds(visibleSteps.map(step => step.id))}>选择全部</button>
         <button type='button' onClick={() => setSelectedRepeatStepIds([])}>清空</button>
+        <button type='button' className='danger-outline' disabled={!selectionState.selectedCount} onClick={deleteSelectedSteps}>删除选中</button>
         <button type='button' className='primary' disabled={!selectionState.canCreate} onClick={() => setEditingRepeatSegment(createRepeatSegment(flow, selectedRepeatStepIds))}>设为循环片段</button>
       </div>
     </div>}
@@ -119,7 +152,11 @@ export const FlowReviewPanel: React.FC<{
         const assertionCount = step.assertions.filter(assertion => assertion.enabled).length;
         const selectedForRepeat = selectedRepeatStepIds.includes(step.id);
         return <React.Fragment key={step.id}>
-          <div className={selectedForRepeat ? 'review-step-row selected-for-repeat' : 'review-step-row'}>
+          <div
+            className={selectedForRepeat ? 'review-step-row selected-for-repeat' : 'review-step-row'}
+            onPointerDown={event => beginDragSelect(event, step.id)}
+            onPointerEnter={() => extendDragSelect(step.id)}
+          >
             <button type='button' className={selectedForRepeat ? 'repeat-step-selector selected' : 'repeat-step-selector'} onClick={() => toggleRepeatStep(step.id)} aria-label={`选择 ${step.id} 作为循环步骤`}>
               <span></span>
             </button>
@@ -192,6 +229,19 @@ function repeatSelectionState(steps: BusinessFlow['steps'], selectedStepIds: str
 
 function sortStepIdsByVisibleOrder(steps: BusinessFlow['steps'], stepIds: string[]) {
   return [...stepIds].sort((left, right) => steps.findIndex(step => step.id === left) - steps.findIndex(step => step.id === right));
+}
+
+function stepRangeIds(steps: BusinessFlow['steps'], startStepId: string, endStepId: string) {
+  const start = steps.findIndex(step => step.id === startStepId);
+  const end = steps.findIndex(step => step.id === endStepId);
+  if (start < 0 || end < 0)
+    return [];
+  const [from, to] = start <= end ? [start, end] : [end, start];
+  return steps.slice(from, to + 1).map(step => step.id);
+}
+
+function isInteractiveTarget(target: EventTarget) {
+  return target instanceof Element && !!target.closest('button, input, textarea, select, a, [role="button"]');
 }
 
 const RepeatSegmentCard: React.FC<{
