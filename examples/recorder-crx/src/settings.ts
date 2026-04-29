@@ -19,6 +19,11 @@ export type CrxSettings = {
   sidepanel?: boolean;
   experimental?: boolean;
   playInIncognito: boolean;
+  businessFlowEnabled?: boolean;
+  defaultApp?: string;
+  defaultRepo?: string;
+  defaultRole?: string;
+  redactSensitiveData?: boolean;
 };
 
 export const defaultSettings = {
@@ -27,12 +32,17 @@ export const defaultSettings = {
   sidepanel: true,
   experimental: false,
   playInIncognito: false,
+  businessFlowEnabled: true,
+  defaultApp: '',
+  defaultRepo: '',
+  defaultRole: '',
+  redactSensitiveData: true,
 };
 
 export async function loadSettings(): Promise<CrxSettings> {
   const [isAllowedIncognitoAccess, loadedPreferences] = await Promise.all([
     chrome.extension.isAllowedIncognitoAccess(),
-    chrome.storage.sync.get(['testIdAttributeName', 'targetLanguage', 'sidepanel', 'playInIncognito', 'experimental']) as Partial<CrxSettings>,
+    chrome.storage.sync.get(['testIdAttributeName', 'targetLanguage', 'sidepanel', 'playInIncognito', 'experimental', 'businessFlowEnabled', 'defaultApp', 'defaultRepo', 'defaultRole', 'redactSensitiveData']) as Partial<CrxSettings>,
   ]);
   return { ...defaultSettings, ...loadedPreferences, playInIncognito: !!loadedPreferences.playInIncognito && isAllowedIncognitoAccess };
 }
@@ -44,8 +54,8 @@ export async function storeSettings(settings: CrxSettings) {
 const listeners = new Map<(settings: CrxSettings) => void, any>();
 
 export function addSettingsChangedListener(listener: (settings: CrxSettings) => void) {
-  const wrappedListener = ({ testIdAttributeName, targetLanguage, sidepanel, playInIncognito, experimental }: Record<string, chrome.storage.StorageChange>) => {
-    if (!testIdAttributeName && !targetLanguage && sidepanel && playInIncognito && experimental)
+  const wrappedListener = ({ testIdAttributeName, targetLanguage, sidepanel, playInIncognito, experimental, businessFlowEnabled, defaultApp, defaultRepo, defaultRole, redactSensitiveData }: Record<string, chrome.storage.StorageChange>) => {
+    if (!testIdAttributeName && !targetLanguage && !sidepanel && !playInIncognito && !experimental && !businessFlowEnabled && !defaultApp && !defaultRepo && !defaultRole && !redactSensitiveData)
       return;
 
     loadSettings().then(listener).catch(() => {});

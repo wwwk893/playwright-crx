@@ -6,7 +6,8 @@
   "author": "",
   "license": "ISC",
   "scripts": {
-    "build": "tsc && vite build"
+    "build": "tsc && vite build",
+    "test:flow": "node ./scripts/run-flow-tests.mjs"
   },
   "dependencies": {
     "idb-keyval": "^6.2.1",

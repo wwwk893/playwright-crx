@@ -1,0 +1,44 @@
+{
+  "flow": {
+    "name": "共享 WAN 新建并保存",
+    "module": "全局配置",
+    "page": "WAN",
+    "role": "租户管理员",
+    "businessGoal": "配置共享 WAN 并保存"
+  },
+  "steps": [
+    {
+      "stepId": "s001",
+      "order": 1,
+      "action": "click",
+      "target": {
+        "role": "button",
+        "text": "新建",
+        "testId": "ha-wan-add-button"
+      },
+      "before": {
+        "page": { "title": "全局配置" },
+        "activeTab": { "title": "WAN" },
+        "section": { "title": "共享 WAN" },
+        "table": { "title": "共享 WAN" }
+      },
+      "after": {
+        "dialog": { "type": "modal", "title": "新建共享 WAN" }
+      }
+    },
+    {
+      "stepId": "s002",
+      "order": 2,
+      "action": "click",
+      "target": {
+        "role": "option",
+        "text": "WAN2"
+      },
+      "before": {
+        "dialog": { "type": "modal", "title": "新建共享 WAN" },
+        "form": { "label": "WAN", "name": "wan" },
+        "dropdown": { "type": "select", "fieldLabel": "WAN" }
+      }
+    }
+  ]
+}

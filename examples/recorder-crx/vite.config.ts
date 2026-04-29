@@ -42,6 +42,7 @@ export default defineConfig({
         'index': path.resolve(__dirname, 'index.html'),
         'preferences': path.resolve(__dirname, 'preferences.html'),
         'background': path.resolve(__dirname, 'src/background.ts'),
+        'pageContextSidecar': path.resolve(__dirname, 'src/pageContextSidecar.ts'),
       },
       output: {
         entryFileNames: '[name].js',

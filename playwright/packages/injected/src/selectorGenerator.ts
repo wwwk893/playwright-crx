@@ -96,7 +96,7 @@ export function generateSelector(injectedScript: InjectedScript, targetElement: 
     } else {
       // Note: this matches InjectedScript.retarget().
       if (!targetElement.matches('input,textarea,select') && !(targetElement as any).isContentEditable) {
-        const interactiveParent = closestCrossShadow(targetElement, 'button,select,input,[role=button],[role=checkbox],[role=radio],a,[role=link]', options.root);
+        const interactiveParent = closestCrossShadow(targetElement, 'button,select,input,[role=button],[role=checkbox],[role=radio],[role=option],a,[role=link]', options.root);
         if (interactiveParent && isElementVisible(interactiveParent))
           targetElement = interactiveParent;
       }

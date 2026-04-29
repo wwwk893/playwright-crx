@@ -1,0 +1,74 @@
+flow: 共享 WAN 新建并保存
+id: draft-1777281859354
+app: tenant-web
+repo: tenant-frontend
+module: 全局配置
+page: WAN
+role: 租户管理员
+priority: P0
+goal: 新建共享 WAN 并确认保存成功
+
+preconditions:
+  - 已登录租户管理员账号
+  - 已进入全局配置页面
+
+steps:
+  - id: s001
+    order: 1
+    intent: 打开共享 WAN 新建弹窗
+    intentSource: auto
+    suggestionConfidence: 0.92
+    action: click
+    target: ha-wan-add-button
+    context:
+      page: 全局配置
+      tab: WAN
+      section: 共享 WAN
+      table: 共享 WAN
+      target: 新建
+      resultDialog: 新建共享 WAN
+
+  - id: s002
+    order: 2
+    intent: 选择 WAN 为 WAN2
+    intentSource: auto
+    suggestionConfidence: 0.88
+    action: click
+    target: WAN2
+    context:
+      page: 全局配置
+      tab: WAN
+      dialog: 新建共享 WAN
+      field: WAN
+      selectedOption: WAN2
+
+  - id: s003
+    order: 3
+    intent: 填写共享 WAN 的 MTU
+    intentSource: auto
+    suggestionConfidence: 0.85
+    action: fill
+    target: ha-wan-mtu-field
+    value: '1500'
+    context:
+      page: 全局配置
+      tab: WAN
+      dialog: 新建共享 WAN
+      field: MTU
+
+  - id: s004
+    order: 4
+    intent: 确认保存新建共享 WAN
+    intentSource: auto
+    suggestionConfidence: 0.90
+    action: click
+    target: 确定
+    context:
+      page: 全局配置
+      tab: WAN
+      dialog: 新建共享 WAN
+      section: 共享 WAN
+      target: 确定
+    assert:
+      - toast contains 保存成功
+      - table row exists WAN2

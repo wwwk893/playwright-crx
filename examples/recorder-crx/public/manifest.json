@@ -12,6 +12,13 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["pageContextSidecar.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_icon": {
       "16": "icon-16x16.png",
@@ -40,5 +47,5 @@
     "page": "preferences.html",
     "open_in_tab": false
   },
-  "permissions": ["debugger", "tabs", "contextMenus", "storage", "sidePanel"]
+  "permissions": ["debugger", "tabs", "contextMenus", "storage", "sidePanel", "scripting", "activeTab"]
 }

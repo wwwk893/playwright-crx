@@ -19,6 +19,7 @@ import type { CrxApplication } from 'playwright-crx';
 import playwright, { crx, _debug, _setUnderTest, _isUnderTest as isUnderTest } from 'playwright-crx';
 import type { CrxSettings } from './settings';
 import { addSettingsChangedListener, defaultSettings, loadSettings } from './settings';
+import type { PageContextEvent } from './flow/pageContextTypes';
 
 type CrxMode = Mode | 'detached';
 
@@ -31,6 +32,9 @@ let crxAppPromise: Promise<CrxApplication> | undefined;
 const attachedTabIds = new Set<number>();
 let currentMode: CrxMode | 'detached' | undefined;
 let settings: CrxSettings = defaultSettings;
+const maxContextEventsPerTab = 200;
+const maxContextEventAgeMs = 5 * 60 * 1000;
+const contextEventsByTabId = new Map<number, PageContextEvent[]>();
 
 // if it's in sidepanel mode, we need to open it synchronously on action click,
 // so we need to fetch its value asap
@@ -77,6 +81,7 @@ async function changeAction(tabId: number, mode?: CrxMode | 'detached') {
 // action state per tab is reset every time a navigation occurs
 // https://bugs.chromium.org/p/chromium/issues/detail?id=1450904
 chrome.tabs.onUpdated.addListener(tabId => changeAction(tabId));
+chrome.tabs.onRemoved.addListener(tabId => contextEventsByTabId.delete(tabId));
 
 async function getCrxApp(incognito: boolean) {
   if (!crxAppPromise) {
@@ -133,13 +138,16 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
     });
   }
 
+  await ensurePageContextSidecar(tab.id!).catch(() => {});
+
   const crxApp = await getCrxApp(tab.incognito);
+  const initialMode = mode ?? (!isUnderTest() && settings.businessFlowEnabled !== false ? 'standby' : 'recording');
 
   try {
 
     if (crxApp.recorder.isHidden()) {
       await crxApp.recorder.show({
-        mode: mode ?? 'recording',
+        mode: initialMode,
         language: settings.targetLanguage,
         window: { type: sidepanel ? 'sidepanel' : 'popup', url: 'index.html' },
         playInIncognito: settings.playInIncognito,
@@ -153,6 +161,15 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
   } finally {
     chrome.action.enable();
   }
+}
+
+async function ensurePageContextSidecar(tabId: number) {
+  if (!chrome.scripting?.executeScript)
+    return;
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['pageContextSidecar.js'],
+  });
 }
 
 async function setTestIdAttributeName(testIdAttributeName: string) {
@@ -189,7 +206,49 @@ async function getStorageState() {
   return await crxApp.context().storageState();
 }
 
-chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
+function addPageContextEvent(tabId: number, event: PageContextEvent) {
+  const events = contextEventsByTabId.get(tabId) ?? [];
+  events.push({
+    ...event,
+    tabId,
+  });
+  contextEventsByTabId.set(tabId, prunePageContextEvents(events));
+}
+
+function getRecentPageContextEvents(tabId: number) {
+  const events = prunePageContextEvents(contextEventsByTabId.get(tabId) ?? []);
+  contextEventsByTabId.set(tabId, events);
+  return events;
+}
+
+function prunePageContextEvents(events: PageContextEvent[]) {
+  const minWallTime = Date.now() - maxContextEventAgeMs;
+  return events
+      .filter(event => (event.wallTime ?? Date.now()) >= minWallTime)
+      .slice(-maxContextEventsPerTab);
+}
+
+async function activeTabId() {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab?.id;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.event === 'pageContextEvent') {
+    const tabId = sender.tab?.id;
+    if (typeof tabId === 'number' && message.contextEvent)
+      addPageContextEvent(tabId, message.contextEvent);
+    return false;
+  }
+
+  if (message.event === 'pageContextEventsRequested') {
+    const requestedTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
+    (requestedTabId ? Promise.resolve(requestedTabId) : activeTabId())
+        .then(tabId => sendResponse(typeof tabId === 'number' ? getRecentPageContextEvents(tabId) : []))
+        .catch(() => sendResponse([]));
+    return true;
+  }
+
   if (message.event === 'storageStateRequested') {
     getStorageState().then(sendResponse).catch(() => {});
     return true;

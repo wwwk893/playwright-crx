@@ -36,7 +36,12 @@ export const PreferencesForm: React.FC = ({}) => {
       initialSettings.targetLanguage !== settings.targetLanguage ||
       initialSettings.testIdAttributeName !== settings.testIdAttributeName ||
       initialSettings.playInIncognito !== settings.playInIncognito ||
-      initialSettings.experimental !== settings.experimental;
+      initialSettings.experimental !== settings.experimental ||
+      initialSettings.businessFlowEnabled !== settings.businessFlowEnabled ||
+      initialSettings.defaultApp !== settings.defaultApp ||
+      initialSettings.defaultRepo !== settings.defaultRepo ||
+      initialSettings.defaultRole !== settings.defaultRole ||
+      initialSettings.redactSensitiveData !== settings.redactSensitiveData;
   }, [settings, initialSettings]);
 
   const saveSettings = React.useCallback((e: React.FormEvent<HTMLFormElement>) => {
@@ -114,6 +119,50 @@ export const PreferencesForm: React.FC = ({}) => {
         onChange={e => setSettings({ ...settings, experimental: e.target.checked })}
       />
     </div>
-    <button id='submit' type='submit' disabled={!canSave}>{canSave ? 'Save' : 'Saved'}</button>
+    <div>
+      <label htmlFor='businessFlowEnabled' className='row'>启用业务流程录制：</label>
+      <input
+        type='checkbox'
+        id='businessFlowEnabled'
+        name='businessFlowEnabled'
+        checked={settings.businessFlowEnabled}
+        onChange={e => setSettings({ ...settings, businessFlowEnabled: e.target.checked })}
+      />
+    </div>
+    <div>
+      <label htmlFor='redactSensitiveData' className='row'>导出前脱敏：</label>
+      <input
+        type='checkbox'
+        id='redactSensitiveData'
+        name='redactSensitiveData'
+        checked={settings.redactSensitiveData}
+        onChange={e => setSettings({ ...settings, redactSensitiveData: e.target.checked })}
+      />
+    </div>
+    <label htmlFor='defaultApp'>默认应用：</label>
+    <input
+      type='text'
+      id='defaultApp'
+      name='defaultApp'
+      value={settings.defaultApp ?? ''}
+      onChange={e => setSettings({ ...settings, defaultApp: e.target.value })}
+    />
+    <label htmlFor='defaultRepo'>默认仓库：</label>
+    <input
+      type='text'
+      id='defaultRepo'
+      name='defaultRepo'
+      value={settings.defaultRepo ?? ''}
+      onChange={e => setSettings({ ...settings, defaultRepo: e.target.value })}
+    />
+    <label htmlFor='defaultRole'>默认角色：</label>
+    <input
+      type='text'
+      id='defaultRole'
+      name='defaultRole'
+      value={settings.defaultRole ?? ''}
+      onChange={e => setSettings({ ...settings, defaultRole: e.target.value })}
+    />
+    <button id='submit' type='submit' disabled={!canSave}>{canSave ? '保存' : '已保存'}</button>
   </form>;
 };

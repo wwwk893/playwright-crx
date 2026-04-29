@@ -50,6 +50,7 @@ export default class CrxPlayer extends EventEmitter {
   private _stopping?: ManualPromise;
   private _pageAliases = new Map<Page, string>();
   private _pause?: Promise<void>;
+  private _running = false;
 
   constructor(crx: Crx) {
     super();
@@ -104,6 +105,7 @@ export default class CrxPlayer extends EventEmitter {
 
     this._pageAliases.clear();
     this._pageAliases.set(page, 'page');
+    this._running = true;
     this.emit('start');
 
     try {
@@ -122,11 +124,13 @@ export default class CrxPlayer extends EventEmitter {
       this.pause().catch(() => {});
       if (instrumentationListener)
         context.instrumentation.removeListener(instrumentationListener);
+      this._running = false;
+      this.emit('stop');
     }
   }
 
   isPlaying() {
-    return !!this._currAction;
+    return this._running || !!this._currAction;
   }
 
   async stop() {

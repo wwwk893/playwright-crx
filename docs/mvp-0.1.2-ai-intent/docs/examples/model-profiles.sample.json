@@ -1,0 +1,72 @@
+[
+  {
+    "id": "deepseek-v4-flash-openai",
+    "name": "DeepSeek V4 Flash",
+    "enabled": true,
+    "protocol": "openai-compatible",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "apiKeyStorageKey": "aiIntent.apiKey.deepseek-v4-flash-openai",
+    "temperature": 0.1,
+    "maxTokens": 400,
+    "timeoutMs": 15000,
+    "responseMode": "json_object",
+    "thinking": "disabled",
+    "pricing": {
+      "currency": "USD",
+      "unit": "per_1m_tokens",
+      "cachedInputPer1M": 0.0028,
+      "cacheMissInputPer1M": 0.14,
+      "outputPer1M": 0.28
+    },
+    "createdAt": "2026-04-28T00:00:00.000Z",
+    "updatedAt": "2026-04-28T00:00:00.000Z"
+  },
+  {
+    "id": "openai-compatible-custom",
+    "name": "OpenAI Compatible Custom",
+    "enabled": false,
+    "protocol": "openai-compatible",
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "apiKeyStorageKey": "aiIntent.apiKey.openai-compatible-custom",
+    "temperature": 0.1,
+    "maxTokens": 400,
+    "timeoutMs": 15000,
+    "responseMode": "json_schema",
+    "thinking": "omit",
+    "pricing": {
+      "currency": "USD",
+      "unit": "per_1m_tokens",
+      "inputPer1M": 0,
+      "outputPer1M": 0,
+      "cachedInputPer1M": 0
+    },
+    "createdAt": "2026-04-28T00:00:00.000Z",
+    "updatedAt": "2026-04-28T00:00:00.000Z"
+  },
+  {
+    "id": "anthropic-compatible-custom",
+    "name": "Anthropic Compatible Custom",
+    "enabled": false,
+    "protocol": "anthropic-compatible",
+    "baseUrl": "https://api.anthropic.com",
+    "model": "claude-sonnet-4-5",
+    "apiKeyStorageKey": "aiIntent.apiKey.anthropic-compatible-custom",
+    "temperature": 0.1,
+    "maxTokens": 400,
+    "timeoutMs": 15000,
+    "responseMode": "prompt_json_only",
+    "thinking": "omit",
+    "pricing": {
+      "currency": "USD",
+      "unit": "per_1m_tokens",
+      "inputPer1M": 0,
+      "outputPer1M": 0,
+      "cacheWritePer1M": 0,
+      "cacheReadPer1M": 0
+    },
+    "createdAt": "2026-04-28T00:00:00.000Z",
+    "updatedAt": "2026-04-28T00:00:00.000Z"
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "stepId": "s001",
+      "intent": "打开共享 WAN 新建弹窗",
+      "confidence": 0.95,
+      "reason": "点击新建按钮后出现新建共享 WAN 弹窗",
+      "ruleHint": "click.create.open-dialog"
+    },
+    {
+      "stepId": "s002",
+      "intent": "选择 WAN 为 WAN2",
+      "confidence": 0.95,
+      "reason": "在新建共享 WAN 弹窗中选择 WAN 字段的 WAN2 选项",
+      "ruleHint": "select.option"
+    }
+  ]
+}
