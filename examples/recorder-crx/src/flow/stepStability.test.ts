@@ -8,6 +8,7 @@ import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaywrightCode } 
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { mergePageContextIntoFlow } from './flowContextMerger';
 import { createRepeatSegment } from './repeatSegments';
 import type { PageContextEvent, ElementContext } from './pageContextTypes';
 import type { BusinessFlow } from './types';
@@ -632,6 +633,364 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'antd adapter prefers outer button testId over nested span and svg events',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('保存配置'),
+      ], [], {});
+      const wallTime = Date.now() - 2000;
+      const svgEvent = pageClickEventWithTarget('ctx-svg', wallTime, {
+        tag: 'svg',
+        role: 'img',
+      });
+      const spanEvent = pageClickEventWithTarget('ctx-span', wallTime + 120, {
+        tag: 'span',
+        text: '新建',
+        normalizedText: '新建',
+      });
+      const buttonEvent = pageClickEventWithTarget('ctx-button', wallTime + 180, {
+        tag: 'button',
+        role: 'button',
+        testId: 'site-ip-port-pool-create-button',
+        text: '新建',
+        normalizedText: '新建',
+        framework: 'antd',
+        controlType: 'button',
+        locatorQuality: 'testid',
+      } as ElementContext);
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [svgEvent, spanEvent, buttonEvent]);
+
+      assertEqual(withSynthetic.steps.map(step => step.id), ['s001', 's002']);
+      assertEqual(withSynthetic.steps[1].target?.testId, 'site-ip-port-pool-create-button');
+      assertEqual(withSynthetic.steps[1].sourceCode, `await page.getByTestId("site-ip-port-pool-create-button").click();`);
+    },
+  },
+  {
+    name: 'bare svg icon click without semantic parent is not synthesized',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('保存配置'),
+      ], [], {});
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [
+        pageClickEventWithTarget('ctx-svg-only', Date.now() - 2000, {
+          tag: 'svg',
+          role: 'img',
+        }),
+      ]);
+
+      assertEqual(withSynthetic.steps.map(step => step.id), ['s001']);
+    },
+  },
+  {
+    name: 'page context upgrades weird recorded click selector to test id target',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        {
+          action: {
+            name: 'click',
+            selector: 'div >> internal:has-text="新建"i >> nth=1',
+          },
+          wallTime,
+        },
+      ], [], {});
+      const upgraded = mergePageContextIntoFlow(recorded, [
+        pageClickEventWithTarget('ctx-button-testid', wallTime + 120, {
+          tag: 'button',
+          role: 'button',
+          testId: 'site-ip-port-pool-create-button',
+          text: '新建',
+          normalizedText: '新建',
+          framework: 'antd',
+          controlType: 'button',
+          locatorQuality: 'testid',
+        } as ElementContext),
+      ]);
+
+      assertEqual(upgraded.steps[0].target?.testId, 'site-ip-port-pool-create-button');
+      assertEqual(upgraded.steps[0].target?.displayName, '新建');
+    },
+  },
+  {
+    name: 'code preview prefers upgraded test id over weird raw click selector',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [
+        rawClickAction('div >> internal:has-text="新建"i >> nth=1'),
+      ], [], {});
+      const upgraded: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            testId: 'site-ip-port-pool-create-button',
+            role: 'button',
+            name: '新建',
+            displayName: '新建',
+          },
+        })),
+      };
+      const code = generateBusinessFlowPlaywrightCode(upgraded);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes(`page.getByTestId("site-ip-port-pool-create-button").click();`), 'click should prefer upgraded test id');
+      assert(!firstStep.includes('internal:has-text'), 'weird raw selector should not be used when test id exists');
+    },
+  },
+  {
+    name: 'antd select option keeps previous form field label context',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('保存配置'),
+      ], [], {});
+      const optionEvent = pageClickEventWithTarget('ctx-select-option', Date.now() - 2000, {
+        tag: 'div',
+        role: 'option',
+        text: 'WAN2',
+        normalizedText: 'WAN2',
+        framework: 'antd',
+        controlType: 'select-option',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      optionEvent.before.form = {
+        label: 'WAN',
+        name: 'wan',
+      };
+      optionEvent.before.dialog = {
+        type: 'modal',
+        title: '新建共享 WAN',
+        visible: true,
+      };
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [optionEvent]);
+
+      assertEqual(withSynthetic.steps[1].target?.role, 'option');
+      assertEqual(withSynthetic.steps[1].target?.text, 'WAN2');
+      assertEqual(withSynthetic.steps[1].context?.before.form?.label, 'WAN');
+    },
+  },
+  {
+    name: 'pro table row action context keeps table title row key and action text',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('保存配置'),
+      ], [], {});
+      const editEvent = pageClickEventWithTarget('ctx-row-edit', Date.now() - 2000, {
+        tag: 'button',
+        role: 'button',
+        text: '编辑',
+        normalizedText: '编辑',
+        framework: 'antd',
+        controlType: 'table-row-action',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      editEvent.before.table = {
+        title: '共享 WAN',
+        rowKey: 'WAN1',
+        rowText: 'WAN1 启用 1000',
+        columnName: '操作',
+        headers: ['名称', '状态', '权重', '操作'],
+      };
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [editEvent]);
+
+      assertEqual(withSynthetic.steps[1].target?.text, '编辑');
+      assertEqual(withSynthetic.steps[1].context?.before.table?.title, '共享 WAN');
+      assertEqual(withSynthetic.steps[1].context?.before.table?.rowKey, 'WAN1');
+      assertEqual(withSynthetic.steps[1].context?.before.table?.columnName, '操作');
+    },
+  },
+  {
+    name: 'merge page context stores scope for table row actions',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        {
+          action: {
+            name: 'click',
+            selector: 'div >> internal:has-text="编辑"i >> nth=4',
+          },
+          wallTime,
+        },
+      ], [], {});
+      const event = pageClickEventWithTarget('ctx-row-scope', wallTime + 120, {
+        tag: 'button',
+        role: 'button',
+        text: '编辑',
+        normalizedText: '编辑',
+        framework: 'procomponents',
+        controlType: 'table-row-action',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      event.before.table = {
+        title: '用户列表',
+        testId: 'users-table',
+        rowKey: 'user-42',
+        rowText: 'Alice 管理员 编辑',
+        columnName: '操作',
+        headers: ['用户名', '角色', '操作'],
+      };
+      const merged = mergePageContextIntoFlow(recorded, [event]);
+
+      assertEqual(merged.steps[0].target?.scope?.table?.testId, 'users-table');
+      assertEqual(merged.steps[0].target?.scope?.table?.rowKey, 'user-42');
+      assertEqual(merged.steps[0].target?.scope?.table?.columnName, '操作');
+    },
+  },
+  {
+    name: 'table row action code preview uses table scoped locator when button text repeats',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:has-text="编辑"i >> nth=4')], [], {});
+      const scoped: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            role: 'button',
+            text: '编辑',
+            displayName: '编辑',
+            scope: {
+              table: {
+                title: '用户列表',
+                testId: 'users-table',
+                rowKey: 'user-42',
+                rowText: 'Alice 管理员 编辑',
+                columnName: '操作',
+              },
+            },
+          },
+        })),
+      };
+      const code = generateBusinessFlowPlaywrightCode(scoped);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('page.getByTestId("users-table")'), 'should use table test id scope');
+      assert(firstStep.includes('data-row-key=\\"user-42\\"') || firstStep.includes('data-row-key="user-42"'), 'should scope by row key');
+      assert(firstStep.includes('getByRole("button", { name: "编辑" })'), 'should still click the row action by role/name');
+      assert(!firstStep.includes('await page.getByRole("button", { name: "编辑" }).click();'), 'should not use global repeated button locator');
+    },
+  },
+  {
+    name: 'table row code preview scopes row target without nesting row locator inside itself',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('tr >> internal:has-text="Alice 管理员 编辑"i')], [], {});
+      const scoped: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            role: 'row',
+            name: 'Alice 管理员 编辑',
+            text: 'Alice 管理员 编辑',
+            displayName: 'Alice 管理员 编辑',
+            scope: {
+              table: {
+                title: '用户列表',
+                testId: 'users-table',
+                rowKey: 'user-42',
+                rowText: 'Alice 管理员 编辑',
+                columnName: '操作',
+              },
+            },
+          },
+        })),
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(scoped), 's001');
+
+      assert(firstStep.includes('page.getByTestId("users-table").locator('), 'row target should start from table scope');
+      assert(firstStep.includes('data-row-key=\\"user-42\\"') || firstStep.includes('data-row-key="user-42"'), 'row target should scope by row key');
+      assert(firstStep.includes('.first().click();'), 'row target should click the scoped row directly');
+      assert(!firstStep.includes('filter({ has: page.getByRole("row"'), 'row target should not look for a nested row inside the row');
+    },
+  },
+  {
+    name: 'dialog button code preview uses dialog scoped locator when button text repeats',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:has-text="确定"i >> nth=2')], [], {});
+      const scoped: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            role: 'button',
+            text: '确定',
+            displayName: '确定',
+            scope: {
+              dialog: {
+                type: 'modal',
+                title: '新建用户',
+                visible: true,
+              },
+            },
+          },
+        })),
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(scoped), 's001');
+
+      assert(firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]")'), 'should start from dialog scope');
+      assert(firstStep.includes('filter({ hasText: "新建用户" })'), 'should filter dialog by title');
+      assert(firstStep.includes('getByRole("button", { name: "确定" })'), 'should click confirm button inside dialog');
+    },
+  },
+  {
+    name: 'section button code preview uses section scope when no test id and repeated button text',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:has-text="新建"i >> nth=3')], [], {});
+      const scoped: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            role: 'button',
+            text: '新建',
+            displayName: '新建',
+            scope: {
+              section: {
+                title: '地址池',
+                testId: 'address-pool-card',
+              },
+            },
+          },
+        })),
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(scoped), 's001');
+
+      assert(firstStep.includes('page.getByTestId("address-pool-card").getByRole("button", { name: "新建" })'), 'should use section scoped role locator');
+    },
+  },
+  {
+    name: 'late page context upgrades recorded action without creating synthetic duplicate',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        {
+          action: {
+            name: 'click',
+            selector: 'div >> internal:has-text="新建"i >> nth=1',
+          },
+          wallTime,
+        },
+      ], [], {});
+      const contextEvent = pageClickEventWithTarget('ctx-testid', wallTime + 200, {
+        tag: 'button',
+        role: 'button',
+        testId: 'site-ip-port-pool-create-button',
+        text: '新建',
+        normalizedText: '新建',
+        framework: 'antd',
+        controlType: 'button',
+        locatorQuality: 'testid',
+      } as ElementContext);
+      const withContext = mergePageContextIntoFlow(recorded, [contextEvent]);
+      const afterSyntheticFlush = appendSyntheticPageContextSteps(withContext, [contextEvent]);
+
+      assertEqual(afterSyntheticFlush.steps.length, 1);
+      assertEqual(afterSyntheticFlush.steps[0].target?.testId, 'site-ip-port-pool-create-button');
+    },
+  },
+  {
     name: 'late recorder click upgrades a synthetic page context click in place',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -776,7 +1135,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(staleSourceFlow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes(`getByRole('button', { name: '新建' })`), 's001 should use its own button locator');
+      assert(firstStep.includes(`getByRole('button', { name: '新建' })`) || firstStep.includes(`getByRole("button", { name: "新建" })`), 's001 should use its own button locator');
       assert(firstStep.includes('.click();'), 's001 should render a click action');
       assert(!firstStep.includes('.fill('), 's001 should not reuse the stale fill source');
     },

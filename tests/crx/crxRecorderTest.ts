@@ -106,14 +106,20 @@ export const test = crxTest.extend<{
             try {
               await locator.waitFor({ state: 'attached', timeout: 100 });
             } catch (e) {
-              if (await recorderPage.getByTitle('Record').evaluate(e => e.classList.contains('toggled'))) {
-                await recorderPage.getByTitle('Record').click();
-                await page.reload();
-                await recorderPage.getByTitle('Record').click();
+              const recordButton = recorderPage.getByTitle('Record');
+              const hasLegacyRecordButton = await recordButton.count().then(count => count > 0).catch(() => false);
+              if (hasLegacyRecordButton) {
+                if (await recordButton.evaluate(e => e.classList.contains('toggled'))) {
+                  await recordButton.click();
+                  await page.reload();
+                  await recordButton.click();
+                } else {
+                  await page.reload();
+                }
+                await locator.waitFor({ state: 'attached', timeout: 100 });
               } else {
-                await page.reload();
+                await recorderPage.locator('.business-flow-panel, .recorder').first().waitFor({ state: 'attached', timeout: 1000 });
               }
-              await locator.waitFor({ state: 'attached', timeout: 100 });
             }
 
             return recorderPage;

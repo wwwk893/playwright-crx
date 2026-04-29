@@ -13,8 +13,8 @@
  */
 import { suggestIntent, stepContextFromEvent } from './intentRules';
 import { matchPageContextEvent } from './pageContextMatcher';
-import type { PageContextEvent } from './pageContextTypes';
-import type { BusinessFlow, FlowStep } from './types';
+import type { ElementContext, PageContextEvent, StepContextSnapshot } from './pageContextTypes';
+import type { BusinessFlow, FlowTargetScope, FlowStep, FlowTarget, LocatorHint } from './types';
 
 const autoIntentThreshold = 0.6;
 
@@ -31,11 +31,12 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
 
     const actionIndex = actionIndexForStep(flow, normalizedStep.id);
     const context = stepContextFromEvent(event, actionIndex);
-    const suggestion = suggestIntent(normalizedStep, context);
+    const upgradedStep = upgradeStepTargetFromContext(normalizedStep, context);
+    const suggestion = suggestIntent(upgradedStep, context);
     const nextStep = applySuggestion({
-      ...normalizedStep,
+      ...upgradedStep,
       context,
-      intentSuggestion: suggestion ?? normalizedStep.intentSuggestion,
+      intentSuggestion: suggestion ?? upgradedStep.intentSuggestion,
     }, suggestion);
     changed = changed || nextStep !== step;
     return nextStep;
@@ -79,6 +80,127 @@ function applySuggestion(step: FlowStep, suggestion: FlowStep['intentSuggestion'
     intent: suggestion.text,
     intentSource: 'rule',
   };
+}
+
+function upgradeStepTargetFromContext(step: FlowStep, context: StepContextSnapshot): FlowStep {
+  const contextTarget = context.before.target;
+  if (!contextTarget)
+    return step;
+
+  const nextTarget = mergeTargetWithContext(step.target, contextTarget, context);
+  if (nextTarget === step.target)
+    return step;
+
+  return {
+    ...step,
+    target: nextTarget,
+  };
+}
+
+function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: ElementContext, context: StepContextSnapshot): FlowTarget | undefined {
+  const contextScope = scopeFromContext(context);
+  const locatorHint = locatorHintFromContext(contextTarget, contextScope);
+  if (!target)
+    return flowTargetFromElementContext(contextTarget, contextScope, locatorHint);
+
+  const hasBetterTestId = !target.testId && contextTarget.testId;
+  const hasBetterDisplayName = !target.displayName && (contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId);
+  const hasBetterRole = !target.role && contextTarget.role;
+  const hasBetterText = !target.text && contextTarget.text;
+  const hasBetterPlaceholder = !target.placeholder && contextTarget.placeholder;
+  const hasBetterScope = !!contextScope && !target.scope;
+  const hasBetterLocatorHint = !!locatorHint && !target.locatorHint;
+
+  if (!hasBetterTestId && !hasBetterDisplayName && !hasBetterRole && !hasBetterText && !hasBetterPlaceholder && !hasBetterScope && !hasBetterLocatorHint)
+    return target;
+
+  return {
+    ...target,
+    testId: target.testId || contextTarget.testId,
+    role: target.role || contextTarget.role,
+    name: target.name || contextTarget.ariaLabel || contextTarget.text || contextTarget.title,
+    displayName: target.displayName || contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId,
+    text: target.text || contextTarget.text,
+    placeholder: target.placeholder || contextTarget.placeholder,
+    scope: target.scope || contextScope,
+    locatorHint: target.locatorHint || locatorHint,
+    raw: {
+      recorder: target.raw,
+      pageContext: contextTarget,
+    },
+  };
+}
+
+function flowTargetFromElementContext(contextTarget: ElementContext, scope?: FlowTargetScope, locatorHint?: LocatorHint): FlowTarget {
+  return {
+    testId: contextTarget.testId,
+    role: contextTarget.role,
+    name: contextTarget.ariaLabel || contextTarget.text || contextTarget.title,
+    displayName: contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId,
+    placeholder: contextTarget.placeholder,
+    text: contextTarget.text,
+    scope,
+    locatorHint,
+    raw: contextTarget,
+  };
+}
+
+function scopeFromContext(context: StepContextSnapshot): FlowTargetScope | undefined {
+  const { dialog, section, table, form } = context.before;
+  const scope: FlowTargetScope = {};
+  if (dialog) {
+    scope.dialog = {
+      type: dialog.type,
+      title: dialog.title,
+      testId: dialog.testId,
+      visible: dialog.visible,
+    };
+  }
+  if (section) {
+    scope.section = {
+      title: section.title,
+      testId: section.testId,
+      kind: section.kind,
+    };
+  }
+  if (table) {
+    scope.table = {
+      title: table.title,
+      testId: table.testId,
+      rowKey: table.rowKey,
+      rowText: table.rowText,
+      rowIdentity: table.rowIdentity,
+      columnName: table.columnName,
+      nestingLevel: table.nestingLevel,
+      fixedSide: table.fixedSide,
+      fingerprint: table.fingerprint,
+    };
+  }
+  if (form) {
+    scope.form = {
+      title: form.title,
+      label: form.label,
+      name: form.name,
+      testId: form.testId,
+    };
+  }
+  return Object.keys(scope).length ? scope : undefined;
+}
+
+function locatorHintFromContext(contextTarget: ElementContext, scope?: FlowTargetScope): LocatorHint | undefined {
+  if (contextTarget.testId)
+    return { strategy: 'global-testid', confidence: 0.98, pageCount: contextTarget.uniqueness?.pageCount, scopeCount: contextTarget.uniqueness?.scopeCount };
+  if (scope?.table?.testId && (scope.table.rowKey || scope.table.rowIdentity?.value || scope.table.rowText))
+    return { strategy: scope.table.rowKey || scope.table.rowIdentity?.stable ? 'table-row-testid' : 'table-row-text', confidence: scope.table.rowKey || scope.table.rowIdentity?.stable ? 0.9 : 0.72 };
+  if (scope?.dialog?.title)
+    return { strategy: 'dialog-scoped-role', confidence: 0.78 };
+  if (scope?.section?.testId)
+    return { strategy: 'section-scoped-role', confidence: 0.74 };
+  if (scope?.form?.label || contextTarget.placeholder)
+    return { strategy: 'field-scoped', confidence: 0.7 };
+  if (contextTarget.role && (contextTarget.text || contextTarget.ariaLabel))
+    return { strategy: 'global-role', confidence: 0.62, pageCount: contextTarget.uniqueness?.pageCount, scopeCount: contextTarget.uniqueness?.scopeCount };
+  return contextTarget.text ? { strategy: 'fallback-text', confidence: 0.45 } : undefined;
 }
 
 function actionIndexForStep(flow: BusinessFlow, stepId: string) {

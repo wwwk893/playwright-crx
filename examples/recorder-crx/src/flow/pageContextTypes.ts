@@ -44,6 +44,32 @@ export interface PageContextAfterSnapshot {
   toast?: string;
 }
 
+export type UiFramework = 'antd' | 'procomponents' | 'generic';
+
+export type UiControlType =
+  | 'button'
+  | 'link'
+  | 'input'
+  | 'textarea'
+  | 'select'
+  | 'select-option'
+  | 'tree-select'
+  | 'tree-select-option'
+  | 'cascader'
+  | 'cascader-option'
+  | 'checkbox'
+  | 'radio'
+  | 'switch'
+  | 'tab'
+  | 'menu-item'
+  | 'dropdown-trigger'
+  | 'date-picker'
+  | 'upload'
+  | 'table-row-action'
+  | 'unknown';
+
+export type LocatorQuality = 'testid' | 'semantic' | 'fallback';
+
 export interface ElementContext {
   tag?: string;
   role?: string;
@@ -54,11 +80,23 @@ export interface ElementContext {
   placeholder?: string;
   selectedOption?: string;
   normalizedText?: string;
+  framework?: UiFramework;
+  controlType?: UiControlType;
+  locatorQuality?: LocatorQuality;
+  optionPath?: string[];
+  uniqueness?: LocatorUniqueness;
+}
+
+export interface LocatorUniqueness {
+  pageCount?: number;
+  scopeCount?: number;
+  scopeKind?: 'dialog' | 'section' | 'table' | 'form';
 }
 
 export interface DialogContext {
   type: 'modal' | 'drawer' | 'popover' | 'dropdown';
   title?: string;
+  testId?: string;
   visible: boolean;
 }
 
@@ -68,19 +106,49 @@ export interface SectionContext {
   testId?: string;
 }
 
+export interface RowIdentity {
+  value?: string;
+  source:
+    | 'data-row-key'
+    | 'data-testid'
+    | 'data-id'
+    | 'data-key'
+    | 'primary-cell'
+    | 'row-text'
+    | 'aria-rowindex'
+    | 'data-index'
+    | 'unknown';
+  confidence: number;
+  stable: boolean;
+}
+
 export interface TableContext {
   title?: string;
   testId?: string;
   rowKey?: string;
   rowText?: string;
+  rowIdentity?: RowIdentity;
+  rowIndex?: number;
+  ariaRowIndex?: string;
   columnName?: string;
+  columnIndex?: number;
   headers?: string[];
+  nestingLevel?: number;
+  parentTitle?: string;
+  fixedSide?: 'left' | 'right';
+  rowKind?: 'data' | 'expanded' | 'summary' | 'virtual';
+  expandedParentRowKey?: string;
+  fingerprint?: string;
 }
 
 export interface FormContext {
   title?: string;
   label?: string;
   name?: string;
+  namePath?: string[];
+  nameSource?: 'name' | 'data-field' | 'data-name' | 'input-name' | 'id' | 'label-for' | 'placeholder' | 'unknown';
+  testId?: string;
+  id?: string;
   required?: boolean;
 }
 

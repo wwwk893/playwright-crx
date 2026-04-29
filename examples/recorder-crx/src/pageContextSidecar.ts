@@ -19,7 +19,67 @@ const maxAncestorDepth = 10;
 const maxNearbyText = 8;
 const maxTextLength = 60;
 const sensitivePattern = /(password|passwd|pwd|token|cookie|authorization|auth|secret|session)/i;
-let lastFieldContext: { label?: string; title?: string; time: number } | undefined;
+const antdActionSelectors = [
+  '[data-testid]',
+  '[data-test-id]',
+  '[data-e2e]',
+  'button',
+  '.ant-btn',
+  'a[role="button"]',
+  '[role="button"]',
+  '.ant-dropdown-menu-item',
+  '.ant-menu-item',
+  '[role="menuitem"]',
+  '.ant-select-selector',
+  '.ant-select-item-option',
+  '[role="option"]',
+  '[role="combobox"]',
+  '.ant-checkbox-wrapper',
+  '.ant-checkbox',
+  '[role="checkbox"]',
+  '.ant-radio-wrapper',
+  '.ant-radio',
+  '[role="radio"]',
+  '.ant-switch',
+  '[role="switch"]',
+  '.ant-tabs-tab',
+  '[role="tab"]',
+  '.ant-picker',
+  '.ant-upload',
+  '.ant-upload-select',
+  '.ant-cascader-picker',
+  '.ant-cascader-menu-item',
+  '.ant-cascader-menu-item-content',
+  '.ant-tree-select',
+  '.ant-tree-treenode',
+  '.ant-select-tree-treenode',
+  '.ant-select-tree-node-content-wrapper',
+  '[role="treeitem"]',
+].join(', ');
+const tableRowSelectors = [
+  'tr[data-row-key]',
+  '.ant-table-row',
+  '[data-row-key]',
+  '[role="row"]',
+  '.rc-virtual-list-holder-inner > *',
+  '.ant-table-tbody-virtual-holder-inner > *',
+  '[aria-rowindex]',
+  '[data-row-index]',
+  '[data-index]',
+].join(', ');
+const overlaySelectors = '.ant-modal, .ant-drawer, .ant-popover, .ant-dropdown, .ant-select-dropdown, .ant-cascader-dropdown, [role="dialog"]';
+type ActiveDropdownContext = {
+  id: string;
+  fieldLabel?: string;
+  fieldName?: string;
+  fieldTestId?: string;
+  dialogTitle?: string;
+  sectionTitle?: string;
+  dropdownType?: 'select' | 'tree-select' | 'cascader' | 'dropdown' | 'menu';
+  triggerText?: string;
+  time: number;
+};
+let activeDropdownContexts: ActiveDropdownContext[] = [];
 
 if (!(window as any)[installKey]) {
   (window as any)[installKey] = true;
@@ -55,20 +115,33 @@ function recordEvent(kind: ContextEventKind, event: Event) {
 }
 
 function collectPageContext(target: Element) {
-  const form = collectForm(target);
-  if (form?.label && !target.closest('.ant-select-dropdown, .ant-dropdown, [role="listbox"]'))
-    lastFieldContext = { label: form.label, title: form.title, time: performance.now() };
-  const dropdownField = target.closest('.ant-select-dropdown, .ant-dropdown, [role="listbox"]') && lastFieldContext && performance.now() - lastFieldContext.time < 3000 ? lastFieldContext : undefined;
+  const anchor = actionAnchorForElement(target);
+  const form = collectForm(target, anchor);
+  const section = collectSection(target, anchor);
+  const directDialog = collectDialog(target, anchor);
+  const dialog = directDialog ?? (isDropdownLikeTarget(anchor, target) ? collectVisibleOverlay() : undefined);
+  if (form?.label && !isDropdownOptionTarget(target, anchor)) {
+    rememberDropdownContext({
+      fieldLabel: form.label,
+      fieldName: form.name,
+      fieldTestId: collectElement(target, anchor).testId,
+      dialogTitle: dialog?.title,
+      sectionTitle: section?.title,
+      dropdownType: dropdownTypeForAnchor(anchor),
+      triggerText: elementText(anchor),
+    });
+  }
+  const dropdownField = isDropdownOptionTarget(target, anchor) ? activeDropdownContextFor(target) : undefined;
   return compactObject({
     url: safeText(location.href, 180),
     title: safeText(document.title || headingText(document.body), maxTextLength),
     breadcrumb: collectBreadcrumb(),
     activeTab: collectActiveTab(),
-    dialog: collectDialog(target) ?? collectVisibleOverlay(),
-    section: collectSection(target),
-    table: collectTable(target),
-    form: form?.label ? form : dropdownField,
-    target: collectElement(target),
+    dialog,
+    section,
+    table: collectTable(target, anchor),
+    form: form?.label ? form : formFromDropdownContext(dropdownField),
+    target: collectElement(target, anchor),
     nearbyText: collectNearbyText(target),
   });
 }
@@ -84,69 +157,109 @@ function collectAfterContext() {
   });
 }
 
-function collectElement(element: Element) {
-  const anchor = actionAnchorForElement(element);
+function collectElement(element: Element, knownAnchor?: Element) {
+  const anchor = knownAnchor ?? actionAnchorForElement(element);
   const htmlElement = anchor as HTMLElement;
   const tag = anchor.tagName.toLowerCase();
   const text = elementText(anchor);
+  const framework = frameworkForElement(anchor);
+  const controlType = controlTypeForElement(anchor);
+  const testId = testIdOf(anchor);
   return compactObject({
     tag,
-    role: anchor.getAttribute('role') || inferredRole(anchor),
-    testId: testIdOf(anchor),
+    role: anchor.getAttribute('role') || inferredRole(anchor, controlType),
+    testId,
     ariaLabel: safeText(anchor.getAttribute('aria-label') || undefined),
     title: safeText(anchor.getAttribute('title') || undefined),
     text,
-    placeholder: safeText((htmlElement as HTMLInputElement).placeholder),
+    placeholder: safeText((htmlElement as HTMLInputElement).placeholder || anchor.querySelector<HTMLInputElement>('input[placeholder], textarea[placeholder]')?.placeholder),
     selectedOption: selectedOptionText(anchor),
     normalizedText: normalizeText(text),
+    framework,
+    controlType,
+    locatorQuality: testId ? 'testid' : controlType !== 'unknown' || anchor.getAttribute('role') || text ? 'semantic' : 'fallback',
+    optionPath: optionPathFor(anchor),
+    uniqueness: collectLocatorUniqueness(anchor, controlType),
   });
 }
 
 function actionAnchorForElement(element: Element) {
-  const candidates = [
-    element,
-    closestWithin(element, 'button, a, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]'),
-    closestWithin(element, '[data-testid], [data-test-id], [data-e2e]'),
-    closestWithin(element, 'input, textarea, select, [role="combobox"], [role="textbox"]'),
-  ].filter(Boolean) as Element[];
-
-  return candidates.sort((a, b) => anchorScore(b) - anchorScore(a))[0] ?? element;
+  const candidates = collectAnchorCandidates(element);
+  return candidates.sort((a, b) => anchorScore(b, element) - anchorScore(a, element))[0] ?? element;
 }
 
-function isDirectActionTarget(element: Element) {
+function collectAnchorCandidates(element: Element) {
+  const candidates: Element[] = [];
+  for (let current: Element | null = element, depth = 0; current && depth < maxAncestorDepth; current = current.parentElement, depth++) {
+    if (isPotentialActionAnchor(current))
+      candidates.push(current);
+  }
+  return uniqueElements(candidates.length ? candidates : [element]);
+}
+
+function isPotentialActionAnchor(element: Element) {
   const tag = element.tagName.toLowerCase();
-  return tag === 'input' ||
+  return !!testIdOf(element) ||
+    element.matches(antdActionSelectors) ||
+    tag === 'input' ||
     tag === 'textarea' ||
-    tag === 'select' ||
-    isInteractiveRole(element.getAttribute('role')) ||
-    !!testIdOf(element);
+    tag === 'select';
 }
 
-function isInteractiveRole(role?: string | null) {
-  return !!role && /^(button|link|menuitem|option|tab|checkbox|radio|switch|combobox|textbox)$/i.test(role);
-}
-
-function anchorScore(element: Element) {
+function anchorScore(element: Element, original: Element) {
   const tag = element.tagName.toLowerCase();
   const role = element.getAttribute('role');
-  return (testIdOf(element) ? 100 : 0) +
-    (tag === 'button' ? 50 : 0) +
-    (role === 'button' ? 40 : 0) +
-    (tag === 'input' || tag === 'textarea' || tag === 'select' ? 30 : 0) +
-    (isInteractiveRole(role) ? 20 : 0) +
-    (elementText(element) ? 10 : 0) +
-    (isDirectActionTarget(element) ? 5 : 0);
+  const className = element.getAttribute('class') || '';
+  const depth = ancestorDistance(original, element);
+  let score = 0;
+
+  if (testIdOf(element))
+    score += depth <= 2 ? 1000 : 220;
+  if (tag === 'button')
+    score += 500;
+  if (className.includes('ant-btn'))
+    score += 480;
+  if (role === 'button')
+    score += 450;
+  if (className.includes('ant-select-selector'))
+    score += 420;
+  if (className.includes('ant-select-item-option') || role === 'option')
+    score += 420;
+  if (className.includes('ant-dropdown-menu-item') || className.includes('ant-menu-item') || role === 'menuitem')
+    score += 400;
+  if (className.includes('ant-tabs-tab') || role === 'tab')
+    score += 380;
+  if (className.includes('ant-switch') || role === 'switch')
+    score += 360;
+  if (className.includes('ant-checkbox') || role === 'checkbox')
+    score += 350;
+  if (className.includes('ant-radio') || role === 'radio')
+    score += 350;
+  if (className.includes('ant-picker'))
+    score += 340;
+  if (className.includes('ant-upload'))
+    score += 340;
+  if (tag === 'input' || tag === 'textarea' || tag === 'select')
+    score += 320;
+  if (elementText(element))
+    score += 30;
+  if (tag === 'svg' || className.includes('anticon'))
+    score -= 300;
+  if (tag === 'span' && !testIdOf(element))
+    score -= 80;
+
+  return score - depth;
 }
 
-function collectDialog(target: Element) {
-  const dialog = closestWithin(target, '.ant-modal, .ant-drawer, [role="dialog"], .ant-popover, .ant-dropdown, .ant-select-dropdown');
+function collectDialog(target: Element, anchor = actionAnchorForElement(target)) {
+  const dialog = closestWithin(anchor, overlaySelectors) ?? closestWithin(target, overlaySelectors);
   if (!dialog)
     return undefined;
   return dialogContext(dialog);
 }
 
 function collectVisibleOverlay() {
-  const overlays = [...document.querySelectorAll('.ant-modal, .ant-drawer, [role="dialog"], .ant-popover, .ant-dropdown, .ant-select-dropdown')];
+  const overlays = Array.from(document.querySelectorAll(overlaySelectors));
   const overlay = overlays.find(isVisible);
   return overlay ? dialogContext(overlay) : undefined;
 }
@@ -159,53 +272,165 @@ function dialogContext(dialog: Element) {
         'modal';
   return compactObject({
     type,
-    title: textFromFirst('.ant-modal-title, .ant-drawer-title, [class*="title"], h1, h2, h3, h4', dialog),
+    title: textFromFirst('.ant-modal-title, .ant-drawer-title, .ant-popover-title, [class*="title"], h1, h2, h3, h4', dialog),
+    testId: testIdOf(dialog),
     visible: isVisible(dialog),
   });
 }
 
-function collectSection(target: Element) {
-  const section = closestWithin(target, '.ant-card, .ant-collapse-item, section, fieldset, [data-testid], [data-e2e], [role="region"]');
+function collectSection(target: Element, anchor = actionAnchorForElement(target)) {
+  const section = closestStructuralSection(anchor) ?? closestStructuralSection(target);
   if (!section)
     return undefined;
   const className = section.getAttribute('class') || '';
   return compactObject({
-    title: textFromFirst('.ant-card-head-title, .ant-collapse-header, legend, h1, h2, h3, h4, [class*="title"]', section) || headingText(section),
+    title: textFromFirst('.ant-pro-card-title, .ant-card-head-title, .ant-collapse-header, legend, h1, h2, h3, h4, [class*="title"]', section) || headingText(section),
     kind: className.includes('card') ? 'card' : className.includes('collapse') ? 'panel' : section.tagName.toLowerCase() === 'fieldset' ? 'fieldset' : 'section',
     testId: testIdOf(section),
   });
 }
 
-function collectTable(target: Element) {
-  const row = closestWithin(target, 'tr, [role="row"], .ant-table-row');
-  const table = closestWithin(target, '.ant-table, table, [role="table"], [role="grid"]');
-  if (!table && !row)
+function closestStructuralSection(target: Element) {
+  for (let element: Element | null = target; element; element = element.parentElement) {
+    if (isStructuralSection(element))
+      return element;
+  }
+  return undefined;
+}
+
+function isStructuralSection(element: Element) {
+  const tag = element.tagName.toLowerCase();
+  if (element.matches('.ant-pro-card, .ant-card, .ant-collapse-item, section, fieldset, [role="region"]'))
+    return !isPotentialActionAnchor(element) || hasStructuralSectionContent(element) || tag === 'section' || tag === 'fieldset';
+  if (!testIdOf(element))
+    return false;
+  return hasStructuralSectionContent(element) && !isPotentialActionAnchor(element);
+}
+
+function hasStructuralSectionContent(element: Element) {
+  return !!element.querySelector('h1, h2, h3, h4, .ant-card-head-title, .ant-pro-card-title, .ant-collapse-header, form, .ant-form, table, .ant-table, section, [role="region"]');
+}
+
+function collectTable(target: Element, anchor = actionAnchorForElement(target)) {
+  const row = closestWithin(anchor, tableRowSelectors) ?? closestWithin(target, tableRowSelectors);
+  const tableWrapper = closestWithin(anchor, '.ant-pro-table, .ant-table-wrapper') ?? closestWithin(target, '.ant-pro-table, .ant-table-wrapper');
+  const cardWrapper = tableWrapper ? undefined : closestWithin(anchor, '.ant-pro-card, .ant-card') ?? closestWithin(target, '.ant-pro-card, .ant-card');
+  const wrapper = tableWrapper ?? cardWrapper;
+  const table = closestWithin(anchor, '.ant-table, table, [role="table"], [role="grid"]') ?? closestWithin(target, '.ant-table, table, [role="table"], [role="grid"]');
+  if (!table && !row && !wrapper)
     return undefined;
 
-  const headers = table ? [...table.querySelectorAll('th, [role="columnheader"]')].map(elementText).filter(Boolean).slice(0, 8) : [];
-  const cell = closestWithin(target, 'td, th, [role="cell"], [role="gridcell"]');
-  const rowChildren = row ? [...row.children] : [];
+  const headers = table ? Array.from(table.querySelectorAll('th, [role="columnheader"]')).map(elementText).filter((text): text is string => !!text).slice(0, 12) : [];
+  const cell = closestWithin(anchor, 'td, th, [role="cell"], [role="gridcell"]') ?? closestWithin(target, 'td, th, [role="cell"], [role="gridcell"]');
+  const rowChildren = row ? Array.from(row.children) : [];
   const columnIndex = cell ? rowChildren.indexOf(cell) : -1;
-  const rowText = row ? elementText(row, 120) : undefined;
-  return compactObject({
-    title: table ? tableTitle(table) : undefined,
-    testId: table ? testIdOf(table) : undefined,
-    rowKey: row?.getAttribute('data-row-key') || firstToken(rowText),
+  const rowText = row ? elementText(row, 160) : undefined;
+  const rowIdentity = rowIdentityFor(row, table);
+  const parentExpandedRow = parentRowForExpandedRow(row);
+  const rowKind = rowKindFor(row);
+  const context = compactObject({
+    title: proTableTitle(wrapper) || (table ? tableTitle(table) : undefined) || sectionTitleAround(wrapper || table || row),
+    testId: (wrapper ? testIdOf(wrapper) : undefined) || (table ? testIdOf(table) : undefined),
+    rowKey: row?.getAttribute('data-row-key') || parentExpandedRow?.getAttribute('data-row-key') || (rowIdentity?.stable ? rowIdentity.value : undefined),
     rowText,
+    rowIdentity,
+    rowIndex: numericAttribute(row, 'data-row-index') ?? numericAttribute(row, 'data-index'),
+    ariaRowIndex: row?.getAttribute('aria-rowindex') || undefined,
     columnName: columnIndex >= 0 ? headers[columnIndex] : undefined,
+    columnIndex: columnIndex >= 0 ? columnIndex : undefined,
     headers,
+    nestingLevel: tableNestingLevel(table),
+    parentTitle: parentTableTitle(table),
+    fixedSide: fixedSideFor(cell),
+    rowKind,
+    expandedParentRowKey: parentExpandedRow?.getAttribute('data-row-key') || undefined,
+  });
+  return compactObject({
+    ...context,
+    fingerprint: tableFingerprint(context),
   });
 }
 
-function collectForm(target: Element) {
-  const item = closestWithin(target, '.ant-form-item, label, [role="group"]');
-  const label = item ? textFromFirst('.ant-form-item-label label, label', item) || labelFromAria(target) : labelFromAria(target);
+function collectForm(target: Element, anchor = actionAnchorForElement(target)) {
+  const item = closestWithin(anchor, '.ant-form-item, .ant-pro-form-group, .ant-pro-form-list, [role="group"], label') ??
+    closestWithin(target, '.ant-form-item, .ant-pro-form-group, .ant-pro-form-list, [role="group"], label');
+  const label = item ? textFromFirst('.ant-form-item-label label, label', item) || labelFromAria(anchor) || labelFromPlaceholder(anchor) : labelFromAria(anchor) || labelFromPlaceholder(anchor);
+  const nameInfo = formControlNameInfo(anchor);
   return compactObject({
-    title: titleFromAncestor(target, 'form, .ant-form, fieldset'),
+    title: titleFromAncestor(anchor, 'form, .ant-form, .ant-pro-form, fieldset'),
     label,
-    name: (target as HTMLInputElement).name || target.getAttribute('name') || undefined,
-    required: !!closestWithin(target, '.ant-form-item-required, [aria-required="true"], [required]'),
+    name: nameInfo.name,
+    namePath: nameInfo.namePath,
+    nameSource: nameInfo.nameSource,
+    testId: testIdOf(item ?? anchor),
+    id: formControlId(anchor),
+    required: !!closestWithin(anchor, '.ant-form-item-required, [aria-required="true"], [required]'),
   });
+}
+
+function rememberDropdownContext(context: Omit<ActiveDropdownContext, 'id' | 'time'>) {
+  activeDropdownContexts = [{
+    ...context,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    time: performance.now(),
+  }, ...activeDropdownContexts.filter(context => performance.now() - context.time < 5000)].slice(0, 5);
+}
+
+function activeDropdownContextFor(target: Element) {
+  const overlay = closestWithin(target, '.ant-select-dropdown, .ant-cascader-dropdown, .ant-dropdown, [role="listbox"], [role="tree"]');
+  const type = dropdownTypeForOverlay(overlay);
+  return activeDropdownContexts
+      .filter(context => performance.now() - context.time < 5000)
+      .filter(context => !type || !context.dropdownType || context.dropdownType === type)
+      .sort((a, b) => b.time - a.time)[0];
+}
+
+function formFromDropdownContext(context?: ActiveDropdownContext) {
+  if (!context)
+    return undefined;
+  return compactObject({
+    label: context.fieldLabel,
+    name: context.fieldName,
+    testId: context.fieldTestId,
+    title: context.sectionTitle,
+  });
+}
+
+function isDropdownLikeTarget(anchor: Element, target: Element) {
+  return isDropdownOptionTarget(target, anchor) || /^(select|select-option|tree-select|tree-select-option|cascader|cascader-option|menu-item)$/.test(controlTypeForElement(anchor));
+}
+
+function isDropdownOptionTarget(target: Element, anchor = actionAnchorForElement(target)) {
+  return !!target.closest('.ant-select-dropdown, .ant-cascader-dropdown, .ant-dropdown, [role="listbox"], [role="tree"]') ||
+    /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(controlTypeForElement(anchor));
+}
+
+function dropdownTypeForAnchor(anchor: Element): ActiveDropdownContext['dropdownType'] {
+  const controlType = controlTypeForElement(anchor);
+  if (controlType === 'cascader' || controlType === 'cascader-option')
+    return 'cascader';
+  if (controlType === 'tree-select' || controlType === 'tree-select-option')
+    return 'tree-select';
+  if (controlType === 'menu-item')
+    return 'menu';
+  if (controlType === 'select' || controlType === 'select-option')
+    return 'select';
+  return 'dropdown';
+}
+
+function dropdownTypeForOverlay(overlay?: Element): ActiveDropdownContext['dropdownType'] | undefined {
+  if (!overlay)
+    return undefined;
+  const className = overlay.getAttribute('class') || '';
+  if (className.includes('cascader'))
+    return 'cascader';
+  if (className.includes('tree'))
+    return 'tree-select';
+  if (className.includes('select'))
+    return 'select';
+  if (className.includes('dropdown'))
+    return 'dropdown';
+  return undefined;
 }
 
 function collectActiveTab() {
@@ -222,7 +447,7 @@ function collectBreadcrumb() {
   const root = document.querySelector('.ant-breadcrumb, [aria-label*="breadcrumb" i]');
   if (!root)
     return undefined;
-  const items = [...root.querySelectorAll('li, a, span')]
+  const items = Array.from(root.querySelectorAll('li, a, span'))
       .map(elementText)
       .filter(Boolean)
       .filter((item, index, all) => all.indexOf(item) === index)
@@ -233,7 +458,7 @@ function collectBreadcrumb() {
 function collectNearbyText(target: Element) {
   const values: string[] = [];
   for (let element: Element | null = target, depth = 0; element && depth < maxAncestorDepth; element = element.parentElement, depth++) {
-    for (const candidate of element.querySelectorAll('h1, h2, h3, h4, label, button, th, .ant-card-head-title, .ant-collapse-header')) {
+    for (const candidate of Array.from(element.querySelectorAll('h1, h2, h3, h4, label, button, th, .ant-card-head-title, .ant-collapse-header'))) {
       const text = elementText(candidate);
       if (text && !values.includes(text))
         values.push(text);
@@ -276,8 +501,22 @@ function testIdOf(element: Element) {
   return safeText(element.getAttribute('data-testid') || element.getAttribute('data-test-id') || element.getAttribute('data-e2e') || undefined);
 }
 
-function inferredRole(element: Element) {
+function inferredRole(element: Element, controlType?: string) {
   const tag = element.tagName.toLowerCase();
+  if (controlType === 'button')
+    return 'button';
+  if (controlType === 'menu-item')
+    return 'menuitem';
+  if (controlType === 'select-option')
+    return 'option';
+  if (controlType === 'tab')
+    return 'tab';
+  if (controlType === 'checkbox')
+    return 'checkbox';
+  if (controlType === 'radio')
+    return 'radio';
+  if (controlType === 'switch')
+    return 'switch';
   if (tag === 'button')
     return 'button';
   if (tag === 'input' || tag === 'textarea' || tag === 'select')
@@ -292,6 +531,60 @@ function labelFromAria(element: Element) {
   if (!labelledBy)
     return undefined;
   return labelledBy.split(/\s+/).map(id => element.ownerDocument.getElementById(id)).map(element => elementText(element)).find(Boolean);
+}
+
+function labelFromPlaceholder(anchor: Element) {
+  const html = anchor as HTMLInputElement;
+  return safeText(html.placeholder || anchor.querySelector<HTMLInputElement>('input[placeholder], textarea[placeholder]')?.placeholder);
+}
+
+function formControlNameInfo(anchor: Element) {
+  const html = anchor as HTMLInputElement;
+  const direct = anchor.getAttribute('name') || html.name;
+  if (direct)
+    return { name: direct, namePath: namePathFromValue(direct), nameSource: 'name' };
+
+  const dataField = anchor.getAttribute('data-field');
+  if (dataField)
+    return { name: dataField, namePath: namePathFromValue(dataField), nameSource: 'data-field' };
+
+  const dataName = anchor.getAttribute('data-name');
+  if (dataName)
+    return { name: dataName, namePath: namePathFromValue(dataName), nameSource: 'data-name' };
+
+  const input = anchor.matches('input, textarea, select, [name], [id]') ? anchor : anchor.querySelector('input, textarea, select, [name], [id]');
+  const inputName = input?.getAttribute('name');
+  if (inputName)
+    return { name: inputName, namePath: namePathFromValue(inputName), nameSource: 'input-name' };
+
+  const inputId = input?.getAttribute('id') || anchor.getAttribute('id');
+  const formName = closestWithin(anchor, 'form, .ant-form')?.getAttribute('name');
+  const derived = deriveFieldNameFromId(inputId, formName);
+  if (derived)
+    return { name: derived, namePath: namePathFromValue(derived), nameSource: 'id' };
+
+  return { name: undefined, namePath: undefined, nameSource: undefined };
+}
+
+function formControlId(anchor: Element) {
+  const input = anchor.matches('input, textarea, select, [id]') ? anchor : anchor.querySelector('input, textarea, select, [id]');
+  return safeText(input?.getAttribute('id') || anchor.getAttribute('id'));
+}
+
+function deriveFieldNameFromId(id?: string | null, formName?: string | null) {
+  if (!id)
+    return undefined;
+  let value = id;
+  if (formName && value.startsWith(`${formName}_`))
+    value = value.slice(formName.length + 1);
+  const parts = value.split('_').filter(Boolean);
+  if (parts.length >= 2 && /^(basic|form|search|query|modal|drawer|edit|create)$/i.test(parts[0]))
+    return parts.slice(1).join('.');
+  return parts.length ? parts.join('.') : value;
+}
+
+function namePathFromValue(value?: string) {
+  return value ? value.split(/[.[\]_]+/).filter(Boolean) : undefined;
 }
 
 function selectedOptionText(element: Element) {
@@ -320,8 +613,170 @@ function tableTitle(table: Element) {
   return textFromFirst('h1, h2, h3, h4, .ant-card-head-title, [class*="title"]', parent ?? table);
 }
 
-function firstToken(value?: string) {
-  return value?.split(/\s+/).find(token => token.length <= 40 && !/^(编辑|删除|操作)$/.test(token));
+function proTableTitle(root?: Element | null) {
+  if (!root)
+    return undefined;
+  return textFromFirst('.ant-pro-table-list-toolbar-title, .ant-pro-card-title, .ant-card-head-title, [class*="toolbar"] [class*="title"], h1, h2, h3, h4', root);
+}
+
+function sectionTitleAround(root?: Element | null) {
+  if (!root)
+    return undefined;
+  const section = closestWithin(root, '.ant-pro-card, .ant-card, section, [role="region"]');
+  return section ? textFromFirst('.ant-pro-card-title, .ant-card-head-title, h1, h2, h3, h4, [class*="title"]', section) : undefined;
+}
+
+function rowIdentityFor(row?: Element, table?: Element) {
+  if (!row)
+    return undefined;
+  const dataRowKey = row.getAttribute('data-row-key');
+  if (dataRowKey)
+    return { value: dataRowKey, source: 'data-row-key', confidence: 0.98, stable: true };
+  const dataId = row.getAttribute('data-id') || row.getAttribute('data-key');
+  if (dataId)
+    return { value: dataId, source: row.getAttribute('data-id') ? 'data-id' : 'data-key', confidence: 0.9, stable: true };
+  const testId = testIdOf(row);
+  if (testId)
+    return { value: testId, source: 'data-testid', confidence: 0.85, stable: true };
+  const primaryCell = primaryCellText(row, table);
+  if (primaryCell)
+    return { value: primaryCell, source: 'primary-cell', confidence: 0.72, stable: false };
+  const rowText = elementText(row, 120);
+  if (rowText)
+    return { value: rowText, source: 'row-text', confidence: 0.5, stable: false };
+  const ariaRowIndex = row.getAttribute('aria-rowindex') || row.getAttribute('data-row-index') || row.getAttribute('data-index');
+  if (ariaRowIndex)
+    return { value: ariaRowIndex, source: row.getAttribute('data-index') ? 'data-index' : 'aria-rowindex', confidence: 0.35, stable: false };
+  return undefined;
+}
+
+function primaryCellText(row: Element, table?: Element) {
+  const headers = table ? Array.from(table.querySelectorAll('th, [role="columnheader"]')).map(elementText) : [];
+  const cells = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"]'));
+  const preferredHeaderIndex = headers.findIndex(header => /^(名称|姓名|用户名|账号|ID|编号|名称\/ID|IP|地址池|实例|租户|项目)$/i.test(header || ''));
+  const cell = preferredHeaderIndex >= 0 ? cells[preferredHeaderIndex] : cells.find(cell => !/^(操作|编辑|删除|查看|启用|禁用)$/.test(elementText(cell) || ''));
+  return safeText(elementText(cell), 80);
+}
+
+function rowKindFor(row?: Element) {
+  const className = row?.getAttribute('class') || '';
+  if (className.includes('ant-table-expanded-row'))
+    return 'expanded';
+  if (className.includes('ant-table-summary'))
+    return 'summary';
+  if (row?.closest('.rc-virtual-list, .ant-table-tbody-virtual-holder'))
+    return 'virtual';
+  return row ? 'data' : undefined;
+}
+
+function parentRowForExpandedRow(row?: Element) {
+  if (rowKindFor(row) !== 'expanded')
+    return undefined;
+  let previous = row?.previousElementSibling;
+  while (previous) {
+    if (previous.matches('tr[data-row-key], .ant-table-row[data-row-key], [role="row"][data-row-key]'))
+      return previous;
+    previous = previous.previousElementSibling;
+  }
+  return undefined;
+}
+
+function numericAttribute(element: Element | undefined, name: string) {
+  const value = element?.getAttribute(name);
+  if (!value)
+    return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function tableNestingLevel(table?: Element) {
+  if (!table)
+    return undefined;
+  let count = 0;
+  for (let current = table.parentElement; current; current = current.parentElement) {
+    if (current.matches('table, [role="table"], [role="grid"]'))
+      count += 1;
+  }
+  return count || undefined;
+}
+
+function parentTableTitle(table?: Element) {
+  if (!table)
+    return undefined;
+  for (let current = table.parentElement; current; current = current.parentElement) {
+    if (current.matches('table, [role="table"], [role="grid"]'))
+      return tableTitle(current) || sectionTitleAround(current);
+  }
+  return undefined;
+}
+
+function fixedSideFor(cell?: Element) {
+  const className = cell?.getAttribute('class') || '';
+  if (className.includes('ant-table-cell-fix-left'))
+    return 'left';
+  if (className.includes('ant-table-cell-fix-right'))
+    return 'right';
+  return undefined;
+}
+
+function tableFingerprint(context: { testId?: string; title?: string; headers?: string[]; nestingLevel?: number }) {
+  return [context.testId, context.title, context.headers?.slice(0, 5).join('|'), context.nestingLevel]
+      .filter(Boolean)
+      .join('::') || undefined;
+}
+
+function optionPathFor(element: Element) {
+  return cascaderOptionPath(element) || treeOptionPath(element);
+}
+
+function cascaderOptionPath(option: Element) {
+  const dropdown = closestWithin(option, '.ant-cascader-dropdown');
+  if (!dropdown)
+    return undefined;
+  const menus = Array.from(dropdown.querySelectorAll('.ant-cascader-menu'));
+  const values = menus.map(menu => {
+    const active = menu.querySelector('.ant-cascader-menu-item-active') ||
+      menu.querySelector('[aria-selected="true"]') ||
+      menu.querySelector('.ant-cascader-menu-item-expand');
+    return active ? elementText(active) : undefined;
+  }).filter(Boolean) as string[];
+  const current = elementText(closestWithin(option, '.ant-cascader-menu-item, [role="menuitem"]') || option);
+  if (current && values[values.length - 1] !== current)
+    values.push(current);
+  return values.length ? values : undefined;
+}
+
+function treeOptionPath(option: Element) {
+  const node = closestWithin(option, '.ant-select-tree-treenode, .ant-tree-treenode, [role="treeitem"]');
+  if (!node)
+    return undefined;
+  const text = elementText(node);
+  return text ? [text] : undefined;
+}
+
+function collectLocatorUniqueness(anchor: Element, controlType?: string) {
+  const testId = testIdOf(anchor);
+  const text = elementText(anchor);
+  const role = anchor.getAttribute('role') || inferredRole(anchor, controlType);
+  if (!testId && !text)
+    return undefined;
+  const pageCount = testId ? countTestId(document, testId) : countRoleTextLike(document, role, text);
+  return compactObject({ pageCount });
+}
+
+function countTestId(root: ParentNode, testId: string) {
+  return Array.from(root.querySelectorAll('[data-testid], [data-test-id], [data-e2e]'))
+      .filter(element => testIdOf(element) === testId)
+      .length;
+}
+
+function countRoleTextLike(root: ParentNode, role?: string, text?: string) {
+  if (!text)
+    return undefined;
+  const selector = role === 'button' ? 'button, [role="button"], .ant-btn' : role ? `[role="${role}"]` : '*';
+  return Array.from(root.querySelectorAll(selector))
+      .filter(element => elementText(element) === text)
+      .length;
 }
 
 function shouldIgnoreTarget(element: Element, kind?: ContextEventKind) {
@@ -329,6 +784,72 @@ function shouldIgnoreTarget(element: Element, kind?: ContextEventKind) {
     return true;
   const input = element.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
   return !!input && (sensitivePattern.test(input.name || input.id || input.placeholder || '') || input.type === 'password');
+}
+
+function frameworkForElement(element: Element) {
+  const className = element.getAttribute('class') || '';
+  const proRoot = closestWithin(element, '.ant-pro-table, .ant-pro-card, .ant-pro-form, .ant-pro-form-group, .ant-pro-form-list, [class*="ant-pro-"]');
+  if (proRoot || className.includes('ant-pro-'))
+    return 'procomponents';
+  const antdRoot = closestWithin(element, '.ant-btn, .ant-form, .ant-table, .ant-modal, .ant-drawer, .ant-select, .ant-dropdown, .ant-menu, .ant-tabs, .ant-picker, .ant-upload, [class*="ant-"]');
+  if (antdRoot || className.includes('ant-'))
+    return 'antd';
+  return 'generic';
+}
+
+function controlTypeForElement(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  const role = element.getAttribute('role');
+  const className = element.getAttribute('class') || '';
+  if (tag === 'button' || className.includes('ant-btn') || role === 'button')
+    return closestWithin(element, 'td, th, [role="cell"], [role="gridcell"]') ? 'table-row-action' : 'button';
+  if (tag === 'a')
+    return 'link';
+  if (tag === 'textarea')
+    return 'textarea';
+  if (tag === 'input')
+    return 'input';
+  if (className.includes('ant-cascader-picker'))
+    return 'cascader';
+  if (className.includes('ant-cascader-menu-item') || closestWithin(element, '.ant-cascader-menu-item'))
+    return 'cascader-option';
+  if (className.includes('ant-tree-select'))
+    return 'tree-select';
+  if (className.includes('ant-select-tree-treenode') || className.includes('ant-tree-treenode') || role === 'treeitem' || closestWithin(element, '.ant-select-tree-treenode, .ant-tree-treenode, [role="treeitem"]'))
+    return 'tree-select-option';
+  if (className.includes('ant-select-item-option') || role === 'option')
+    return 'select-option';
+  if (tag === 'select' || className.includes('ant-select') || role === 'combobox' || !!element.querySelector('.ant-select-selector, [role="combobox"]'))
+    return 'select';
+  if (className.includes('ant-dropdown-menu-item') || className.includes('ant-menu-item') || role === 'menuitem')
+    return 'menu-item';
+  if (className.includes('ant-checkbox') || role === 'checkbox')
+    return 'checkbox';
+  if (className.includes('ant-radio') || role === 'radio')
+    return 'radio';
+  if (className.includes('ant-switch') || role === 'switch')
+    return 'switch';
+  if (className.includes('ant-tabs-tab') || role === 'tab')
+    return 'tab';
+  if (className.includes('ant-picker'))
+    return 'date-picker';
+  if (className.includes('ant-upload'))
+    return 'upload';
+  return 'unknown';
+}
+
+function uniqueElements(elements: Element[]) {
+  return elements.filter((element, index) => elements.indexOf(element) === index);
+}
+
+function ancestorDistance(from: Element, candidate: Element) {
+  let distance = 0;
+  for (let current: Element | null = from; current; current = current.parentElement) {
+    if (current === candidate)
+      return distance;
+    distance += 1;
+  }
+  return maxAncestorDepth;
 }
 
 function isVisible(element: Element) {

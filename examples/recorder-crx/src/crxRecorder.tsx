@@ -877,7 +877,7 @@ export const CrxRecorder: React.FC = ({
     setPickingAssertionStepId(undefined);
     setEditingAssertionStepId(undefined);
     setActiveTab('business');
-    setPanelStage('review');
+    setPanelStage('setup');
     setDraftStatus('正在创建新流程');
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
     window.dispatch({ event: 'clear', params: {} }).catch(() => {});

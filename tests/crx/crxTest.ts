@@ -103,7 +103,9 @@ export const test = base.extend<CrxFixtureOptions & {
         context: async ({ extensionPath, createUserDataDir }, use) => {
           const context = await chromium.launchPersistentContext(createUserDataDir(), {
             headless: false,
+            executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
             args: [
+              '--no-sandbox',
               `--disable-extensions-except=${extensionPath}`,
               `--load-extension=${extensionPath}`,
             ],

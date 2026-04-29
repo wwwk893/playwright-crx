@@ -443,17 +443,21 @@ function dedupeSyntheticClickEvents(events: PageContextEvent[]) {
 }
 
 function sameClickCluster(left: PageContextEvent, right: PageContextEvent) {
-  const timeClose = Math.abs(Number(left.wallTime ?? 0) - Number(right.wallTime ?? 0)) < 600;
+  const timeClose = Math.abs(Number(left.wallTime ?? 0) - Number(right.wallTime ?? 0)) < 650;
   if (!timeClose)
     return false;
+
+  if (left.before.target?.testId && left.before.target.testId === right.before.target?.testId)
+    return true;
 
   const leftText = left.before.target ? targetComparableText(left.before.target) : undefined;
   const rightText = right.before.target ? targetComparableText(right.before.target) : undefined;
   if (leftText && rightText && leftText === rightText)
     return true;
-  if (left.before.target?.testId && left.before.target.testId === right.before.target?.testId)
-    return true;
-  return !!left.before.dialog?.title && left.before.dialog.title === right.before.dialog?.title;
+
+  const leftDialog = left.after?.dialog?.title || left.before.dialog?.title;
+  const rightDialog = right.after?.dialog?.title || right.before.dialog?.title;
+  return !!leftDialog && leftDialog === rightDialog && leftText === rightText;
 }
 
 function bestPageContextEvent(events: PageContextEvent[]) {
@@ -462,31 +466,43 @@ function bestPageContextEvent(events: PageContextEvent[]) {
 
 function contextEventScore(event: PageContextEvent) {
   const target = event.before.target;
-  return (target?.testId ? 100 : 0) +
-    (target?.role === 'button' ? 30 : 0) +
-    (target?.text ? 20 : 0) +
-    (target?.ariaLabel ? 15 : 0) +
-    (target?.placeholder ? 10 : 0) +
-    (event.before.form?.label ? 8 : 0) +
-    (event.before.dialog?.title ? 5 : 0);
+  return (target?.testId ? 1000 : 0) +
+    (target?.locatorQuality === 'testid' ? 200 : 0) +
+    (target?.framework === 'antd' || target?.framework === 'procomponents' ? 80 : 0) +
+    (target?.role === 'button' ? 80 : 0) +
+    (target?.controlType === 'button' ? 80 : 0) +
+    (target?.controlType === 'select-option' ? 70 : 0) +
+    (target?.text ? 40 : 0) +
+    (target?.ariaLabel ? 30 : 0) +
+    (target?.placeholder ? 20 : 0) +
+    (event.before.form?.label ? 20 : 0) +
+    (event.before.table?.rowKey ? 20 : 0) +
+    (event.before.dialog?.title ? 10 : 0);
 }
 
 function shouldCreateSyntheticClick(event: PageContextEvent) {
   const target = event.before.target;
   if (!target)
     return false;
-  return !!target.testId ||
-    !!target.text ||
-    !!target.ariaLabel ||
-    !!target.placeholder ||
-    target.role === 'button' ||
-    target.role === 'menuitem' ||
-    target.role === 'option';
+
+  if (target.testId)
+    return true;
+  if (target.controlType && target.controlType !== 'unknown')
+    return true;
+  if (target.role && /^(button|menuitem|option|tab|checkbox|radio|switch)$/i.test(target.role))
+    return true;
+  return !!target.text || !!target.ariaLabel || !!target.placeholder;
 }
 
 function hasSyntheticStepForEvent(steps: FlowStep[], event: PageContextEvent) {
   return steps.some(step => {
     const raw = asRecord(step.rawAction);
+    if (step.action === 'click' && step.context?.eventId === event.id)
+      return true;
+    if (step.action === 'click' && step.context?.before.target &&
+      targetsLikelySame(step.context.before.target, event.before.target) &&
+      Math.abs(Number(step.context.capturedAt ?? 0) - Number(event.wallTime ?? 0)) < 1500)
+      return true;
     return raw.syntheticContextEventId === event.id ||
       (raw.syntheticContextEventSignature === pageContextTargetSignature(event.before.target) &&
         Math.abs(Number(raw.syntheticContextEventWallTime ?? 0) - Number(event.wallTime ?? 0)) < 750) ||

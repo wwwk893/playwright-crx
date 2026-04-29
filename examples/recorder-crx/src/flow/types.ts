@@ -13,7 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { IntentSource, IntentSuggestion, StepContextSnapshot } from './pageContextTypes';
+import type {
+  DialogContext,
+  FormContext,
+  IntentSource,
+  IntentSuggestion,
+  RowIdentity,
+  SectionContext,
+  StepContextSnapshot,
+} from './pageContextTypes';
 
 export const BUSINESS_FLOW_SCHEMA = 'business-flow/v1' as const;
 
@@ -82,6 +90,39 @@ export interface FlowTestDataItem {
   rule?: string;
 }
 
+export interface FlowTargetScope {
+  dialog?: Pick<DialogContext, 'title' | 'testId' | 'type' | 'visible'>;
+  section?: Pick<SectionContext, 'title' | 'testId' | 'kind'>;
+  table?: {
+    title?: string;
+    testId?: string;
+    rowKey?: string;
+    rowText?: string;
+    rowIdentity?: RowIdentity;
+    columnName?: string;
+    nestingLevel?: number;
+    fixedSide?: 'left' | 'right';
+    fingerprint?: string;
+  };
+  form?: Pick<FormContext, 'title' | 'label' | 'name' | 'testId'>;
+}
+
+export interface LocatorHint {
+  strategy:
+    | 'global-testid'
+    | 'global-role'
+    | 'dialog-scoped-role'
+    | 'section-scoped-role'
+    | 'table-row-testid'
+    | 'table-row-text'
+    | 'field-scoped'
+    | 'fallback-text';
+  confidence: number;
+  pageCount?: number;
+  scopeCount?: number;
+  reason?: string;
+}
+
 export interface FlowTarget {
   selector?: string;
   locator?: string;
@@ -92,6 +133,8 @@ export interface FlowTarget {
   placeholder?: string;
   testId?: string;
   text?: string;
+  scope?: FlowTargetScope;
+  locatorHint?: LocatorHint;
   raw?: unknown;
 }
 

@@ -202,10 +202,18 @@ function renderRawActionSource(step: FlowStep) {
     case 'goto':
     case 'openPage':
       return action.url || step.url ? `await page.goto(${stringLiteral(action.url || step.url)});` : undefined;
-    case 'click':
+    case 'click': {
+      const preferred = preferredTargetLocator(step);
+      if (preferred)
+        return `await ${preferred}.click();`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.click();` : targetClickFallback(step);
-    case 'fill':
-      return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${stringLiteral(action.text ?? action.value ?? step.value ?? '')});` : undefined;
+    }
+    case 'fill': {
+      const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
+      if (step.target?.label)
+        return `await page.getByLabel(${stringLiteral(step.target.label)}).fill(${value});`;
+      return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
+    }
     case 'press':
       return selector ? `await ${locatorExpressionForSelector(selector)}.press(${stringLiteral(action.key ?? step.value ?? '')});` : undefined;
     case 'wait':
@@ -234,12 +242,110 @@ function waitMilliseconds(value: unknown) {
 }
 
 function targetClickFallback(step: FlowStep) {
-  if (step.target?.testId)
-    return `await page.getByTestId(${stringLiteral(step.target.testId)}).click();`;
-  if (step.target?.role && (step.target.name || step.target.text))
-    return `await page.getByRole(${stringLiteral(step.target.role)}, { name: ${stringLiteral(step.target.name || step.target.text)} }).click();`;
+  const preferred = preferredTargetLocator(step);
+  if (preferred)
+    return `await ${preferred}.click();`;
   const text = step.target?.text || step.target?.name || step.target?.label || step.target?.displayName;
   return text ? `await page.getByText(${stringLiteral(text)}).click();` : undefined;
+}
+
+function preferredTargetLocator(step: FlowStep) {
+  return globalTestIdLocator(step) ||
+    tableScopedLocator(step) ||
+    dialogScopedLocator(step) ||
+    sectionScopedLocator(step) ||
+    fieldLocator(step) ||
+    globalRoleLocator(step) ||
+    fallbackTextLocator(step);
+}
+
+function globalTestIdLocator(step: FlowStep) {
+  if (step.target?.testId)
+    return `page.getByTestId(${stringLiteral(step.target.testId)})`;
+  return undefined;
+}
+
+function tableScopedLocator(step: FlowStep) {
+  const table = step.target?.scope?.table || step.context?.before.table;
+  const targetName = targetNameForLocator(step);
+  const role = step.target?.role || 'button';
+  if (!table?.testId || !targetName)
+    return undefined;
+
+  const rowIdentity = table.rowIdentity;
+  const stableRowValue = table.rowKey || (rowIdentity?.stable ? rowIdentity.value : undefined);
+  if (stableRowValue) {
+    const rowSelector = `tr[data-row-key="${stableRowValue}"], [data-row-key="${stableRowValue}"]`;
+    const rowLocator = `page.getByTestId(${stringLiteral(table.testId)}).locator(${stringLiteral(rowSelector)})`;
+    if (role === 'row')
+      return `${rowLocator}.first()`;
+    return rowLocator +
+      `.filter({ has: page.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} }) })` +
+      `.first()` +
+      `.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+  }
+
+  const fallbackRowText = rowIdentity?.value || table.rowText;
+  if (fallbackRowText) {
+    const rowLocator = `page.getByTestId(${stringLiteral(table.testId)})` +
+      `.locator(${stringLiteral('tr, [role="row"]')})` +
+      `.filter({ hasText: ${stringLiteral(fallbackRowText)} })`;
+    if (role === 'row')
+      return `${rowLocator}.first()`;
+    return `${rowLocator}.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+  }
+  return undefined;
+}
+
+function dialogScopedLocator(step: FlowStep) {
+  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  const targetName = targetNameForLocator(step);
+  if (!dialog || !targetName)
+    return undefined;
+  const role = step.target?.role || 'button';
+  if (dialog.testId)
+    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+  if (!dialog.title)
+    return undefined;
+  return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')})` +
+    `.filter({ hasText: ${stringLiteral(dialog.title)} })` +
+    `.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+}
+
+function sectionScopedLocator(step: FlowStep) {
+  const section = step.target?.scope?.section || step.context?.before.section;
+  const targetName = targetNameForLocator(step);
+  if (!section?.testId || !targetName)
+    return undefined;
+  const role = step.target?.role || 'button';
+  return `page.getByTestId(${stringLiteral(section.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+}
+
+function fieldLocator(step: FlowStep) {
+  if (step.target?.label)
+    return `page.getByLabel(${stringLiteral(step.target.label)})`;
+  if (step.target?.placeholder)
+    return `page.getByPlaceholder(${stringLiteral(step.target.placeholder)})`;
+  return undefined;
+}
+
+function globalRoleLocator(step: FlowStep) {
+  const targetName = targetNameForLocator(step);
+  const pageCount = step.target?.locatorHint?.pageCount ?? step.context?.before.target?.uniqueness?.pageCount;
+  if (pageCount && pageCount > 1)
+    return undefined;
+  if (step.target?.role && targetName)
+    return `page.getByRole(${stringLiteral(step.target.role)}, { name: ${stringLiteral(targetName)} })`;
+  return undefined;
+}
+
+function fallbackTextLocator(step: FlowStep) {
+  const text = step.target?.text || step.target?.displayName || step.target?.name;
+  return text ? `page.getByText(${stringLiteral(text)})` : undefined;
+}
+
+function targetNameForLocator(step: FlowStep) {
+  return step.target?.name || step.target?.text || step.target?.displayName;
 }
 
 function rawAction(value: unknown) {
