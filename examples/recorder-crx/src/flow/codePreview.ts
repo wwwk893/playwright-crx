@@ -165,6 +165,8 @@ function sourceMatchesStep(sourceCode: string[], step: FlowStep) {
       return /\.fill\(/.test(joined) && (!step.value || joined.includes(step.value));
     case 'press':
       return /\.press\(/.test(joined) && (!step.value || joined.includes(step.value));
+    case 'wait':
+      return /\.waitForTimeout\(/.test(joined) && (!step.value || joined.includes(step.value));
     case 'select':
       return /\.selectOption\(/.test(joined) || /\.click\(/.test(joined);
     case 'check':
@@ -206,6 +208,9 @@ function renderRawActionSource(step: FlowStep) {
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${stringLiteral(action.text ?? action.value ?? step.value ?? '')});` : undefined;
     case 'press':
       return selector ? `await ${locatorExpressionForSelector(selector)}.press(${stringLiteral(action.key ?? step.value ?? '')});` : undefined;
+    case 'wait':
+    case 'waitForTimeout':
+      return `await page.waitForTimeout(${waitMilliseconds(step.value ?? action.timeout ?? action.value ?? action.text)});`;
     case 'check':
       return selector ? `await ${locatorExpressionForSelector(selector)}.check();` : undefined;
     case 'uncheck':
@@ -219,6 +224,13 @@ function renderRawActionSource(step: FlowStep) {
     default:
       return undefined;
   }
+}
+
+function waitMilliseconds(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric))
+    return 1000;
+  return Math.max(0, Math.round(numeric));
 }
 
 function targetClickFallback(step: FlowStep) {
@@ -239,6 +251,7 @@ function rawAction(value: unknown) {
     url?: string;
     text?: string;
     value?: string;
+    timeout?: number;
     key?: string;
     options?: string[];
     files?: string[];

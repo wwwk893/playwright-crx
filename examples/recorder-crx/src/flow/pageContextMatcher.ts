@@ -66,6 +66,8 @@ function isCompatible(action: FlowActionType, eventKind: PageContextEvent['kind'
       return eventKind === 'change' || eventKind === 'click';
     case 'press':
       return eventKind === 'keydown';
+    case 'wait':
+      return false;
     case 'navigate':
       return eventKind === 'navigation' || eventKind === 'click';
     default:

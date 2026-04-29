@@ -55,6 +55,7 @@ type ActionFnName =
   | 'goto'
   | 'newPage'
   | 'press'
+  | 'waitForTimeout'
   | 'selectOption'
   | 'uncheck'
   | 'setInputFiles'
@@ -82,11 +83,30 @@ const fnActions: Record<Exclude<ActionFnName, AssertFnAction>, (...args: any[]) 
   'goto': url => ['navigate', { url }],
   'newPage': () => ['openPage'],
   'press': shortcut => ['press', parseShortcut(shortcut)],
+  'waitForTimeout': timeout => ['waitForTimeout', { timeout: normalizeWaitTimeout(timeout) }],
   'selectOption': options => ['select', { options: typeof options === 'string' ? [options] : options }],
   'uncheck': () => ['uncheck'],
   'setInputFiles': files => ['setInputFiles', { files: typeof files === 'string' ? [files] : files }],
   'routeFromHAR': (har, options) => ['routeFromHAR', { har, ...options }],
 };
+
+const pageLevelActions = new Set<ActionFnName>([
+  'close',
+  'goto',
+  'newPage',
+  'routeFromHAR',
+  'waitForTimeout',
+]);
+
+function actionNeedsLocator(actionFnName: ActionFnName) {
+  return !pageLevelActions.has(actionFnName);
+}
+
+function normalizeWaitTimeout(timeout: unknown) {
+  if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout < 0)
+    parserError('Invalid wait timeout');
+  return Math.round(timeout);
+}
 
 const variableCallRegex = /^([a-zA-Z_$][\w$]*)\./;
 
@@ -223,6 +243,7 @@ export function parse(code: string, file: string = 'playwright-test') {
       parserError('Invalid action expression', expr.loc);
 
     const actionFnName = expr.argument.callee.property.name as ActionFnName;
+    const needsLocator = actionNeedsLocator(actionFnName);
     let locator: string | undefined;
     let expectAction = false;
     let expectActionNegated = false;
@@ -238,7 +259,7 @@ export function parse(code: string, file: string = 'playwright-test') {
 
       if (variable) {
         pageAlias = variable;
-        if (!['goto', 'close', 'routeFromHAR'].includes(actionFnName))
+        if (needsLocator)
           locator = code.substring(expr.argument.callee.object.start + (variable.length + 1), expr.argument.callee.object.end);
 
       } else if (code.startsWith('expect(', expr.argument.start)) {
@@ -272,8 +293,10 @@ export function parse(code: string, file: string = 'playwright-test') {
     let action: Action;
     const args = expr.argument.arguments.map(argsParser);
 
+    if (!needsLocator)
+      locator = undefined;
     const selector = locator ? locatorOrSelectorAsSelector('javascript', locator, 'data-testid') : undefined;
-    if (selector === '')
+    if (needsLocator && selector === '')
       parserError('Invalid locator', expr.argument.callee.loc);
 
     if (expectAction) {

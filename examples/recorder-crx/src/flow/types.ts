@@ -47,6 +47,7 @@ export type FlowActionType =
   | 'check'
   | 'uncheck'
   | 'press'
+  | 'wait'
   | 'upload'
   | 'assert'
   | 'unknown';

@@ -232,6 +232,9 @@ export default class CrxPlayer extends EventEmitter {
       });
     }
 
+    if (action.name === 'waitForTimeout')
+      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.waitForTimeout(callMetadata, action.timeout));
+
     const selector = buildFullSelector(actionInContext.frame.framePath, action.selector);
 
     if (action.name === 'click') {

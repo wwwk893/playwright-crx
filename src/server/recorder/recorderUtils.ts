@@ -36,6 +36,12 @@ export function traceParamsForAction(actionInContext: recorderActions.ActionInCo
     case 'closePage': {
       return { method: 'close', params: {}, apiName: 'page.close' };
     }
+    case 'waitForTimeout': {
+      const params: channels.FrameWaitForTimeoutParams = {
+        timeout: action.timeout,
+      };
+      return { method: 'waitForTimeout', apiName: 'page.waitForTimeout', params };
+    }
   }
   const selector = buildFullSelector(actionInContext.frame.framePath, action.selector);
   switch (action.name) {

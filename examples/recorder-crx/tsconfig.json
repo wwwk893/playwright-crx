@@ -21,6 +21,8 @@
       "@protocol/*": ["../../playwright/packages/protocol/src/*"],
       "@web/*": ["../../playwright/packages/web/src/*"],
       "@recorder/*": ["../../playwright/packages/recorder/src/*"],
+      "playwright-core/lib/*": ["../../playwright/packages/playwright-core/src/*"],
+      "@playwright/test/lib/*": ["../../playwright/packages/playwright/src/*"],
     }
   },
   "include": ["src"],

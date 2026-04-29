@@ -24,6 +24,7 @@ export type ActionName =
   'navigate' |
   'openPage' |
   'press' |
+  'waitForTimeout' |
   'select' |
   'uncheck' |
   'setInputFiles' |
@@ -84,6 +85,11 @@ export type PressAction = ActionBase & {
   modifiers: number,
 };
 
+export type WaitForTimeoutAction = ActionBase & {
+  name: 'waitForTimeout',
+  timeout: number,
+};
+
 export type SelectAction = ActionWithSelector & {
   name: 'select',
   options: string[],
@@ -119,7 +125,7 @@ export type AssertSnapshotAction = ActionWithSelector & {
   snapshot: string,
 };
 
-export type Action = ClickAction | CheckAction | ClosesPageAction | OpenPageAction | UncheckAction | FillAction | NavigateAction | PressAction | SelectAction | SetInputFilesAction | AssertTextAction | AssertValueAction | AssertCheckedAction | AssertVisibleAction | AssertSnapshotAction;
+export type Action = ClickAction | CheckAction | ClosesPageAction | OpenPageAction | UncheckAction | FillAction | NavigateAction | PressAction | WaitForTimeoutAction | SelectAction | SetInputFilesAction | AssertTextAction | AssertValueAction | AssertCheckedAction | AssertVisibleAction | AssertSnapshotAction;
 export type AssertAction = AssertCheckedAction | AssertValueAction | AssertTextAction | AssertVisibleAction | AssertSnapshotAction;
 export type PerformOnRecordAction = ClickAction | CheckAction | UncheckAction | PressAction | SelectAction;
 

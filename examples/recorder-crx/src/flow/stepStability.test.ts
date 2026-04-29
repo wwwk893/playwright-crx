@@ -7,7 +7,7 @@
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
-import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { createRepeatSegment } from './repeatSegments';
 import type { PageContextEvent, ElementContext } from './pageContextTypes';
 import type { BusinessFlow } from './types';
@@ -81,6 +81,22 @@ const tests: TestCase[] = [
       const manual = inserted.steps.find(step => step.id === 's004');
       assertEqual(manual?.kind, 'manual');
       assertEqual(manual?.sourceActionIds, []);
+    },
+  },
+  {
+    name: 'manual wait insert emits runnable timeout code without renumbering existing steps',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('新建'),
+        clickAction('确定'),
+      ], [], {});
+      const inserted = insertWaitStepAfter(initial, 's001', 2500);
+      const code = generateBusinessFlowPlaywrightCode(inserted);
+
+      assertEqual(inserted.steps.map(step => step.id), ['s001', 's003', 's002']);
+      assertEqual(inserted.steps[1].action, 'wait');
+      assertEqual(inserted.steps[1].value, '2500');
+      assert(code.includes('await page.waitForTimeout(2500);'), 'wait step should emit a runnable timeout');
     },
   },
   {

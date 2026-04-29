@@ -1315,6 +1315,7 @@
   position: relative;
   margin: -2px 0;
   padding: 8px 0 8px;
+  scroll-margin: 80px 0;
 }
 
 .timeline-insert-marker {
@@ -1753,6 +1754,56 @@
   background: #f8fbff;
 }
 
+.runtime-log-panel {
+  margin-bottom: 12px;
+}
+
+.runtime-log-row {
+  margin: 0 0 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.runtime-log-row.warn {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.runtime-log-row summary {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.runtime-log-row summary strong {
+  overflow: hidden;
+  color: #1f2937;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-log-row summary em {
+  color: #6b7280;
+  font-style: normal;
+}
+
+.runtime-log-row pre {
+  margin: 0;
+  border-top: 1px solid #eef2f7;
+  padding: 8px 10px;
+  overflow: auto;
+  color: #374151;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+}
+
 .diagnostic-dev-panel > summary {
   display: flex;
   align-items: center;
@@ -2058,6 +2109,7 @@
 }
 
 .review-insert-actions .primary {
+  grid-column: 1 / -1;
   border-color: #1677ff;
   background: #1677ff;
   color: #fff;
@@ -2568,6 +2620,92 @@
 
 .repeat-data-table input {
   min-height: 32px;
+}
+
+.scroll-jump-dock {
+  position: fixed;
+  right: 18px;
+  top: 50%;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 38px;
+  padding: 7px 4px;
+  border: 1px solid rgba(22, 119, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.68);
+  backdrop-filter: blur(10px);
+  transform: translateY(-50%);
+}
+
+.scroll-jump-dock button {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #1677ff;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.scroll-jump-dock button:hover {
+  background: #eef6ff;
+  color: #0958d9;
+  transform: translateY(-1px);
+}
+
+.scroll-jump-dock button:active {
+  transform: translateY(0);
+}
+
+.scroll-jump-dock svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.scroll-jump-dock button::after {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  content: attr(data-tooltip);
+  min-width: 58px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(17, 24, 39, 0.88);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.scroll-jump-dock button:hover::after,
+.scroll-jump-dock button:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.scroll-jump-divider {
+  width: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #c7d7ee, transparent);
 }
 
 @media (max-width: 420px) {

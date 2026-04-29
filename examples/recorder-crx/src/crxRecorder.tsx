@@ -40,7 +40,7 @@ import { clearAiUsageRecords, loadAiApiKey, loadAiIntentSettings, loadAiProvider
 import { usageRecordsToJsonl } from './aiIntent/usage';
 import type { AiIntentSettings, AiProviderProfile, AiUsageRecord } from './aiIntent/types';
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './flow/codePreview';
-import { appendSyntheticPageContextStepsWithResult, createAssertion, deleteStepFromFlow, insertEmptyStepAfter, mergeActionsIntoFlow, nextAssertionId, normalizeFlowStepIds, type MergeDiagnosticEvent } from './flow/flowBuilder';
+import { appendSyntheticPageContextStepsWithResult, createAssertion, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow, nextAssertionId, normalizeFlowStepIds, type MergeDiagnosticEvent } from './flow/flowBuilder';
 import { mergePageContextIntoFlow, normalizeIntentSources } from './flow/flowContextMerger';
 import { deleteRepeatSegment, upsertRepeatSegment } from './flow/repeatSegments';
 import { toCompactFlow } from './flow/compactExporter';
@@ -321,6 +321,23 @@ function cloneDiagnosticData(data?: Record<string, unknown>) {
   }
 }
 
+function runtimeDispatchDiagnostic(data: any): MergeDiagnosticEvent | undefined {
+  const event = data?.event;
+  if (!['resume', 'step', 'pause', 'businessFlowCodeChanged'].includes(event))
+    return undefined;
+  const code = typeof data?.params?.code === 'string' ? data.params.code : undefined;
+  return {
+    type: `runtime.ui-dispatch.${event}`,
+    message: event === 'businessFlowCodeChanged' ? 'Side panel 已发送业务流程 Playwright 代码' : `Side panel 已发送 ${event} 运行事件`,
+    data: {
+      event,
+      codeLength: code?.length ?? 0,
+      lineCount: code ? code.split(/\r?\n/).length : 0,
+      containsWaitForTimeout: code?.includes('waitForTimeout') ?? false,
+    },
+  };
+}
+
 function pageContextEventLabel(event: PageContextEvent) {
   const target = event.before.target;
   return [event.kind, target?.testId || target?.text || target?.ariaLabel || target?.placeholder || event.before.dialog?.title].filter(Boolean).join(' · ');
@@ -520,6 +537,14 @@ export const CrxRecorder: React.FC = ({
           }
           return newLog;
         }); break;
+        case 'runtimeEvent':
+          appendDiagnosticLog({
+            type: msg.event?.type ?? 'runtime.event',
+            level: msg.event?.level,
+            message: msg.event?.message ?? 'Playwright runtime event',
+            data: msg.event?.data,
+          });
+          break;
         case 'setRunningFile': setRunningFileId(msg.file); break;
         case 'elementPicked': {
           const pendingPick = pendingAssertionPickRef.current;
@@ -537,6 +562,9 @@ export const CrxRecorder: React.FC = ({
     port.onMessage.addListener(onMessage);
 
     window.dispatch = async (data: any) => {
+      const runtimeEvent = runtimeDispatchDiagnostic(data);
+      if (runtimeEvent)
+        appendDiagnosticLog(runtimeEvent);
       port.postMessage({ type: 'recorderEvent', ...data });
       if (data.event === 'fileChanged')
         setSelectedFileId(data.params.file);
@@ -1188,6 +1216,26 @@ export const CrxRecorder: React.FC = ({
     });
   }, [appendDiagnosticLog]);
 
+  const insertWaitStep = React.useCallback((afterStepId: string, milliseconds: number) => {
+    setFlowDraft(flow => {
+      const next = insertWaitStepAfter(flow, afterStepId, milliseconds);
+      const insertedStep = next.steps.find(step => !flow.steps.some(previous => previous.id === step.id));
+      appendDiagnosticLog({
+        type: 'ui.step-insert-wait',
+        message: insertedStep ? `在 ${afterStepId} 后插入等待步骤 ${insertedStep.id}` : `尝试在 ${afterStepId} 后插入等待步骤`,
+        data: {
+          afterStepId,
+          insertedStepId: insertedStep?.id,
+          waitMilliseconds: milliseconds,
+          beforeStepCount: flow.steps.length,
+          afterStepCount: next.steps.length,
+          order: insertedStep?.order,
+        },
+      });
+      return next;
+    });
+  }, [appendDiagnosticLog]);
+
   const addAssertion = React.useCallback((stepId: string, type: FlowAssertionType, patch: Partial<FlowAssertion> = {}) => {
     setFlowDraft(flow => {
       const assertionId = nextAssertionId(flow);
@@ -1484,6 +1532,7 @@ export const CrxRecorder: React.FC = ({
   const insertAnchorStep = insertRecordingAfterStepId ? flowDraft.steps.find(step => step.id === insertRecordingAfterStepId) : undefined;
   const insertAnchorIndex = insertAnchorStep ? flowDraft.steps.indexOf(insertAnchorStep) : -1;
   const insertNextStep = insertAnchorIndex >= 0 ? flowDraft.steps[insertAnchorIndex + 1] : undefined;
+  const runtimeLogs = React.useMemo(() => diagnosticLogs.filter(log => log.type.startsWith('runtime.')).slice(-80), [diagnosticLogs]);
 
   return <>
     <ModalContainer />
@@ -1684,6 +1733,7 @@ export const CrxRecorder: React.FC = ({
               onContinueRecording={continueRecording}
               onContinueRecordingFrom={continueRecordingFrom}
               onInsertEmptyStep={insertEmptyStep}
+              onInsertWaitStep={insertWaitStep}
               onSaveRecord={() => {
                 saveCurrentRecord().then(saved => {
                   if (saved)
@@ -1707,6 +1757,21 @@ export const CrxRecorder: React.FC = ({
               <Recorder sources={generatedBusinessSources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
             </div>}
             {activeTab === 'log' && <div className='run-log-panel'>
+              <section className='runtime-log-panel'>
+                <div className='section-heading row'>
+                  <span>Playwright 运行事件</span>
+                  <span className='review-inline-note'>{runtimeLogs.length ? `${runtimeLogs.length} 条` : '暂无事件'}</span>
+                </div>
+                {runtimeLogs.length === 0 && <div className='business-flow-empty compact'>点击 Play 后，这里会显示代码解析、action 数量、开始/结束和报错信息。</div>}
+                {runtimeLogs.slice().reverse().map(entry => <details className={`runtime-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id} open={entry.level === 'warn'}>
+                  <summary>
+                    <span>{new Date(entry.time).toLocaleTimeString()}</span>
+                    <strong>{entry.message}</strong>
+                    <em>{entry.type}</em>
+                  </summary>
+                  {entry.data && <pre>{formatDiagnosticData(entry.data)}</pre>}
+                </details>)}
+              </section>
               <details className='diagnostic-dev-panel'>
                 <summary>
                   <div>

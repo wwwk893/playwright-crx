@@ -338,6 +338,20 @@ node tools/flow-runner/cli.mjs run tools/flow-runner/fixtures/sample.business-fl
 - 刷新后草稿恢复。
 - 脱敏效果。
 
+### CRX 构建与本地扩展重载注意点
+
+修改 parser / codegen / player / recorder action 类型，或任何会进入 `playwright-crx` 根包的 server/client 代码时，不能只构建 `examples/recorder-crx`。测试与示例扩展可能同时依赖 root `lib/` 和 example `dist/`，必须按顺序验证：
+
+```bash
+npm run build:crx
+npm run build:examples:recorder
+npm run build:tests
+```
+
+若只改 `src/` 或 `playwright/packages/**` 后直接跑 `examples/recorder-crx` 测试，可能出现源码已修但测试仍使用旧 `lib` / 旧 codegen 产物的假失败。
+
+本地 Chrome 中已加载的 unpacked extension 不会自动吃到新 `examples/recorder-crx/dist`，手工验证前必须在扩展管理页重新加载扩展，或重启测试环境。
+
 ---
 
 ## 14. 交付格式

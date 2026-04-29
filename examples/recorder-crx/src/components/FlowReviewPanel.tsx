@@ -18,6 +18,7 @@ import { actionLabel, flowStats, summarizeStepSubject } from '../flow/display';
 import { createRepeatSegment, repeatSegmentStats } from '../flow/repeatSegments';
 import type { BusinessFlow, FlowRepeatSegment } from '../flow/types';
 import { RepeatSegmentEditor } from './RepeatSegmentEditor';
+import { ScrollJumpDock } from './ScrollJumpDock';
 
 export const FlowReviewPanel: React.FC<{
   flow: BusinessFlow;
@@ -28,13 +29,14 @@ export const FlowReviewPanel: React.FC<{
   onContinueRecording: () => void;
   onContinueRecordingFrom: (afterStepId: string) => void;
   onInsertEmptyStep: (afterStepId: string) => void;
+  onInsertWaitStep: (afterStepId: string, milliseconds: number) => void;
   onSaveRecord: () => void;
   onClearSteps: () => void;
   onExportJson: () => void;
   onExportYaml: () => void;
   onSaveRepeatSegment: (segment: FlowRepeatSegment) => void;
   onDeleteRepeatSegment: (segmentId: string) => void;
-}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
+}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
   const stats = flowStats(flow);
   const repeatStats = repeatSegmentStats(flow);
   const [activeInsertStepId, setActiveInsertStepId] = React.useState<string>();
@@ -66,6 +68,19 @@ export const FlowReviewPanel: React.FC<{
     onInsertEmptyStep(stepId);
     setActiveInsertStepId(undefined);
   }, [onInsertEmptyStep]);
+
+  const insertWait = React.useCallback((stepId: string) => {
+    const secondsText = window.prompt('等待几秒后继续执行？', '2');
+    if (secondsText === null)
+      return;
+    const seconds = Number(secondsText);
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      window.alert('请输入大于等于 0 的秒数。');
+      return;
+    }
+    onInsertWaitStep(stepId, Math.round(seconds * 1000));
+    setActiveInsertStepId(undefined);
+  }, [onInsertWaitStep]);
 
   const toggleRepeatStep = React.useCallback((stepId: string) => {
     setSelectedRepeatStepIds(stepIds => {
@@ -109,6 +124,7 @@ export const FlowReviewPanel: React.FC<{
   }
 
   return <div className='review-panel'>
+    <ScrollJumpDock />
     <div className='review-toolbar'>
       <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
       <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
@@ -182,6 +198,7 @@ export const FlowReviewPanel: React.FC<{
               <div>在当前位置与下一步之间插入新操作</div>
               <div className='review-insert-actions'>
                 <button type='button' className='primary' onClick={() => insertFrom(step.id)}>从这里继续录制</button>
+                <button type='button' onClick={() => insertWait(step.id)}>插入等待</button>
                 <button type='button' onClick={() => insertEmpty(step.id)}>插入空步骤</button>
               </div>
             </div>}

@@ -23,6 +23,7 @@ export const actionLabel: Record<FlowActionType, string> = {
   check: '勾选',
   uncheck: '取消勾选',
   press: '按键',
+  wait: '等待',
   upload: '上传',
   assert: '断言',
   unknown: '未识别',
@@ -66,12 +67,22 @@ export function summarizeTarget(target?: FlowTarget) {
 }
 
 export function summarizeStepSubject(step: FlowStep) {
+  if (step.action === 'wait')
+    return `等待 ${formatWaitSeconds(step.value)} 秒`;
   if (step.url)
     return step.url;
   const target = summarizeTarget(step.target);
   if (step.value)
     return `${target}（值：${step.value}）`;
   return target;
+}
+
+function formatWaitSeconds(value?: string) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0)
+    return '0';
+  const seconds = milliseconds / 1000;
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1).replace(/\.0$/, '');
 }
 
 export function summarizeAssertion(assertion: FlowAssertion) {

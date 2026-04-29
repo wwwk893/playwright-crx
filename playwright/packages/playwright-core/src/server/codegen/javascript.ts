@@ -106,6 +106,8 @@ export class JavaScriptLanguageGenerator implements LanguageGenerator {
       }
       case 'navigate':
         return `await ${subject}.goto(${quote(action.url)});`;
+      case 'waitForTimeout':
+        return `await ${actionInContext.frame.pageAlias}.waitForTimeout(${action.timeout});`;
       case 'select':
         return `await ${subject}.${this._asLocator(action.selector)}.selectOption(${formatObject(action.options.length === 1 ? action.options[0] : action.options)});`;
       case 'assertText':

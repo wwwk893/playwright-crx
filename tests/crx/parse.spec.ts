@@ -89,6 +89,21 @@ test('test', async ({ page }) => {
   ]);
 });
 
+test('should parse waitForTimeout without locator', async ({ testParse }) => {
+  const code = `import { test, expect } from '@playwright/test';
+
+test('test', async ({ page }) => {
+  await page.waitForTimeout(3000);
+  await page.getByTestId('save').click();
+});`;
+  const { actions } = await testParse(code);
+  expect(actions).toMatchObject([
+    { name: 'openPage' },
+    { name: 'waitForTimeout', timeout: 3000 },
+    { name: 'click', selector: 'internal:testid=[data-testid="save"s]' },
+  ]);
+});
+
 test('should not parse incorrect code', async ({ testParse }) => {
   const code = `import { test, expect } from '@playwright/test';
 

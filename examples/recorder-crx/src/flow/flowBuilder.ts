@@ -19,6 +19,7 @@ type ActionLike = {
   url?: string;
   text?: string;
   value?: string;
+  timeout?: number;
   key?: string;
   options?: string[];
   files?: string[];
@@ -165,6 +166,32 @@ export function insertEmptyStepAfter(flow: BusinessFlow, afterStepId: string): B
     comment: '插入的空步骤',
     assertions: [],
     target: { label: '待补充操作' },
+  };
+  const insertAt = Math.max(0, base.steps.findIndex(candidate => candidate.id === afterStepId) + 1);
+  const steps = [...base.steps];
+  steps.splice(insertAt, 0, step);
+  return withRecorderState({
+    ...base,
+    steps: recomputeOrders(steps),
+    updatedAt: new Date().toISOString(),
+  }, recorder);
+}
+
+export function insertWaitStepAfter(flow: BusinessFlow, afterStepId: string, milliseconds: number): BusinessFlow {
+  const base = migrateFlowToStableStepModel(flow);
+  const recorder = cloneRecorderState(base);
+  const waitMilliseconds = normalizeWaitMilliseconds(milliseconds);
+  const step: FlowStep = {
+    id: nextStableStepId(recorder),
+    order: 0,
+    kind: 'manual',
+    sourceActionIds: [],
+    action: 'wait',
+    intent: `等待 ${formatWaitSeconds(waitMilliseconds)} 秒`,
+    comment: '等待页面状态稳定后继续执行。',
+    value: String(waitMilliseconds),
+    assertions: [],
+    sourceCode: `await page.waitForTimeout(${waitMilliseconds});`,
   };
   const insertAt = Math.max(0, base.steps.findIndex(candidate => candidate.id === afterStepId) + 1);
   const steps = [...base.steps];
@@ -803,6 +830,9 @@ function mapActionType(name?: string): FlowActionType {
       return 'uncheck';
     case 'press':
       return 'press';
+    case 'wait':
+    case 'waitForTimeout':
+      return 'wait';
     case 'setInputFiles':
       return 'upload';
     default:
@@ -876,6 +906,8 @@ function extractValue(action: ActionLike) {
   const value = readString(action.value);
   if (value !== undefined)
     return value;
+  if (typeof action.timeout === 'number')
+    return String(action.timeout);
   const key = readString(action.key);
   if (key !== undefined)
     return key;
@@ -905,6 +937,9 @@ function defaultAssertions(action: ActionLike, assertionIndex: number, target?: 
       return url ? [assertion(id, 'urlMatches', undefined, url, false)] : [];
     case 'fill':
       return value ? [assertion(id, 'valueEquals', target, value, false)] : [];
+    case 'wait':
+    case 'waitForTimeout':
+      return [];
     default:
       return [];
   }
@@ -1040,6 +1075,7 @@ function actionSignature(rawAction: unknown) {
       url: action.url,
       text: action.text,
       value: action.value,
+      timeout: action.timeout,
       key: action.key,
       options: action.options,
       files: action.files,
@@ -1097,6 +1133,8 @@ function sourceCodeMatchesAction(sourceCode: string | undefined, action: ActionL
     return false;
   if (action.name === 'press' && !/\.press\(/.test(sourceCode))
     return false;
+  if ((action.name === 'wait' || action.name === 'waitForTimeout') && !/\.waitForTimeout\(/.test(sourceCode))
+    return false;
   if ((action.name === 'select' || action.name === 'selectOption') && !/\.selectOption\(/.test(sourceCode))
     return false;
 
@@ -1131,6 +1169,9 @@ function renderActionSource(action: ActionLike) {
       return action.selector ? `await ${locatorExpression(action.selector)}.fill(${stringLiteral(extractValue(action) ?? '')});` : undefined;
     case 'press':
       return action.selector ? `await ${locatorExpression(action.selector)}.press(${stringLiteral(action.key ?? '')});` : undefined;
+    case 'wait':
+    case 'waitForTimeout':
+      return `await page.waitForTimeout(${normalizeWaitMilliseconds(Number(extractValue(action) ?? action.value ?? action.text))});`;
     case 'check':
       return action.selector ? `await ${locatorExpression(action.selector)}.check();` : undefined;
     case 'uncheck':
@@ -1143,6 +1184,17 @@ function renderActionSource(action: ActionLike) {
     default:
       return undefined;
   }
+}
+
+function normalizeWaitMilliseconds(value: number) {
+  if (!Number.isFinite(value))
+    return 1000;
+  return Math.max(0, Math.round(value));
+}
+
+function formatWaitSeconds(milliseconds: number) {
+  const seconds = milliseconds / 1000;
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1).replace(/\.0$/, '');
 }
 
 function locatorExpression(selector: string) {

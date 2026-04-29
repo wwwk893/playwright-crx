@@ -33,12 +33,20 @@ import { monotonicTime } from 'playwright-core/lib/utils';
 export type RecorderMessage = { type: 'recorder' } & (
   | { method: 'resetCallLogs' }
   | { method: 'updateCallLogs', callLogs: CallLog[] }
+  | { method: 'runtimeEvent', event: RecorderRuntimeEvent }
   | { method: 'setPaused', paused: boolean }
   | { method: 'setMode', mode: Mode }
   | { method: 'setSources', sources: Source[] }
   | { method: 'setActions', actions: ActionInContext[], sources: Source[] }
   | { method: 'elementPicked', elementInfo: ElementInfo, userGesture?: boolean }
 );
+
+export type RecorderRuntimeEvent = {
+  type: string;
+  message: string;
+  level?: 'info' | 'warn';
+  data?: Record<string, unknown>;
+};
 
 export type RecorderEventData =  (EventData | { event: 'resetCallLogs' | 'codeChanged' | 'businessFlowCodeChanged' | 'cursorActivity', params: any }) & { type: string };
 
@@ -77,11 +85,13 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
     this._recorder = recorder;
     this._crx.player.on('start', () => {
       this._playbackRunning = true;
+      this._sendRuntimeEvent('runtime.playback-start', 'Playwright 回放开始');
       this._recorder.clearErrors();
       this.resetCallLogs().catch(() => {});
     });
     this._crx.player.on('stop', () => {
       this._playbackRunning = false;
+      this._sendRuntimeEvent('runtime.playback-stop', 'Playwright 回放结束');
     });
   }
 
@@ -250,6 +260,10 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
           break;
         case 'businessFlowCodeChanged':
           this._updateCode(params.code, false);
+          this._sendRuntimeEvent('runtime.code-received', '收到业务流程 Playwright 代码', {
+            codeLength: typeof params.code === 'string' ? params.code.length : 0,
+            lineCount: typeof params.code === 'string' ? params.code.split(/\r?\n/).length : 0,
+          });
           break;
         case 'cursorActivity':
           this._currentCursorPosition = params.position;
@@ -257,7 +271,15 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
           break;
         case 'resume':
         case 'step':
-          this._run().catch(() => {});
+          this._sendRuntimeEvent('runtime.playback-request', event === 'step' ? '请求单步执行 Playwright 代码' : '请求运行 Playwright 代码', {
+            event,
+            filename: this._filename,
+            playerAlreadyRunning: this._crx.player.isPlaying(),
+          });
+          this._run().catch(error => this._sendRuntimeEvent('runtime.playback-error', 'Playwright 回放启动失败', {
+            message: error?.message ?? String(error),
+            stack: error?.stack,
+          }, 'warn'));
           break;
         case 'setMode':
           const { mode } = params;
@@ -273,19 +295,45 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
   }
 
   async _run() {
-    if (this._crx.player.isPlaying())
+    if (this._crx.player.isPlaying()) {
+      this._sendRuntimeEvent('runtime.playback-skip', 'Playwright 正在回放，本次运行请求已忽略', undefined, 'warn');
       return;
+    }
     const incognito = this._playInIncognito;
     if (incognito) {
       const incognitoCrxApp = await this._crx.get({ incognito });
       await incognitoCrxApp?.close({ closeWindows: true });
     }
     const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito }, serverSideCallMetadata());
-    await this._crx.player.run(crxApp._context, this._getActions());
+    const actions = this._getActions();
+    this._sendRuntimeEvent('runtime.playback-actions', actions.length ? `准备执行 ${actions.length} 个 Playwright action` : '没有可执行的 Playwright action', {
+      actionCount: actions.length,
+      filename: this._filename,
+      editedCodeLoaded: this._editedCode?.hasLoaded(),
+      editedCodeHasErrors: this._editedCode?.hasErrors(),
+      editedCodeError: this._editedCode?.loadError(),
+      actions: actions.map(actionSummary),
+    }, actions.length ? 'info' : 'warn');
+    if (!actions.length)
+      return;
+    await this._crx.player.run(crxApp._context, actions);
   }
 
   _sendMessage(msg: RecorderMessage) {
     return this._window?.postMessage(msg);
+  }
+
+  private _sendRuntimeEvent(type: string, message: string, data?: Record<string, unknown>, level: RecorderRuntimeEvent['level'] = 'info') {
+    this._sendMessage({
+      type: 'recorder',
+      method: 'runtimeEvent',
+      event: {
+        type,
+        message,
+        level,
+        data,
+      },
+    });
   }
 
   async uninstall(page: Page) {
@@ -330,6 +378,25 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
   }
 }
 
+function actionSummary(actionInContext: ActionInContextWithLocation, index: number) {
+  const action = actionInContext.action as ActionWithSelector & {
+    name?: string;
+    url?: string;
+    text?: string;
+    value?: string;
+    key?: string;
+    timeout?: number;
+  };
+  return {
+    index: index + 1,
+    name: action.name,
+    selector: action.selector,
+    url: action.url,
+    value: action.timeout ?? action.text ?? action.value ?? action.key,
+    line: actionInContext.location?.line,
+  };
+}
+
 class EditedCode {
   readonly code: string;
   private _recorder: Recorder;
@@ -338,6 +405,7 @@ class EditedCode {
   private _codeLoadDebounceTimeout: NodeJS.Timeout | undefined;
   private _onLoaded?: () => any;
   private _syncRecorder: boolean;
+  private _lastError?: { message: string; line?: number };
 
   constructor(recorder: Recorder, code: string, onLoaded?: () => any, syncRecorder = true) {
     this.code = code;
@@ -357,6 +425,10 @@ class EditedCode {
 
   hasLoaded() {
     return !this._codeLoadDebounceTimeout;
+  }
+
+  loadError() {
+    return this._lastError;
   }
 
   syncRecorder() {
@@ -387,6 +459,7 @@ class EditedCode {
     try {
       const [{ actions, options }] = parse(this.code);
       this._actions = actions;
+      this._lastError = undefined;
       const { deviceName, contextOptions } = { deviceName: '', contextOptions: {}, ...options };
       if (this._syncRecorder)
         this._recorder.loadScript({ actions, deviceName, contextOptions: contextOptions as LanguageGeneratorOptions['contextOptions'], text: this.code });
@@ -394,6 +467,7 @@ class EditedCode {
       this._actions = [];
       // syntax error / parsing error
       const line = error.loc.line ?? error.loc.start.line ?? this.code.split('\n').length;
+      this._lastError = { message: error.message, line };
       this._highlight = [{ line, type: 'error', message: error.message }];
       if (this._syncRecorder)
         this._recorder.loadScript({ actions: this._actions, deviceName: '', contextOptions: {}, text: this.code, highlight: this._highlight });

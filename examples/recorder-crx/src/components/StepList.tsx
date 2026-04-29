@@ -18,6 +18,7 @@ import type { AssertionEditorSuggestion, AssertionPickedTarget } from './Asserti
 import { StepEditor } from './StepEditor';
 import { summarizeTarget } from '../flow/display';
 import type { FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowStep } from '../flow/types';
+import { ScrollJumpDock } from './ScrollJumpDock';
 
 export const StepList: React.FC<{
   steps: FlowStep[];
@@ -34,7 +35,18 @@ export const StepList: React.FC<{
   insertRecordingAfterStepId?: string;
   aiPendingStepIds?: Set<string>;
 }> = ({ steps, editingAssertionStepId, onUpdateStep, onBeginAddAssertion, onCancelAddAssertion, onSaveAssertion, onDeleteStep, onRegenerateIntent, onPickAssertionTarget, pickedTarget, pickingStepId, insertRecordingAfterStepId, aiPendingStepIds }) => {
+  const insertSlotRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!insertRecordingAfterStepId || !insertSlotRef.current)
+      return;
+    window.requestAnimationFrame(() => {
+      insertSlotRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }, [insertRecordingAfterStepId]);
+
   return <section className='step-timeline-section'>
+    <ScrollJumpDock />
     <div className='section-heading'>步骤时间线</div>
     {steps.length === 0 && <div className='business-flow-empty'>还没有录制到操作。填写流程信息后点击“开始录制”。</div>}
     <div className='flow-step-list' role='list'>
@@ -55,7 +67,7 @@ export const StepList: React.FC<{
             isPickingTarget={pickingStepId === step.id}
             isAiPending={aiPendingStepIds?.has(step.id)}
           />
-          {insertRecordingAfterStepId === step.id && <div className='timeline-insert-recording-slot'>
+          {insertRecordingAfterStepId === step.id && <div className='timeline-insert-recording-slot' ref={insertSlotRef}>
             <div className='timeline-insert-marker'></div>
             <div className='timeline-insert-card'>
               <div>
