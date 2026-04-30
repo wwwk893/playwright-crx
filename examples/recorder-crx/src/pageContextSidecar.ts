@@ -38,7 +38,9 @@ const antdActionSelectors = [
   '.ant-checkbox',
   '[role="checkbox"]',
   '.ant-radio-wrapper',
+  '.ant-radio-button-wrapper',
   '.ant-radio',
+  '.ant-radio-button',
   '[role="radio"]',
   '.ant-switch',
   '[role="switch"]',
@@ -246,6 +248,12 @@ function anchorScore(element: Element, original: Element) {
     score += 450;
   if (className.includes('ant-select-selector'))
     score += 420;
+  if (className.includes('ant-radio-button-wrapper'))
+    score += 520;
+  if (className.includes('ant-checkbox-wrapper') || className.includes('ant-radio-wrapper'))
+    score += 500;
+  if (className.includes('ant-radio-button-input') || className.includes('ant-checkbox-input'))
+    score -= 260;
   if (className.includes('ant-select-item-option') || role === 'option')
     score += 420;
   if (className.includes('ant-dropdown-menu-item') || className.includes('ant-menu-item') || role === 'menuitem')
@@ -256,7 +264,7 @@ function anchorScore(element: Element, original: Element) {
     score += 360;
   if (className.includes('ant-checkbox') || role === 'checkbox')
     score += 350;
-  if (className.includes('ant-radio') || role === 'radio')
+  if (className.includes('ant-radio-button') || className.includes('ant-radio') || role === 'radio')
     score += 350;
   if (className.includes('ant-picker'))
     score += 340;
@@ -384,9 +392,10 @@ function tableContainerTestId(element?: Element) {
 }
 
 function collectForm(target: Element, anchor = actionAnchorForElement(target)) {
-  const item = closestWithin(anchor, '.ant-form-item, .ant-pro-form-group, .ant-pro-form-list, [role="group"], label') ??
-    closestWithin(target, '.ant-form-item, .ant-pro-form-group, .ant-pro-form-list, [role="group"], label');
-  const label = item ? textFromFirst('.ant-form-item-label label, label', item) || labelFromAria(anchor) || labelFromPlaceholder(anchor) : labelFromAria(anchor) || labelFromPlaceholder(anchor);
+  const item = closestWithin(anchor, '.ant-form-item, .ant-pro-form-group, .ant-pro-form-list, [role="group"]') ??
+    closestWithin(target, '.ant-form-item, .ant-pro-form-group, .ant-pro-form-list, [role="group"]') ??
+    closestWithin(anchor, 'label') ?? closestWithin(target, 'label');
+  const label = item ? formItemLabel(item, anchor) || labelFromAria(anchor) || labelFromPlaceholder(anchor) : labelFromAria(anchor) || labelFromPlaceholder(anchor);
   const nameInfo = formControlNameInfo(anchor);
   return compactObject({
     title: titleFromAncestor(anchor, 'form, .ant-form, .ant-pro-form, fieldset'),
@@ -398,6 +407,20 @@ function collectForm(target: Element, anchor = actionAnchorForElement(target)) {
     id: formControlId(anchor),
     required: !!closestWithin(anchor, '.ant-form-item-required, [aria-required="true"], [required]'),
   });
+}
+
+function formItemLabel(item: Element, anchor: Element) {
+  const explicit = textFromFirst('.ant-form-item-label label, label', item);
+  if (explicit)
+    return explicit;
+  if (item.tagName.toLowerCase() === 'label') {
+    const labelText = elementText(item);
+    const anchorText = elementText(anchor);
+    if (labelText && labelText !== anchorText)
+      return labelText;
+    return labelText || anchorText;
+  }
+  return undefined;
 }
 
 function rememberDropdownContext(context: Omit<ActiveDropdownContext, 'id' | 'time'>) {
@@ -839,6 +862,10 @@ function controlTypeForElement(element: Element): string {
     return 'link';
   if (tag === 'textarea')
     return 'textarea';
+  if (className.includes('ant-checkbox') || role === 'checkbox')
+    return 'checkbox';
+  if (className.includes('ant-radio-button') || className.includes('ant-radio') || role === 'radio')
+    return 'radio';
   if (tag === 'input')
     return 'input';
   if (className.includes('ant-cascader-picker'))
@@ -857,7 +884,7 @@ function controlTypeForElement(element: Element): string {
     return 'menu-item';
   if (className.includes('ant-checkbox') || role === 'checkbox')
     return 'checkbox';
-  if (className.includes('ant-radio') || role === 'radio')
+  if (className.includes('ant-radio-button') || className.includes('ant-radio') || role === 'radio')
     return 'radio';
   if (className.includes('ant-switch') || role === 'switch')
     return 'switch';

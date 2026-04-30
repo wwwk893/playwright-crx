@@ -30,7 +30,7 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
     if (!event)
       return normalizedStep;
     usedEventIds.add(event.id);
-    if (shouldIgnoreMismatchedDropdownOptionContext(normalizedStep, event))
+    if (shouldIgnoreMismatchedDropdownOptionContext(normalizedStep, event) || shouldIgnoreMismatchedChoiceControlContext(normalizedStep, event))
       return normalizedStep;
 
     const actionIndex = actionIndexForStep(flow, normalizedStep.id);
@@ -112,10 +112,11 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
   const hasBetterRole = !target.role && contextTarget.role;
   const hasBetterText = !target.text && contextTarget.text;
   const hasBetterPlaceholder = !target.placeholder && contextTarget.placeholder;
+  const hasBetterLabel = !target.label && contextScope?.form?.label;
   const hasBetterScope = !!contextScope && !target.scope;
   const hasBetterLocatorHint = !!locatorHint && !target.locatorHint;
 
-  if (!hasBetterTestId && !hasBetterDisplayName && !hasBetterRole && !hasBetterText && !hasBetterPlaceholder && !hasBetterScope && !hasBetterLocatorHint)
+  if (!hasBetterTestId && !hasBetterDisplayName && !hasBetterRole && !hasBetterText && !hasBetterPlaceholder && !hasBetterLabel && !hasBetterScope && !hasBetterLocatorHint)
     return target;
 
   return {
@@ -125,6 +126,7 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
     name: target.name || contextTarget.ariaLabel || contextTarget.text || contextTarget.title,
     displayName: target.displayName || contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId,
     text: target.text || contextTarget.text,
+    label: target.label || contextScope?.form?.label,
     placeholder: target.placeholder || contextTarget.placeholder,
     scope: target.scope || contextScope,
     locatorHint: target.locatorHint || locatorHint,
@@ -140,7 +142,8 @@ function flowTargetFromElementContext(contextTarget: ElementContext, scope?: Flo
     testId: contextTarget.testId,
     role: contextTarget.role,
     name: contextTarget.ariaLabel || contextTarget.text || contextTarget.title,
-    displayName: contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId,
+    displayName: contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || scope?.form?.label,
+    label: scope?.form?.label,
     placeholder: contextTarget.placeholder,
     text: contextTarget.text,
     scope,
@@ -220,6 +223,17 @@ function shouldIgnoreMismatchedDropdownOptionContext(step: FlowStep, event: Page
   if (recorderSelector && /internal:testid=/.test(recorderSelector) && !contextTarget.testId)
     return true;
   return false;
+}
+
+function shouldIgnoreMismatchedChoiceControlContext(step: FlowStep, event: PageContextEvent) {
+  if (step.action !== 'check' && step.action !== 'uncheck')
+    return false;
+  const contextTarget = event.before.target;
+  if (!contextTarget)
+    return false;
+  const contextLooksChoice = /^(checkbox|radio|switch)$/.test(contextTarget.controlType || '') ||
+    /^(checkbox|radio|switch)$/.test(contextTarget.role || '');
+  return !contextLooksChoice;
 }
 
 function stepLooksLikeDropdownOption(step: FlowStep) {

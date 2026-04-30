@@ -564,6 +564,8 @@ function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: Page
     return true;
   if (isDropdownOptionContext(event.before.target))
     return false;
+  if (isFormLabeledChoiceContext(event))
+    return false;
   if (diff < 800 && isWeakPageContextClickTarget(event.before.target))
     return true;
   return diff < 400 && !target?.testId && !event.before.target?.testId;
@@ -572,6 +574,14 @@ function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: Page
 function isDropdownOptionContext(target?: ElementContext) {
   return /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(target?.controlType || '') ||
     /^(option|treeitem|menuitem)$/.test(target?.role || '');
+}
+
+function isFormLabeledChoiceContext(event: PageContextEvent) {
+  const target = event.before.target;
+  return !!event.before.form?.label && (
+    /^(checkbox|radio|switch)$/.test(target?.controlType || '') ||
+    /^(checkbox|radio|switch)$/.test(target?.role || '')
+  );
 }
 
 function isWeakPageContextClickTarget(target?: ElementContext) {
@@ -584,8 +594,8 @@ function isWeakPageContextClickTarget(target?: ElementContext) {
 }
 
 function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContextEvent): FlowStep {
-  const target = flowTargetFromPageContext(event.before.target);
-  const subject = target?.testId || target?.text || target?.name || target?.placeholder || event.before.dialog?.title || '页面元素';
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label);
+  const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
   return {
     id: nextStableStepId(recorder),
     order: 0,
@@ -611,14 +621,15 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
   };
 }
 
-function flowTargetFromPageContext(target?: ElementContext): FlowTarget | undefined {
+function flowTargetFromPageContext(target?: ElementContext, formLabel?: string): FlowTarget | undefined {
   if (!target)
     return undefined;
   return {
     testId: target.testId,
     role: target.role,
     name: target.ariaLabel || target.text || target.title,
-    displayName: target.text || target.ariaLabel || target.placeholder || target.testId,
+    displayName: target.text || target.ariaLabel || target.placeholder || target.testId || formLabel,
+    label: formLabel,
     placeholder: target.placeholder,
     text: target.text,
     raw: target,
@@ -628,6 +639,12 @@ function flowTargetFromPageContext(target?: ElementContext): FlowTarget | undefi
 function syntheticClickSourceCode(target: FlowTarget | undefined, fallback: string) {
   if (target?.testId)
     return `await page.getByTestId(${stringLiteral(target.testId)}).click();`;
+  const rawControlType = typeof target?.raw === 'object' && target.raw ? String((target.raw as { controlType?: unknown }).controlType || '') : '';
+  const choiceText = target?.text || target?.name || target?.displayName;
+  if (/^(checkbox|radio|switch)$/.test(rawControlType) && choiceText)
+    return `await page.locator('label').filter({ hasText: ${stringLiteral(choiceText)} }).click();`;
+  if (target?.label)
+    return `await page.getByLabel(${stringLiteral(target.label)}).click();`;
   if (target?.role && (target.name || target.text))
     return `await page.getByRole(${stringLiteral(target.role)}, { name: ${stringLiteral(target.name || target.text)} }).click();`;
   return `await page.getByText(${stringLiteral(target?.text || target?.name || fallback)}).click();`;
@@ -844,9 +861,19 @@ function mergeRecordedAndSyntheticTarget(recorded?: FlowTarget, synthetic?: Flow
 function syntheticClickCoveredByRecordedStep(syntheticStep: FlowStep, draft: StepDraft) {
   if (targetsLikelySame(syntheticStep.target, draft.step.target))
     return true;
+  if (isDropdownOptionContext(syntheticStep.context?.before.target) || isFormLabeledChoiceStep(syntheticStep))
+    return false;
   const syntheticWallTime = Number(asRecord(syntheticStep.rawAction).syntheticContextEventWallTime ?? 0);
   const recordedWallTime = draft.entries.map(entry => entry.wallTime).find((value): value is number => typeof value === 'number');
   return !!syntheticWallTime && !!recordedWallTime && Math.abs(recordedWallTime - syntheticWallTime) < 1500;
+}
+
+function isFormLabeledChoiceStep(step: FlowStep) {
+  const target = step.context?.before.target;
+  return !!step.context?.before.form?.label && (
+    /^(checkbox|radio|switch)$/.test(target?.controlType || '') ||
+    /^(checkbox|radio|switch)$/.test(target?.role || '')
+  );
 }
 
 function cleanRepeatSegments(segments: FlowRepeatSegment[] | undefined, deletedStepIds: Set<string>): FlowRepeatSegment[] {

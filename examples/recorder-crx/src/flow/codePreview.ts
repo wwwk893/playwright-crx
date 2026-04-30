@@ -270,8 +270,9 @@ function preferredTargetLocator(step: FlowStep) {
   return globalTestIdLocator(step) ||
     antdSelectOptionLocator(step) ||
     tableScopedLocator(step) ||
-    dialogScopedLocator(step) ||
+    choiceControlLocator(step) ||
     fieldLocator(step) ||
+    dialogScopedLocator(step) ||
     sectionScopedLocator(step) ||
     globalRoleLocator(step) ||
     fallbackTextLocator(step);
@@ -447,6 +448,20 @@ function sectionScopedLocator(step: FlowStep) {
     return undefined;
   const role = step.target?.role || 'button';
   return `page.getByTestId(${stringLiteral(section.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+}
+
+function choiceControlLocator(step: FlowStep) {
+  if (step.action !== 'click' && step.action !== 'check' && step.action !== 'uncheck')
+    return undefined;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (!/^(checkbox|radio|switch)$/.test(controlType) && !/^(checkbox|radio|switch)$/.test(step.target?.role || ''))
+    return undefined;
+  const text = step.target?.text || step.target?.name || step.target?.displayName;
+  if (!text || text === step.target?.label)
+    return undefined;
+  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  const base = dialog?.title ? `page.getByRole('dialog', { name: ${stringLiteral(dialog.title)} })` : 'page';
+  return `${base}.locator('label').filter({ hasText: ${stringLiteral(text)} })`;
 }
 
 function fieldLocator(step: FlowStep) {

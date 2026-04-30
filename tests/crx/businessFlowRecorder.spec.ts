@@ -72,7 +72,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   expect(flow.steps.some((step: any) => step.target?.placeholder === '请输入用户名' || step.target?.scope?.form?.label === '用户名')).toBeTruthy();
   expect(flow.steps.some((step: any) => step.target?.scope?.table?.rowKey === 'user-42')).toBeTruthy();
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']create-user-btn["']\)/);
-  expect(flow.artifacts.playwrightCode).toMatch(/getByRole\(["']textbox["'],\s*\{\s*name:\s*["']\*?\s*用户名["']/);
+  expect(flow.artifacts.playwrightCode).toMatch(/getByRole\(["']textbox["'],\s*\{\s*name:\s*["']\*?\s*用户名["']|getByLabel\(["']用户名["']\)/);
   expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']审计员["']\s*\}\)/);
   expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
@@ -142,6 +142,76 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
   expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
+
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+});
+
+
+test('records real ProFormField network configuration fields and replays generated code @proform-fields', async ({ context, page, attachRecorder, baseURL }) => {
+  test.setTimeout(150_000);
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page);
+  recorderPage.on('dialog', dialog => dialog.accept());
+
+  await beginNewFlowFromLibrary(recorderPage);
+  await fillFlowMeta(recorderPage, '流程名称', 'ProFormField 网络配置流程');
+  await fillFlowMeta(recorderPage, '应用', 'AntD Pro');
+  await fillFlowMeta(recorderPage, '模块', '网络配置');
+  await fillFlowMeta(recorderPage, '页面', '资源配置');
+  await fillFlowMeta(recorderPage, '角色', '网络管理员');
+  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.goto(`${baseURL}/antd-pro-form-fields.html`);
+  await expect(page.getByText('网络配置资源')).toBeVisible();
+  await page.getByTestId('network-resource-add').click();
+  await expect(page.getByRole('dialog', { name: '新建网络资源' })).toBeVisible();
+
+  await page.getByPlaceholder('地址池名称').fill('pool-proform-alpha');
+  await page.getByTestId('network-resource-wan-select').click();
+  await clickVisibleAntDOption(page, 'edge-lab:WAN1');
+  await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN1');
+  await page.getByText('独享地址池').click();
+  await page.waitForTimeout(250);
+  await page.getByTestId('network-resource-vrf-select').click();
+  await clickVisibleAntDOption(page, '生产VRF');
+  await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
+  await page.getByText('开启代理ARP').click();
+  await page.waitForTimeout(250);
+  await page.getByTestId('network-resource-source-port').fill('8443');
+  await page.waitForTimeout(250);
+  await page.getByPlaceholder('填写策略备注').fill('ProFormField 全量组合录制');
+  await page.getByTestId('network-resource-save').click();
+  await expect(page.getByRole('row', { name: /pool-proform-alpha/ })).toBeVisible({ timeout: 10_000 });
+
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(9);
+  const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
+  await expect.poll(stepSubjects).toContain('network-resource-add');
+  await expect.poll(stepSubjects).toContain('pool-proform-alpha');
+  await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|network-resource-wan-select/);
+
+  await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+
+  const flow = await exportBusinessFlowJson(recorderPage);
+  expect(flow.flow.name).toBe('ProFormField 网络配置流程');
+  expect(flow.steps.length).toBeGreaterThanOrEqual(9);
+  expect(flow.steps.some((step: any) => step.target?.testId === 'network-resource-add')).toBeTruthy();
+  expect(flow.steps.some((step: any) => step.target?.placeholder === '地址池名称' || step.target?.label === '资源名称')).toBeTruthy();
+  expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.placeholder, step.target?.testId].some(value => /WAN口|选择一个WAN口|network-resource-wan-select/.test(String(value || ''))))).toBeTruthy();
+  expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /类型|独享地址池|poolType/.test(String(value || ''))))).toBeTruthy();
+  expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name].some(value => /开启代理ARP|arpProxy/.test(String(value || ''))))).toBeTruthy();
+  expect(flow.artifacts.playwrightCode).toContain('antd-pro-form-fields.html');
+  expect(flow.artifacts.playwrightCode).toContain('pool-proform-alpha');
+  expect(flow.artifacts.playwrightCode).toContain('edge-lab:WAN1');
+  expect(flow.artifacts.playwrightCode).not.toContain('edge-lab:WAN1-copy');
+  expect(flow.artifacts.playwrightCode).toContain('生产VRF');
+  expect(flow.artifacts.playwrightCode).toContain('8443');
+  expect(flow.artifacts.playwrightCode).toContain('ProFormField 全量组合录制');
+  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
+  expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
 });

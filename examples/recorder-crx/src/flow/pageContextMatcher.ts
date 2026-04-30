@@ -32,7 +32,65 @@ export function matchPageContextEvent(step: FlowStep, events: PageContextEvent[]
   if (!candidates.length)
     return undefined;
 
-  return candidates.sort((a, b) => Math.abs(eventTimeFor(a, timing.clock) - timing.end) - Math.abs(eventTimeFor(b, timing.clock) - timing.end))[0];
+  const scored = candidates
+      .map(event => ({ event, score: candidateScore(step, event) }))
+      .filter(candidate => candidate.score >= 0);
+  if (!scored.length)
+    return undefined;
+
+  return scored.sort((a, b) => {
+    const scoreDiff = b.score - a.score;
+    if (scoreDiff)
+      return scoreDiff;
+    return Math.abs(eventTimeFor(a.event, timing.clock) - timing.end) - Math.abs(eventTimeFor(b.event, timing.clock) - timing.end);
+  })[0].event;
+}
+
+function candidateScore(step: FlowStep, event: PageContextEvent) {
+  const target = step.target;
+  const contextTarget = event.before.target;
+  if (!target || !contextTarget)
+    return 0;
+
+  const targetTestId = target.testId;
+  const contextTestId = contextTarget.testId;
+  if (targetTestId && contextTestId)
+    return targetTestId === contextTestId ? 200 : -1;
+
+  const stepText = normalizeComparable(target.displayName || target.name || target.text || target.label || target.placeholder);
+  const contextText = normalizeComparable(contextTarget.text || contextTarget.ariaLabel || contextTarget.title || contextTarget.placeholder || event.before.form?.label);
+  const labelText = normalizeComparable(target.label || target.scope?.form?.label);
+  const formLabel = normalizeComparable(event.before.form?.label);
+
+  let score = 0;
+  if (targetTestId && !contextTestId)
+    score += 20;
+  if (!targetTestId && contextTestId)
+    score += 10;
+  if (stepText && contextText && stepText === contextText)
+    score += 120;
+  if (labelText && formLabel && labelText === formLabel)
+    score += 100;
+  if (target.role && contextTarget.role && target.role === contextTarget.role)
+    score += 40;
+  if (event.before.table?.rowKey)
+    score += 80;
+  if (event.kind === 'input' || event.kind === 'change')
+    score += step.action === 'fill' || step.action === 'select' || step.action === 'check' || step.action === 'uncheck' ? 30 : 0;
+
+  const clearTextMismatch = stepText && contextText && stepText !== contextText;
+  const clearLabelMismatch = labelText && formLabel && labelText !== formLabel;
+  if (!score && (clearTextMismatch || clearLabelMismatch))
+    return -1;
+  if (clearTextMismatch && score <= 10)
+    return -1;
+  if (step.action === 'fill' && event.kind === 'click' && (clearTextMismatch || (targetTestId && contextTestId && targetTestId !== contextTestId)))
+    return -1;
+  return score;
+}
+
+function normalizeComparable(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function actionTiming(rawAction: unknown) {

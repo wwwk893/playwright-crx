@@ -778,6 +778,72 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'page context upgrades ProForm checkbox click with form label scope',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [{
+        action: {
+          name: 'click',
+          selector: 'label >> nth=6',
+        },
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-proform-checkbox', wallTime + 120, {
+        tag: 'span',
+        role: 'checkbox',
+        framework: 'procomponents',
+        controlType: 'checkbox',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      event.before.form = {
+        label: '开启代理ARP',
+        name: 'arpProxy',
+      };
+      event.before.dialog = {
+        type: 'modal',
+        title: '新建网络资源',
+        visible: true,
+      };
+
+      const upgraded = mergePageContextIntoFlow(recorded, [event]);
+      const code = generateBusinessFlowPlaywrightCode(upgraded);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assertEqual(upgraded.steps[0].target?.label, '开启代理ARP');
+      assertEqual(upgraded.steps[0].target?.scope?.form?.name, 'arpProxy');
+      assert(firstStep.includes('getByLabel("开启代理ARP").click()') || firstStep.includes("locator('label').filter({ hasText: \"开启代理ARP\" }).click();"), 'ProForm checkbox click should replay by a semantic choice locator instead of a brittle label nth selector');
+    },
+  },
+  {
+    name: 'form-labeled ProForm checkbox page click is not suppressed by a nearby weak recorder click',
+    run: () => {
+      const wallTime = Date.now();
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: {
+          name: 'click',
+          selector: 'label >> nth=6',
+        },
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-proform-checkbox-synthetic', wallTime + 200, {
+        tag: 'span',
+        role: 'checkbox',
+        framework: 'procomponents',
+        controlType: 'checkbox',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      event.before.form = {
+        label: '开启代理ARP',
+        name: 'arpProxy',
+      };
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [event]);
+
+      assertEqual(withSynthetic.steps.length, 2);
+      assertEqual(withSynthetic.steps[1].target?.label, '开启代理ARP');
+      assertEqual(withSynthetic.steps[1].sourceCode, 'await page.locator(\'label\').filter({ hasText: "开启代理ARP" }).click();');
+    },
+  },
+  {
     name: 'code preview prefers upgraded test id over weird raw click selector',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
