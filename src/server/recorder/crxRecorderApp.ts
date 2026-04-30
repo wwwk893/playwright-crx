@@ -93,6 +93,28 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
       this._playbackRunning = false;
       this._sendRuntimeEvent('runtime.playback-stop', 'Playwright 回放结束');
     });
+    this._crx.player.on('action-start', (action, index, total) => {
+      this._sendRuntimeEvent('runtime.playback-action-start', `开始执行第 ${index + 1}/${total} 个 action`, {
+        total,
+        action: actionSummary(action, index),
+      });
+    });
+    this._crx.player.on('action-end', (action, index, total) => {
+      this._sendRuntimeEvent('runtime.playback-action-end', `完成第 ${index + 1}/${total} 个 action`, {
+        total,
+        action: actionSummary(action, index),
+      });
+    });
+    this._crx.player.on('action-error', (action, index, total, error) => {
+      this._sendRuntimeEvent('runtime.playback-action-error', `第 ${index + 1}/${total} 个 action 执行失败`, {
+        total,
+        action: actionSummary(action, index),
+        error: {
+          message: error?.message ?? String(error),
+          stack: error?.stack,
+        },
+      }, 'warn');
+    });
   }
 
   async open(options?: channels.CrxApplicationShowRecorderParams) {
@@ -378,7 +400,7 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
   }
 }
 
-function actionSummary(actionInContext: ActionInContextWithLocation, index: number) {
+function actionSummary(actionInContext: ActionInContextWithLocation | any, index: number) {
   const action = actionInContext.action as ActionWithSelector & {
     name?: string;
     url?: string;

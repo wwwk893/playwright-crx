@@ -4,7 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  */
-import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaywrightCode } from './codePreview';
+import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
@@ -1141,6 +1141,28 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'append-mode synthetic page context events stay after existing steps',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('打开新建弹窗'),
+        fillAction('地址池名称', 'test1'),
+      ], [], {});
+      const result = appendSyntheticPageContextStepsWithResult(initial, [
+        pageClickEventWithTarget('ctx-save', Date.now() - 10_000, {
+          tag: 'button',
+          role: 'button',
+          testId: 'site-save-button',
+          text: '保存配置',
+          normalizedText: '保存配置',
+        }),
+      ], { insertAfterStepId: initial.steps[initial.steps.length - 1].id });
+
+      assertEqual(result.insertedStepIds.length, 1);
+      assertEqual(result.flow.steps.map(step => step.id), ['s001', 's002', 's003']);
+      assertEqual(result.flow.steps[2].target?.testId, 'site-save-button');
+    },
+  },
+  {
     name: 'continuation batch drops navigation signals between new user actions',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [clickAction('打开')], [], {});
@@ -1354,6 +1376,54 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes(`locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option").filter({ hasText: "real-item-a" }).last()`) || firstStep.includes(`locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').filter({ hasText: 'real-item-a' })`), 'select option should replay through the visible AntD option content locator');
       assert(!firstStep.includes('getByTitle'), 'select option should not replay through brittle title locators');
+    },
+  },
+  {
+    name: 'business flow playback code keeps AntD option replay parser safe',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:attr=[title="real-item-a"i]',
+            locator: 'internal:attr=[title="real-item-a"i]',
+          },
+          context: {
+            eventId: 'ctx-select-option',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'div',
+                role: 'option',
+                title: 'real-item-a',
+                text: 'real-item-a',
+                normalizedText: 'real-item-a',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:attr=[title="real-item-a"i]',
+            },
+          },
+          sourceCode: `await page.getByTitle('real-item-a').locator('div').click();`,
+          assertions: [],
+        }],
+      };
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+
+      assert(!playbackCode.includes('if (!await'), 'runtime playback code should not include unsupported control flow');
+      assert(!playbackCode.includes('.evaluate('), 'runtime playback code should not include unsupported evaluate callbacks');
+      assert(playbackCode.includes('.ant-select-item-option'), 'runtime playback should still target the visible AntD option');
+      assert(playbackCode.includes('.click();'), 'runtime playback should remain a parseable click action');
     },
   },
   {

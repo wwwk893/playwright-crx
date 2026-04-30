@@ -53,14 +53,14 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
   for (const step of flow.steps) {
     const segment = (flow.repeatSegments ?? []).find(segment => firstSegmentStepId(flow, segment) === step.id);
     if (segment) {
-      emitExpandedRepeatSegment(lines, flow, segment);
+      emitExpandedRepeatSegment(lines, flow, segment, { parserSafe: true });
       segment.stepIds.forEach(stepId => emittedRepeatStepIds.add(stepId));
       continue;
     }
     if (emittedRepeatStepIds.has(step.id))
       continue;
 
-    emitStep(lines, step, '  ');
+    emitStep(lines, step, '  ', undefined, undefined, { parserSafe: true });
   }
 
   lines.push('});');
@@ -107,20 +107,24 @@ function firstSegmentStepId(flow: BusinessFlow, segment: FlowRepeatSegment) {
   return flow.steps.find(step => segment.stepIds.includes(step.id))?.id;
 }
 
-function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment) {
+type EmitStepOptions = {
+  parserSafe?: boolean;
+};
+
+function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment, options: EmitStepOptions = {}) {
   const rows = segment.rows.length ? segment.rows : [{ id: 'row-1', values: {} }];
   rows.forEach((row, rowIndex) => {
     lines.push(`  // 循环片段 ${segment.name}: 第 ${rowIndex + 1} 行`);
     for (const step of flow.steps.filter(step => segment.stepIds.includes(step.id)))
-      emitStep(lines, step, '  ', segment, row.values);
+      emitStep(lines, step, '  ', segment, row.values, options);
     if (segment.assertionTemplate)
       lines.push(`  // template assertion: ${replaceTemplateValuesWithRow(segment.assertionTemplate.description, segment, row.values)}`);
   });
 }
 
-function emitStep(lines: string[], step: FlowStep, indent: string, segment?: FlowRepeatSegment, rowValues?: Record<string, string>) {
+function emitStep(lines: string[], step: FlowStep, indent: string, segment?: FlowRepeatSegment, rowValues?: Record<string, string>, options: EmitStepOptions = {}) {
   lines.push(`${indent}// ${step.id} ${actionLabel[step.action]}: ${summarizeStepSubject(step)}`);
-  const sourceCode = sourceCodeForStep(step);
+  const sourceCode = sourceCodeForStep(step, options);
   if (sourceCode)
     lines.push(...sourceCode.map(line => `${indent}${segment ? parameterizeLine(line, step, segment, rowValues) : line}`));
   else
@@ -146,9 +150,9 @@ function isRunnableLine(line: string) {
   return /^(await|const|let|var)\s/.test(line.trim());
 }
 
-function sourceCodeForStep(step: FlowStep) {
+function sourceCodeForStep(step: FlowStep, options: EmitStepOptions = {}) {
   const sourceCode = normalizeActionSource(step.sourceCode);
-  const fallback = renderRawActionSource(step);
+  const fallback = renderRawActionSource(step, options);
   if (fallback)
     return normalizeActionSource(fallback);
   if (sourceCode && sourceMatchesStep(sourceCode, step))
@@ -194,7 +198,7 @@ function sourceMentionsStepTarget(sourceCode: string, step: FlowStep) {
   return !targetTokens.length || targetTokens.some(token => sourceCode.includes(token));
 }
 
-function renderRawActionSource(step: FlowStep) {
+function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
   const action = rawAction(step.rawAction);
   const selector = action.selector || step.target?.selector || step.target?.locator;
   switch (action.name || step.action) {
@@ -205,10 +209,10 @@ function renderRawActionSource(step: FlowStep) {
     case 'click': {
       const rawSelectOption = rawSelectOptionClickSource(step);
       if (rawSelectOption)
-        return rawSelectOption;
+        return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;
       const selectOption = selectOptionLocator(step);
       if (selectOption)
-        return selectOptionClickSource(selectOption);
+        return options.parserSafe ? `await ${selectOption}.click();` : selectOptionClickSource(selectOption);
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -303,6 +307,11 @@ function rawSelectOptionClickSource(step: FlowStep) {
     `  await page.locator(".ant-select-selector").last().click();`,
     selectOptionDispatchSource(optionLocator),
   ].join('\n');
+}
+
+function rawSelectOptionParserSafeSource(step: FlowStep) {
+  const optionLocator = selectOptionLocator(step);
+  return optionLocator ? `await ${optionLocator}.click();` : undefined;
 }
 
 function selectOptionClickSource(optionLocator: string) {

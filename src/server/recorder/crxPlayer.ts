@@ -109,11 +109,18 @@ export default class CrxPlayer extends EventEmitter {
     this.emit('start');
 
     try {
-      for (const action of actions) {
+      for (const [index, action] of actions.entries()) {
         if (action.action.name === 'openPage' && action.frame.pageAlias === 'page')
           continue;
         this._currAction = action;
-        await this._performAction(context, action);
+        this.emit('action-start', action, index, actions.length);
+        try {
+          await this._performAction(context, action);
+          this.emit('action-end', action, index, actions.length);
+        } catch (error) {
+          this.emit('action-error', action, index, actions.length, error);
+          throw error;
+        }
       }
     } catch (e) {
       if (e instanceof Stopped)

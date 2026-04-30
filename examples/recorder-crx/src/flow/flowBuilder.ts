@@ -226,6 +226,8 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   const steps = [...base.steps];
   const addedStepIds: string[] = [];
   const skippedEventIds: string[] = [];
+  const requestedInsertAfterStepId = options.insertAfterStepId;
+  let cursorStepId = options.insertAfterStepId;
   for (const event of dedupeSyntheticClickEvents(events)) {
     if (event.kind !== 'click' || !event.wallTime || !shouldCreateSyntheticClick(event)) {
       skippedEventIds.push(event.id);
@@ -236,10 +238,10 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       continue;
     }
     const step = buildSyntheticClickStep(recorder, event);
-    const insertAt = options.insertAfterStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === options.insertAfterStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
+    const insertAt = cursorStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === cursorStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
     steps.splice(insertAt, 0, step);
     addedStepIds.push(step.id);
-    options.insertAfterStepId = step.id;
+    cursorStepId = step.id;
   }
   if (!addedStepIds.length) {
     return {
@@ -259,7 +261,8 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
     addedStepIds,
     skippedEventIds,
     eventIds: events.map(event => event.id),
-    insertAfterStepId: options.insertAfterStepId,
+    insertAfterStepId: requestedInsertAfterStepId,
+    finalCursorStepId: cursorStepId,
   }, 'warn');
   return {
     flow: withRecorderState(base, recorder),

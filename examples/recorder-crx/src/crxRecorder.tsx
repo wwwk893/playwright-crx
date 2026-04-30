@@ -280,6 +280,24 @@ function diagnosticLogsToJsonl(logs: RecorderDiagnosticLog[]) {
   return logs.map(log => JSON.stringify(log)).join('\n') + (logs.length ? '\n' : '');
 }
 
+function runtimeLogsToJsonl(logs: RecorderDiagnosticLog[]) {
+  return diagnosticLogsToJsonl(logs.filter(log => log.type.startsWith('runtime.')));
+}
+
+function isRuntimeLogExpanded(entry: RecorderDiagnosticLog, expandedIds: Set<number>) {
+  return expandedIds.has(entry.id);
+}
+
+function sameNumberSet(left: Set<number>, right: Set<number>) {
+  if (left.size !== right.size)
+    return false;
+  for (const value of left) {
+    if (!right.has(value))
+      return false;
+  }
+  return true;
+}
+
 function loadPersistedDiagnosticLogs() {
   try {
     const text = window.localStorage.getItem(diagnosticStorageKey);
@@ -371,6 +389,7 @@ export const CrxRecorder: React.FC = ({
   const [recordedActionCount, setRecordedActionCount] = React.useState(0);
   const [panelStage, setPanelStage] = React.useState<PanelStage>('library');
   const [activeTab, setActiveTab] = React.useState<PanelTab>('business');
+  const [expandedRuntimeLogIds, setExpandedRuntimeLogIds] = React.useState<Set<number>>(() => new Set());
   const [editingAssertionStepId, setEditingAssertionStepId] = React.useState<string>();
   const [pickedAssertionTarget, setPickedAssertionTarget] = React.useState<AssertionPickedTarget>();
   const [pickingAssertionStepId, setPickingAssertionStepId] = React.useState<string>();
@@ -393,6 +412,7 @@ export const CrxRecorder: React.FC = ({
   const scheduledSyntheticContextEventIdsRef = React.useRef<Set<string>>(new Set());
   const pendingSyntheticClickEventsRef = React.useRef<PageContextEvent[]>([]);
   const syntheticFlushTimerRef = React.useRef<number>();
+  const businessFlowPlaybackCodeRef = React.useRef('');
 
   React.useEffect(() => {
     flowDraftRef.current = flowDraft;
@@ -420,8 +440,9 @@ export const CrxRecorder: React.FC = ({
     if (!events.length)
       return flowDraftRef.current;
     const pendingRecording = pendingInsertRecordingRef.current;
-    const insertAfterStepId = pendingRecording?.appendToEnd ? undefined : pendingRecording?.afterStepId;
     const withContext = mergePageContextIntoFlow(flowDraftRef.current, events);
+    const lastStepId = withContext.steps[withContext.steps.length - 1]?.id;
+    const insertAfterStepId = pendingRecording?.appendToEnd ? lastStepId : pendingRecording?.afterStepId;
     const result = appendSyntheticPageContextStepsWithResult(withContext, events, {
       insertAfterStepId,
       diagnostics: appendDiagnosticLog,
@@ -469,8 +490,11 @@ export const CrxRecorder: React.FC = ({
     const queuedEvents = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
     const requestedEvents = await requestPageContextEvents();
+    const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
+    const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
+    const newRequestedEvents = lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : [];
     const eventsById = new Map<string, PageContextEvent>();
-    for (const event of [...queuedEvents, ...requestedEvents]) {
+    for (const event of [...queuedEvents, ...newRequestedEvents]) {
       eventsById.set(event.id, event);
       if (event.kind === 'click' && event.wallTime)
         scheduledSyntheticContextEventIdsRef.current.add(event.id);
@@ -489,7 +513,11 @@ export const CrxRecorder: React.FC = ({
   }, []);
 
   React.useEffect(() => {
-    const port = chrome.runtime.connect({ name: 'recorder' });
+    let disposed = false;
+    let port: chrome.runtime.Port | undefined;
+    let portConnected = false;
+    let reconnectTimer: number | undefined;
+
     const onMessage = (msg: any) => {
       if (!('type' in msg) || msg.type !== 'recorder')
         return;
@@ -593,13 +621,106 @@ export const CrxRecorder: React.FC = ({
         }
       }
     };
-    port.onMessage.addListener(onMessage);
+
+    const connectRecorderPort = () => {
+      if (disposed)
+        return;
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
+      try {
+        port = chrome.runtime.connect({ name: 'recorder' });
+        portConnected = true;
+        port.onMessage.addListener(onMessage);
+        port.onDisconnect.addListener(() => {
+          portConnected = false;
+          if (disposed)
+            return;
+          appendDiagnosticLog({
+            type: 'runtime.port-disconnected',
+            level: 'warn',
+            message: 'Side panel 与 recorder app 的运行通道已断开，准备重连',
+            data: { reason: chrome.runtime.lastError?.message },
+          });
+          if (!disposed)
+            reconnectTimer = window.setTimeout(connectRecorderPort, 200);
+        });
+        appendDiagnosticLog({
+          type: 'runtime.port-connected',
+          message: 'Side panel 已连接 recorder app 运行通道',
+          data: { portName: port.name },
+        });
+      } catch (error: any) {
+        portConnected = false;
+        appendDiagnosticLog({
+          type: 'runtime.port-connect-error',
+          level: 'warn',
+          message: 'Side panel 连接 recorder app 运行通道失败',
+          data: { message: error?.message ?? String(error) },
+        });
+      }
+    };
+
+    const postRecorderEvent = (data: any) => {
+      if (!portConnected || !port)
+        connectRecorderPort();
+      if (!port) {
+        appendDiagnosticLog({
+          type: 'runtime.port-post-error',
+          level: 'warn',
+          message: 'Side panel 发送运行事件失败',
+          data: {
+            event: data?.event,
+            message: 'recorder app 运行通道未连接',
+          },
+        });
+        return false;
+      }
+      try {
+        port.postMessage({ type: 'recorderEvent', ...data });
+        const runtimeEvent = runtimeDispatchDiagnostic(data);
+        if (runtimeEvent) {
+          appendDiagnosticLog({
+            ...runtimeEvent,
+            type: `${runtimeEvent.type}.posted`,
+            message: `${runtimeEvent.message}（已投递到 recorder app）`,
+            data: {
+              ...runtimeEvent.data,
+              portConnected,
+            },
+          });
+        }
+        return true;
+      } catch (error: any) {
+        portConnected = false;
+        appendDiagnosticLog({
+          type: 'runtime.port-post-error',
+          level: 'warn',
+          message: 'Side panel 发送运行事件失败',
+          data: {
+            event: data?.event,
+            message: error?.message ?? String(error),
+          },
+        });
+        connectRecorderPort();
+        return false;
+      }
+    };
+
+    connectRecorderPort();
 
     window.dispatch = async (data: any) => {
       const runtimeEvent = runtimeDispatchDiagnostic(data);
       if (runtimeEvent)
         appendDiagnosticLog(runtimeEvent);
-      port.postMessage({ type: 'recorderEvent', ...data });
+      if ((data.event === 'resume' || data.event === 'step') && businessFlowPlaybackCodeRef.current) {
+        postRecorderEvent({
+          event: 'businessFlowCodeChanged',
+          params: { code: businessFlowPlaybackCodeRef.current },
+        });
+      }
+      postRecorderEvent(data);
       if (data.event === 'fileChanged')
         setSelectedFileId(data.params.file);
     };
@@ -611,8 +732,14 @@ export const CrxRecorder: React.FC = ({
     addSettingsChangedListener(setSettings);
 
     return () => {
+      disposed = true;
+      if (reconnectTimer)
+        window.clearTimeout(reconnectTimer);
       removeSettingsChangedListener(setSettings);
-      port.disconnect();
+      try {
+        port?.disconnect();
+      } catch {
+      }
     };
   }, [appendDiagnosticLog]);
 
@@ -771,6 +898,10 @@ export const CrxRecorder: React.FC = ({
   const businessFlowPlaybackCode = React.useMemo(() => generateBusinessFlowPlaybackCode(flowDraft), [flowDraft]);
   const generatedBusinessSources = React.useMemo(() => businessFlowSources(sources, businessFlowCode), [businessFlowCode, sources]);
   const currentCodeText = settings.businessFlowEnabled === false ? source?.text : businessFlowCode;
+
+  React.useEffect(() => {
+    businessFlowPlaybackCodeRef.current = businessFlowPlaybackCode;
+  }, [businessFlowPlaybackCode]);
 
   React.useEffect(() => {
     if (!activeAiProfile) {
@@ -1570,6 +1701,22 @@ export const CrxRecorder: React.FC = ({
   const insertAnchorIndex = insertAnchorStep ? flowDraft.steps.indexOf(insertAnchorStep) : -1;
   const insertNextStep = insertAnchorIndex >= 0 ? flowDraft.steps[insertAnchorIndex + 1] : undefined;
   const runtimeLogs = React.useMemo(() => diagnosticLogs.filter(log => log.type.startsWith('runtime.')).slice(-80), [diagnosticLogs]);
+  const runtimeLogIdSet = React.useMemo(() => new Set(runtimeLogs.map(log => log.id)), [runtimeLogs]);
+
+  React.useEffect(() => {
+    setExpandedRuntimeLogIds(ids => {
+      const next = new Set<number>();
+      for (const id of ids) {
+        if (runtimeLogIdSet.has(id))
+          next.add(id);
+      }
+      for (const log of runtimeLogs) {
+        if (log.level === 'warn')
+          next.add(log.id);
+      }
+      return sameNumberSet(next, ids) ? ids : next;
+    });
+  }, [runtimeLogIdSet, runtimeLogs]);
 
   return <>
     <ModalContainer />
@@ -1794,13 +1941,42 @@ export const CrxRecorder: React.FC = ({
               <Recorder sources={generatedBusinessSources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
             </div>}
             {activeTab === 'log' && <div className='run-log-panel'>
-              <section className='runtime-log-panel'>
-                <div className='section-heading row'>
-                  <span>Playwright 运行事件</span>
-                  <span className='review-inline-note'>{runtimeLogs.length ? `${runtimeLogs.length} 条` : '暂无事件'}</span>
+              <details className='diagnostic-dev-panel runtime-log-panel' open>
+                <summary>
+                  <div>
+                    <strong>Playwright 运行事件</strong>
+                    <span>{runtimeLogs.length ? `${runtimeLogs.length} 条 runtime 事件，显示最近 80 条` : '暂无 runtime 事件'}</span>
+                  </div>
+                </summary>
+                <div className='diagnostic-dev-actions'>
+                  <button type='button' onClick={() => setExpandedRuntimeLogIds(new Set(runtimeLogs.map(entry => entry.id)))} disabled={!runtimeLogs.length}>全部展开</button>
+                  <button type='button' onClick={() => setExpandedRuntimeLogIds(new Set())} disabled={!runtimeLogs.length}>全部收起</button>
+                  <button type='button' onClick={() => downloadText(`playwright-runtime-${generateDatetimeSuffix()}.jsonl`, runtimeLogsToJsonl(diagnosticLogs), 'application/jsonl')} disabled={!runtimeLogs.length}>导出 JSONL</button>
+                  <button type='button' onClick={() => setDiagnosticLogs(logs => {
+                    const next = logs.filter(log => !log.type.startsWith('runtime.'));
+                    exposeDiagnosticLogs(next);
+                    setExpandedRuntimeLogIds(new Set());
+                    return next;
+                  })} disabled={!runtimeLogs.length}>清空</button>
+                  <span>只清理 runtime.*，开发诊断仍保留。</span>
                 </div>
                 {runtimeLogs.length === 0 && <div className='business-flow-empty compact'>点击 Play 后，这里会显示代码解析、action 数量、开始/结束和报错信息。</div>}
-                {runtimeLogs.slice().reverse().map(entry => <details className={`runtime-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id} open={entry.level === 'warn'}>
+                {runtimeLogs.slice().reverse().map(entry => <details
+                  className={`runtime-log-row ${entry.level === 'warn' ? 'warn' : ''}`}
+                  key={entry.id}
+                  open={isRuntimeLogExpanded(entry, expandedRuntimeLogIds)}
+                  onToggle={event => {
+                    const open = event.currentTarget.open;
+                    setExpandedRuntimeLogIds(ids => {
+                      const next = new Set(ids);
+                      if (open)
+                        next.add(entry.id);
+                      else
+                        next.delete(entry.id);
+                      return next;
+                    });
+                  }}
+                >
                   <summary>
                     <span>{new Date(entry.time).toLocaleTimeString()}</span>
                     <strong>{entry.message}</strong>
@@ -1808,7 +1984,7 @@ export const CrxRecorder: React.FC = ({
                   </summary>
                   {entry.data && <pre>{formatDiagnosticData(entry.data)}</pre>}
                 </details>)}
-              </section>
+              </details>
               <details className='diagnostic-dev-panel'>
                 <summary>
                   <div>

@@ -1758,8 +1758,12 @@
   margin-bottom: 12px;
 }
 
+.runtime-log-panel .business-flow-empty {
+  margin: 0 12px 12px;
+}
+
 .runtime-log-row {
-  margin: 0 0 8px;
+  margin: 0 10px 8px;
   border: 1px solid #dbeafe;
   border-radius: 8px;
   background: #fff;
