@@ -213,6 +213,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const selectOption = antdSelectOptionLocator(step);
       if (selectOption)
         return options.parserSafe ? `await ${selectOption}.last().click();` : selectOptionClickSource(selectOption);
+      const popupOption = antdTreeSelectOptionLocator(step) || antdCascaderOptionLocator(step);
+      if (popupOption)
+        return antdSelectOptionDispatchSource(popupOption, popupOptionName(step));
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -269,6 +272,8 @@ function targetClickFallback(step: FlowStep) {
 function preferredTargetLocator(step: FlowStep) {
   return globalTestIdLocator(step) ||
     antdSelectOptionLocator(step) ||
+    antdTreeSelectOptionLocator(step) ||
+    antdCascaderOptionLocator(step) ||
     tableScopedLocator(step) ||
     choiceControlLocator(step) ||
     fieldLocator(step) ||
@@ -299,6 +304,32 @@ function isAntdSelectOptionStep(step: FlowStep) {
     (hasRawTitle && controlType === 'select-option' && (framework === 'antd' || framework === 'procomponents'));
 }
 
+function antdTreeSelectOptionLocator(step: FlowStep) {
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  if (controlType !== 'tree-select-option' && !/ant-select-tree/.test(selector))
+    return undefined;
+  const optionName = step.target?.text || step.target?.name || step.target?.displayName || step.context?.before.target?.text;
+  if (!optionName)
+    return undefined;
+  return `page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-tree-node-content-wrapper").filter({ hasText: ${stringLiteral(optionName)} })`;
+}
+
+function antdCascaderOptionLocator(step: FlowStep) {
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  if (controlType !== 'cascader-option' && !/ant-cascader-menu-item/.test(selector))
+    return undefined;
+  const optionName = step.target?.text || step.target?.name || step.target?.displayName || step.context?.before.target?.text;
+  if (!optionName)
+    return undefined;
+  return `page.locator(".ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)").last().locator(".ant-cascader-menu-item").filter({ hasText: ${stringLiteral(optionName)} })`;
+}
+
+function popupOptionName(step: FlowStep) {
+  return step.target?.text || step.target?.name || step.target?.displayName || step.context?.before.target?.text;
+}
+
 function rawSelectOptionClickSource(step: FlowStep) {
   const optionLocator = antdSelectOptionLocator(step);
   if (!optionLocator)
@@ -322,9 +353,10 @@ function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: 
     `// AntD Select virtual dropdown replay workaround: locator.click() may hit search input or portal/modal overlays.`,
     `if (!await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().isVisible().catch(() => false))`,
     `  await ${triggerLocator}.click();`,
+    optionName ? `if (!await ${optionLocator}.first().isVisible().catch(() => false)) {\n  if (await ${triggerLocator}.locator("input").count().catch(() => 0))\n    await ${triggerLocator}.locator("input").first().fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(async () => { await ${triggerLocator}.fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(() => {}); });\n  else\n    await ${triggerLocator}.fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(() => {});\n}` : undefined,
     antdSelectOptionDispatchSource(optionLocator, optionName),
     `await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().waitFor({ state: "hidden", timeout: 1000 }).catch(() => {});`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function antdSelectOptionName(step: FlowStep) {
@@ -465,6 +497,8 @@ function choiceControlLocator(step: FlowStep) {
 }
 
 function fieldLocator(step: FlowStep) {
+  if (step.target?.role === 'button' || step.context?.before.target?.controlType === 'button')
+    return undefined;
   const label = step.target?.label || step.target?.scope?.form?.label || step.context?.before.form?.label;
   const controlType = step.context?.before.target?.controlType;
   if (label && (controlType === 'select' || controlType === 'tree-select' || step.target?.role === 'combobox'))

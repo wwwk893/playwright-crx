@@ -62,6 +62,10 @@ function candidateScore(step: FlowStep, event: PageContextEvent) {
   const labelText = normalizeComparable(target.label || target.scope?.form?.label);
   const formLabel = normalizeComparable(event.before.form?.label);
 
+  const targetSemantic = normalizeComparable(target.label || target.name || target.displayName || target.placeholder || target.text);
+  if ((step.action === 'fill' || step.action === 'select') && targetSemantic && formLabel && targetSemantic !== formLabel && targetSemantic !== contextText)
+    return -1;
+
   let score = 0;
   if (targetTestId && !contextTestId)
     score += 20;
@@ -90,7 +94,7 @@ function candidateScore(step: FlowStep, event: PageContextEvent) {
 }
 
 function normalizeComparable(value?: string) {
-  return value?.replace(/\s+/g, ' ').trim().toLowerCase();
+  return value?.replace(/^\s*\*\s*/, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function actionTiming(rawAction: unknown) {

@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import type { TestInfo } from '@playwright/test';
 import type { Page, BrowserContext } from 'playwright-core';
 import { test, expect } from './crxRecorderTest';
 
@@ -82,7 +86,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   expect(exportedYaml).toContain('AntD 用户流程 E2E');
   expect(exportedYaml).toContain('user-42');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
 
 test('records a real AntD ProComponents async create-and-use flow @smoke', async ({ context, page, attachRecorder, baseURL }) => {
@@ -143,7 +147,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
 
 
@@ -169,20 +173,39 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-add').click();
   await expect(page.getByRole('dialog', { name: '新建网络资源' })).toBeVisible();
 
+  await page.getByTestId('network-resource-save').click();
+  await expect(page.locator('.ant-form-item-explain-error').filter({ hasText: '请输入资源名称' })).toBeVisible();
+  await expect(page.locator('.ant-form-item-explain-error').filter({ hasText: '选择一个WAN口' })).toBeVisible();
+
   await page.getByPlaceholder('地址池名称').fill('pool-proform-alpha');
   await page.getByTestId('network-resource-wan-select').click();
-  await clickVisibleAntDOption(page, 'edge-lab:WAN1');
-  await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN1');
+  await page.getByTestId('network-resource-wan-select').locator('input').fill('WAN-extra-18');
+  await clickVisibleAntDOption(page, 'edge-lab:WAN-extra-18');
+  await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN-extra-18');
   await page.getByText('独享地址池').click();
   await page.waitForTimeout(250);
   await page.getByTestId('network-resource-vrf-select').click();
+  await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
   await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
   await page.getByText('开启代理ARP').click();
+  await page.getByText('启用健康检查').click();
+  await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
+  await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
+  await page.getByTestId('network-resource-scope-tree').click();
+  await clickVisibleAntDTreeNode(page, '华东生产区');
+  await expect(page.getByTestId('network-resource-scope-tree')).toContainText('华东生产区');
+  await page.getByTestId('network-resource-egress-cascader').click();
+  await clickVisibleAntDCascaderOption(page, '上海');
+  await clickVisibleAntDCascaderOption(page, '一号机房');
+  await clickVisibleAntDCascaderOption(page, 'NAT集群A');
+  await expect(page.getByTestId('network-resource-egress-cascader')).toContainText('NAT集群A');
+  await page.getByPlaceholder('服务名称').fill('https-admin');
+  await page.getByPlaceholder('监听端口').fill('8443');
   await page.waitForTimeout(250);
   await page.getByTestId('network-resource-source-port').fill('8443');
   await page.waitForTimeout(250);
-  await page.getByPlaceholder('填写策略备注').fill('ProFormField 全量组合录制');
+  await page.getByPlaceholder('填写策略备注').fill('ProFormField 全量组合录制：showSearch/TreeSelect/Cascader/List/Dependency/Switch');
   await page.getByTestId('network-resource-save').click();
   await expect(page.getByRole('row', { name: /pool-proform-alpha/ })).toBeVisible({ timeout: 10_000 });
 
@@ -197,23 +220,28 @@ test('records real ProFormField network configuration fields and replays generat
 
   const flow = await exportBusinessFlowJson(recorderPage);
   expect(flow.flow.name).toBe('ProFormField 网络配置流程');
-  expect(flow.steps.length).toBeGreaterThanOrEqual(9);
+  expect(flow.steps.length).toBeGreaterThanOrEqual(18);
   expect(flow.steps.some((step: any) => step.target?.testId === 'network-resource-add')).toBeTruthy();
   expect(flow.steps.some((step: any) => step.target?.placeholder === '地址池名称' || step.target?.label === '资源名称')).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.placeholder, step.target?.testId].some(value => /WAN口|选择一个WAN口|network-resource-wan-select/.test(String(value || ''))))).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /类型|独享地址池|poolType/.test(String(value || ''))))).toBeTruthy();
-  expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name].some(value => /开启代理ARP|arpProxy/.test(String(value || ''))))).toBeTruthy();
+  const serializedProFormTargets = JSON.stringify(flow.steps.map((step: any) => step.target), null, 2);
+  expect(serializedProFormTargets).toMatch(/开启代理ARP|arpProxy/);
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-form-fields.html');
   expect(flow.artifacts.playwrightCode).toContain('pool-proform-alpha');
-  expect(flow.artifacts.playwrightCode).toContain('edge-lab:WAN1');
+  expect(flow.artifacts.playwrightCode).toContain('edge-lab:WAN-extra-18');
   expect(flow.artifacts.playwrightCode).not.toContain('edge-lab:WAN1-copy');
   expect(flow.artifacts.playwrightCode).toContain('生产VRF');
+  expect(flow.artifacts.playwrightCode).toContain('华东生产区');
+  expect(flow.artifacts.playwrightCode).toContain('NAT集群A');
+  expect(flow.artifacts.playwrightCode).toContain('https-admin');
+  expect(flow.artifacts.playwrightCode).toContain('https://probe.example/health');
   expect(flow.artifacts.playwrightCode).toContain('8443');
   expect(flow.artifacts.playwrightCode).toContain('ProFormField 全量组合录制');
   expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
 
 
@@ -309,7 +337,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   expect(flow.artifacts.playwrightCode).not.toContain('WAN1-copy');
   expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
 
 async function beginNewFlowFromLibrary(recorderPage: Page) {
@@ -348,6 +376,41 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
 }
 
+
+async function clickVisibleAntDTreeNode(page: Page, text: string) {
+  const nodes = page
+      .locator('.ant-select-tree-node-content-wrapper')
+      .filter({ hasText: text });
+  await expect(nodes.first()).toBeVisible({ timeout: 10_000 });
+  await nodes.evaluateAll((elements, expectedText) => {
+    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+    const expected = normalize(expectedText);
+    const element = elements.find(element => normalize(element.textContent) === expected);
+    if (!element)
+      throw new Error(`AntD tree node not found exactly: ${expected}`);
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  }, text);
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+}
+
+async function clickVisibleAntDCascaderOption(page: Page, text: string) {
+  const options = page
+      .locator('.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item')
+      .filter({ hasText: text });
+  await expect(options.first()).toBeVisible({ timeout: 10_000 });
+  await options.evaluateAll((elements, expectedText) => {
+    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+    const expected = normalize(expectedText);
+    const element = elements.find(element => normalize(element.textContent) === expected);
+    if (!element)
+      throw new Error(`AntD cascader option not found exactly: ${expected}`);
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  }, text);
+}
 
 async function exportBusinessFlowJson(recorderPage: Page) {
   const exportedJson = await downloadTextAfterClick(
@@ -402,7 +465,12 @@ async function downloadTextAfterClick(recorderPage: Page, trigger: ReturnType<Pa
   });
 }
 
-async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string) {
+async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo?: TestInfo) {
+  if (testInfo) {
+    const rawReplayDir = testInfo.outputPath('raw-generated-replay');
+    fs.mkdirSync(rawReplayDir, { recursive: true });
+    fs.writeFileSync(path.join(rawReplayDir, 'generated-before-inline.spec.ts'), code);
+  }
   const body = testBody(code);
   const replayPage = await context.newPage();
   try {
@@ -411,6 +479,37 @@ async function replayGeneratedPlaywrightCode(context: BrowserContext, code: stri
   } finally {
     await replayPage.close();
   }
+  if (testInfo)
+    runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo);
+}
+
+function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo) {
+  const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
+  fs.mkdirSync(rawReplayRoot, { recursive: true });
+  const rawReplayDir = fs.mkdtempSync(path.join(rawReplayRoot, `${testInfo.workerIndex}-`));
+  const specPath = path.join(rawReplayDir, 'generated-replay.spec.ts');
+  const configPath = path.join(rawReplayDir, 'playwright.raw-replay.config.ts');
+  fs.writeFileSync(specPath, code);
+  fs.writeFileSync(configPath, [
+    `import { defineConfig, devices } from '@playwright/test';`,
+    `export default defineConfig({`,
+    `  timeout: 120000,`,
+    `  workers: 1,`,
+    `  reporter: 'line',`,
+    `  use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:3000' },`,
+    `});`,
+    ``,
+  ].join('\n'));
+  const result = spawnSync('npx', ['playwright', 'test', specPath, '--config', configPath, '--workers=1', '--reporter=line'], {
+    cwd: path.join(__dirname, '..'),
+    env: { ...process.env, CI: '0' },
+    encoding: 'utf8',
+    timeout: 180_000,
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  fs.writeFileSync(path.join(rawReplayDir, 'raw-replay-output.txt'), output);
+  if (result.status !== 0)
+    throw new Error(`Generated Playwright source failed as a standalone spec (exit ${result.status}). See ${rawReplayDir}/raw-replay-output.txt\n${output}`);
 }
 
 function testBody(code: string) {

@@ -6,14 +6,19 @@ import { PlusOutlined } from '@ant-design/icons';
 import {
   ProCard,
   ProForm,
+  ProFormCascader,
   ProFormCheckbox,
+  ProFormDependency,
   ProFormDigit,
+  ProFormList,
   ProFormRadio,
   ProFormSelect,
+  ProFormSwitch,
   ProFormText,
   ProFormTextArea,
+  ProFormTreeSelect,
 } from '@ant-design/pro-components';
-import type { ProColumns } from '@ant-design/pro-components';
+import type { FormListActionType, ProColumns } from '@ant-design/pro-components';
 import 'antd/dist/reset.css';
 
 type NetworkResource = {
@@ -21,8 +26,12 @@ type NetworkResource = {
   name: string;
   wan: string;
   poolType: string;
+  scope?: string;
+  egressPath?: string[];
   arpProxy?: boolean;
+  healthCheck?: boolean;
   sourcePort?: number;
+  mappings?: Array<{ serviceName?: string; listenPort?: number }>;
   remark?: string;
 };
 
@@ -37,31 +46,116 @@ const wanOptions = [
 const vrfOptions = [
   { label: '生产VRF', value: 'vrf-prod' },
   { label: '办公VRF', value: 'vrf-office' },
+  { label: '灾备VRF', value: 'vrf-dr' },
 ];
+
+const scopeTreeOptions = [
+  {
+    title: '全国站点',
+    value: 'all-sites',
+    children: [
+      { title: '华东生产区', value: 'east-prod' },
+      { title: '华南办公区', value: 'south-office' },
+    ],
+  },
+  {
+    title: '海外站点',
+    value: 'global-sites',
+    children: [
+      { title: '新加坡边缘区', value: 'sg-edge' },
+    ],
+  },
+];
+
+const egressPathOptions = [
+  {
+    label: '上海',
+    value: 'shanghai',
+    children: [
+      {
+        label: '一号机房',
+        value: 'sh-idc-1',
+        children: [
+          { label: 'NAT集群A', value: 'nat-a' },
+          { label: 'NAT集群B', value: 'nat-b' },
+        ],
+      },
+    ],
+  },
+  {
+    label: '深圳',
+    value: 'shenzhen',
+    children: [
+      {
+        label: '二号机房',
+        value: 'sz-idc-2',
+        children: [
+          { label: 'NAT集群C', value: 'nat-c' },
+        ],
+      },
+    ],
+  },
+];
+
+function labelFromOptions(options: Array<{ label: string; value: string }>, value: string) {
+  return options.find(option => option.value === value)?.label || value;
+}
+
+function treeLabel(value?: string) {
+  for (const group of scopeTreeOptions) {
+    if (group.value === value)
+      return group.title;
+    const child = group.children.find(option => option.value === value);
+    if (child)
+      return child.title;
+  }
+  return value || '';
+}
+
+function cascaderLabels(values?: string[]) {
+  const labels: string[] = [];
+  let current: any[] | undefined = egressPathOptions;
+  for (const value of values || []) {
+    const option = current?.find(option => option.value === value);
+    if (!option)
+      break;
+    labels.push(option.label);
+    current = option.children;
+  }
+  return labels;
+}
 
 function AntDProFormFieldsApp() {
   const [open, setOpen] = React.useState(false);
   const [rows, setRows] = React.useState<NetworkResource[]>([]);
   const [form] = Form.useForm();
+  const mappingActionRef = React.useRef<FormListActionType<{ serviceName?: string; listenPort?: number }>>();
 
   const columns: ProColumns<NetworkResource>[] = [
     { title: '资源名称', dataIndex: 'name' },
     { title: 'WAN口', dataIndex: 'wan', render: (_, row) => <Tag color="blue">{row.wan}</Tag> },
     { title: '类型', dataIndex: 'poolType' },
+    { title: '发布范围', dataIndex: 'scope' },
+    { title: '出口路径', dataIndex: 'egressPath', render: (_, row) => row.egressPath?.join(' / ') },
     { title: '代理ARP', dataIndex: 'arpProxy', render: (_, row) => row.arpProxy ? '已开启' : '未开启' },
+    { title: '健康检查', dataIndex: 'healthCheck', render: (_, row) => row.healthCheck ? '启用' : '关闭' },
+    { title: '端口映射', dataIndex: 'mappings', render: (_, row) => row.mappings?.map(item => `${item.serviceName}:${item.listenPort}`).join(', ') },
     { title: '备注', dataIndex: 'remark' },
   ];
 
   async function save() {
     const values = await form.validateFields();
-    const wanLabel = wanOptions.find(option => option.value === values.wan)?.label || values.wan;
     const next: NetworkResource = {
       id: `network-resource-${Date.now()}`,
       name: values.name,
-      wan: wanLabel,
+      wan: labelFromOptions(wanOptions, values.wan),
       poolType: values.poolType,
-      arpProxy: values.arpProxy,
+      scope: treeLabel(values.scope),
+      egressPath: cascaderLabels(values.egressPath),
+      arpProxy: values.features?.includes('arpProxy'),
+      healthCheck: values.healthCheck,
       sourcePort: values.sourcePort,
+      mappings: values.mappings,
       remark: values.remark,
     };
     setRows(current => [...current, next]);
@@ -94,6 +188,7 @@ function AntDProFormFieldsApp() {
         title="新建网络资源"
         open={open}
         destroyOnClose
+        width={760}
         data-testid="network-resource-modal"
         onCancel={() => setOpen(false)}
         footer={[
@@ -105,7 +200,7 @@ function AntDProFormFieldsApp() {
           form={form}
           submitter={false}
           layout="vertical"
-          initialValues={{ poolType: 'shared', sourcePort: 443 }}
+          initialValues={{ poolType: 'shared', sourcePort: 443, mappings: [{ serviceName: '', listenPort: undefined }] }}
           data-testid="network-resource-form"
         >
           <ProFormText
@@ -150,14 +245,86 @@ function AntDProFormFieldsApp() {
             fieldProps={{
               'data-testid': 'network-resource-vrf-select',
               showSearch: true,
+              optionFilterProp: 'label',
             } as any}
           />
 
-          <ProFormCheckbox
-            name="arpProxy"
-            label="开启代理ARP"
-            tooltip="抽象自网络资源配置页常见开关"
+          <ProFormCheckbox.Group
+            name="features"
+            label="能力开关"
+            options={[
+              { label: '开启代理ARP', value: 'arpProxy' },
+              { label: '记录审计日志', value: 'auditLog' },
+            ]}
           />
+
+          <ProFormSwitch
+            name="healthCheck"
+            label="启用健康检查"
+            fieldProps={{ 'data-testid': 'network-resource-health-switch' } as any}
+          />
+
+          <ProFormDependency name={['healthCheck']}>
+            {({ healthCheck }) => healthCheck ? <ProFormText
+              name="healthUrl"
+              label="探测地址"
+              placeholder="https://probe.example/health"
+              rules={[{ required: true, message: '请输入探测地址' }]}
+              fieldProps={{ 'data-testid': 'network-resource-health-url' } as any}
+            /> : null}
+          </ProFormDependency>
+
+          <ProFormTreeSelect
+            name="scope"
+            label="发布范围"
+            placeholder="选择发布范围"
+            fieldProps={{
+              'data-testid': 'network-resource-scope-tree',
+              showSearch: true,
+              treeData: scopeTreeOptions,
+              treeDefaultExpandAll: true,
+            } as any}
+            rules={[{ required: true, message: '选择发布范围' }]}
+          />
+
+          <ProFormCascader
+            name="egressPath"
+            label="出口路径"
+            placeholder="选择出口路径"
+            fieldProps={{
+              'data-testid': 'network-resource-egress-cascader',
+              options: egressPathOptions,
+            } as any}
+            rules={[{ required: true, message: '选择出口路径' }]}
+          />
+
+          <Space>
+            <Button data-testid="network-mapping-add" onClick={() => mappingActionRef.current?.add?.({ serviceName: '', listenPort: undefined })}>
+              新增端口映射
+            </Button>
+          </Space>
+
+          <ProFormList
+            name="mappings"
+            label="端口映射规则"
+            actionRef={mappingActionRef}
+            creatorButtonProps={false}
+            itemRender={({ listDom, action }, { index }) => <ProCard bordered size="small" title={`端口映射 #${index + 1}`} extra={action} style={{ marginBlockEnd: 8 }}>{listDom}</ProCard>}
+            rules={[{ required: true, message: '至少添加一条端口映射' }]}
+          >
+            <ProFormText
+              name="serviceName"
+              label="服务名称"
+              placeholder="服务名称"
+              rules={[{ required: true, message: '请输入服务名称' }]}
+            />
+            <ProFormDigit
+              name="listenPort"
+              label="监听端口"
+              placeholder="监听端口"
+              rules={[{ required: true, message: '请输入监听端口' }]}
+            />
+          </ProFormList>
 
           <ProFormDigit
             name="sourcePort"
