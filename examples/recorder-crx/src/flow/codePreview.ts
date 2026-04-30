@@ -373,15 +373,38 @@ function antdSelectOptionName(step: FlowStep) {
 }
 
 function antdSelectTriggerLocator(step: FlowStep) {
+  return antdSelectFieldLocator(step) || `page.locator(".ant-select-selector").last()`;
+}
+
+function antdSelectFieldLocator(step: FlowStep) {
   const testId = step.context?.before.form?.testId ||
     step.target?.scope?.form?.testId ||
     step.context?.before.target?.testId;
   if (testId)
     return `page.getByTestId(${stringLiteral(testId)})`;
-  const label = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label || step.target?.name;
-  if (label)
-    return `page.getByRole("combobox", { name: ${stringLiteral(label)} })`;
-  return `page.locator(".ant-select-selector").last()`;
+  const label = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label;
+  if (!label)
+    return undefined;
+  const dialog = selectTriggerDialog(step);
+  const root = dialog?.testId ?
+    `page.getByTestId(${stringLiteral(dialog.testId)})` :
+    dialog?.title ?
+      `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).filter({ hasText: ${stringLiteral(dialog.title)} })` :
+      'page';
+  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(label)} }).locator(${stringLiteral('.ant-select-selector')}).first()`;
+}
+
+function selectTriggerDialog(step: FlowStep) {
+  const scoped = step.target?.scope?.dialog;
+  if (scoped?.title || scoped?.testId)
+    return scoped;
+  const before = step.context?.before.dialog;
+  if (before?.title || before?.testId)
+    return before;
+  const after = step.context?.after?.dialog;
+  if (after?.title || after?.testId)
+    return after;
+  return undefined;
 }
 
 function antdSelectOptionDispatchSource(locator: string, optionName?: string) {
@@ -502,7 +525,7 @@ function fieldLocator(step: FlowStep) {
   const label = step.target?.label || step.target?.scope?.form?.label || step.context?.before.form?.label;
   const controlType = step.context?.before.target?.controlType;
   if (label && (controlType === 'select' || controlType === 'tree-select' || step.target?.role === 'combobox'))
-    return `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;
+    return antdSelectFieldLocator(step) || `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;
   if (label)
     return `page.getByLabel(${stringLiteral(label)})`;
   if (step.target?.placeholder)

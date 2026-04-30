@@ -1723,6 +1723,145 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'ProFormSelect trigger click uses form-item scoped AntD selector instead of combobox role',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: '#rc_select_14',
+            locator: '#rc_select_14',
+            name: '选择一个WAN口',
+            text: '选择一个WAN口',
+            displayName: '选择一个WAN口',
+            scope: {
+              dialog: {
+                type: 'modal',
+                title: '新建IPv4地址池',
+                visible: true,
+              },
+              form: {
+                label: 'WAN口',
+                name: 'rc.select.14',
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-wan-trigger',
+            capturedAt: 1000,
+            before: {
+              dialog: {
+                type: 'modal',
+                title: '新建IPv4地址池',
+                visible: true,
+              },
+              form: {
+                label: 'WAN口',
+                name: 'rc.select.14',
+              },
+              target: {
+                tag: 'div',
+                text: '选择一个WAN口',
+                normalizedText: '选择一个WAN口',
+                framework: 'procomponents',
+                controlType: 'select',
+                locatorQuality: 'semantic',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: '#rc_select_14',
+            },
+          },
+          sourceCode: `await page.locator('#rc_select_14').click();`,
+          assertions: [],
+        }],
+      };
+
+      const exportedCode = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+      for (const code of [exportedCode, playbackCode]) {
+        const firstStep = stepCodeBlock(code, 's001');
+        assert(firstStep.includes('filter({ hasText: "新建IPv4地址池" })'), 'trigger should keep dialog scope');
+        assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().click();'), 'trigger should click the visible AntD select selector inside the labeled form item');
+        assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'trigger should not rely on combobox accessible name for AntD ProFormSelect');
+        assert(!firstStep.includes('#rc_select_14'), 'trigger should not replay the dynamic rc_select id');
+      }
+    },
+  },
+  {
+    name: 'AntD select option workaround opens ProFormSelect by scoped selector not combobox role',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:role=option[name="xtest16:WAN1"i]',
+            locator: 'internal:role=option[name="xtest16:WAN1"i]',
+            role: 'option',
+            name: 'xtest16:WAN1',
+            text: 'xtest16:WAN1',
+            displayName: 'xtest16:WAN1',
+          },
+          context: {
+            eventId: 'ctx-wan-option',
+            capturedAt: 1000,
+            before: {
+              dialog: {
+                type: 'dropdown',
+                visible: true,
+              },
+              form: {
+                label: 'WAN口',
+                name: 'rc.select.14',
+              },
+              target: {
+                tag: 'div',
+                role: 'option',
+                title: 'xtest16:WAN1',
+                text: 'xtest16:WAN1',
+                normalizedText: 'xtest16:WAN1',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+            after: {
+              dialog: {
+                type: 'modal',
+                title: '新建IPv4地址池',
+                visible: true,
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=option[name="xtest16:WAN1"i]',
+            },
+          },
+          sourceCode: `await page.getByRole('option', { name: 'xtest16:WAN1' }).click();`,
+          assertions: [],
+        }],
+      };
+
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first()'), 'option fallback should open the owning ProFormSelect trigger by form label');
+      assert(!firstStep.includes('getByRole("combobox", { name: "WAN口" })'), 'option fallback should not reopen dropdown through brittle combobox role');
+    },
+  },
+  {
     name: 'redaction preserves full generated playwright code while still masking secrets',
     run: () => {
       const longCode = `await page.goto("/start");\n${'await page.getByRole("button", { name: "保存" }).click();\n'.repeat(80)}await page.getByRole("button", { name: "完成" }).click();`;
