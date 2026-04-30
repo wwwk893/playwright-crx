@@ -19,12 +19,8 @@ import { test, expect } from './crxRecorderTest';
 
 test.describe.configure({ mode: 'serial' });
 
-test('records an AntD business flow through the plugin UI, exports it, and replays generated Playwright code @smoke', async ({ context, page, attachRecorder, baseURL, mockPaths }) => {
+test('records a real AntD user business flow through the plugin UI, exports it, and replays generated Playwright code @smoke', async ({ context, page, attachRecorder, baseURL }) => {
   test.setTimeout(120_000);
-
-  await mockPaths({
-    'antd/users.html': antDUsersFixture(),
-  });
 
   await page.goto(`${baseURL}/empty.html`);
   const recorderPage = await attachRecorder(page);
@@ -40,15 +36,15 @@ test('records an AntD business flow through the plugin UI, exports it, and repla
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
-  await page.goto(`${baseURL}/antd/users.html`);
+  await page.goto(`${baseURL}/antd-users-real.html`);
   await expect(page.getByTestId('create-user-btn')).toBeVisible();
 
   await page.getByTestId('create-user-btn').locator('svg').click();
   await page.getByPlaceholder('请输入用户名').fill('alice');
   await page.getByTestId('role-select').click();
-  await page.getByRole('option', { name: '审计员' }).click();
+  await clickVisibleAntDOption(page, '审计员');
   await page.getByTestId('modal-confirm').locator('span').click();
-  await expect(page.getByTestId('create-user-modal')).not.toHaveClass(/open/);
+  await expect(page.getByTestId('create-user-modal')).not.toBeVisible();
   await page.waitForTimeout(2200);
   await page.getByTestId('users-table').locator('tr[data-row-key="user-42"] button span').click();
 
@@ -76,7 +72,8 @@ test('records an AntD business flow through the plugin UI, exports it, and repla
   expect(flow.steps.some((step: any) => step.target?.placeholder === '请输入用户名' || step.target?.scope?.form?.label === '用户名')).toBeTruthy();
   expect(flow.steps.some((step: any) => step.target?.scope?.table?.rowKey === 'user-42')).toBeTruthy();
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']create-user-btn["']\)/);
-  expect(flow.artifacts.playwrightCode).toMatch(/getBy(?:Label|Role)\(["']用户名|name:\s*["']用户名/);
+  expect(flow.artifacts.playwrightCode).toMatch(/getByRole\(["']textbox["'],\s*\{\s*name:\s*["']\*?\s*用户名["']/);
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\) \.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']审计员["']\s*\}\)\.last\(\)/);
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']users-table["']\)/);
   expect(flow.artifacts.playwrightCode).toContain('data-row-key=\\"user-42\\"');
   expect(exportedYaml).toContain('AntD 用户流程 E2E');
@@ -112,7 +109,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await page.getByRole('button', { name: /保\s*存/ }).click();
   await expect(page.getByRole('row', { name: /real-item-a/ })).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('real-used-item-select').click();
-  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content').filter({ hasText: 'real-item-a' }).click();
+  await clickVisibleAntDOption(page, 'real-item-a');
   await page.getByPlaceholder('填写使用备注').fill('下方表单使用刚保存的条目');
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(7);
@@ -137,6 +134,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\) \.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)\.last\(\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
@@ -156,6 +154,19 @@ async function beginNewFlowFromLibrary(recorderPage: Page) {
 
 async function fillFlowMeta(recorderPage: Page, label: string, value: string) {
   await recorderPage.locator('.flow-meta-panel label').filter({ hasText: label }).locator('input, textarea').first().fill(value);
+}
+
+async function clickVisibleAntDOption(page: Page, text: string) {
+  const option = page
+      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+      .filter({ hasText: text })
+      .last();
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.evaluate(element => {
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  });
 }
 
 async function downloadTextAfterClick(recorderPage: Page, trigger: ReturnType<Page['locator']>) {

@@ -104,7 +104,7 @@ function AntDProRealApp() {
       okText="保存"
       cancelText="取消"
       data-testid="real-create-item-modal"
-      destroyOnHidden
+      destroyOnClose
     >
       <Form form={form} layout="vertical">
         <Form.Item name="name" label="条目名称" rules={[{ required: true, message: '请输入条目名称' }]}>

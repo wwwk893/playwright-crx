@@ -384,6 +384,7 @@ export const CrxRecorder: React.FC = ({
   const [aiGenerating, setAiGenerating] = React.useState(false);
   const [aiPendingStepIds, setAiPendingStepIds] = React.useState<Set<string>>(() => new Set());
   const [diagnosticLogs, setDiagnosticLogs] = React.useState<RecorderDiagnosticLog[]>(() => loadPersistedDiagnosticLogs());
+  const flowDraftRef = React.useRef<BusinessFlow>(flowDraft);
   const pendingAssertionPickRef = React.useRef<PendingAssertionPick>();
   const pendingInsertRecordingRef = React.useRef<PendingInsertRecording>();
   const aiAutoTimerRef = React.useRef<number>();
@@ -392,6 +393,10 @@ export const CrxRecorder: React.FC = ({
   const scheduledSyntheticContextEventIdsRef = React.useRef<Set<string>>(new Set());
   const pendingSyntheticClickEventsRef = React.useRef<PageContextEvent[]>([]);
   const syntheticFlushTimerRef = React.useRef<number>();
+
+  React.useEffect(() => {
+    flowDraftRef.current = flowDraft;
+  }, [flowDraft]);
 
   const appendDiagnosticLog = React.useCallback((event: MergeDiagnosticEvent) => {
     const entry: RecorderDiagnosticLog = {
@@ -411,6 +416,34 @@ export const CrxRecorder: React.FC = ({
     exposeDiagnosticLogs(diagnosticLogs);
   }, [diagnosticLogs]);
 
+  const applyPageContextEventsToDraft = React.useCallback((events: PageContextEvent[]) => {
+    if (!events.length)
+      return flowDraftRef.current;
+    const pendingRecording = pendingInsertRecordingRef.current;
+    const insertAfterStepId = pendingRecording?.appendToEnd ? undefined : pendingRecording?.afterStepId;
+    const withContext = mergePageContextIntoFlow(flowDraftRef.current, events);
+    const result = appendSyntheticPageContextStepsWithResult(withContext, events, {
+      insertAfterStepId,
+      diagnostics: appendDiagnosticLog,
+    });
+    if (pendingRecording && !pendingRecording.appendToEnd && result.insertedStepIds.length) {
+      pendingRecording.afterStepId = result.insertedStepIds[result.insertedStepIds.length - 1];
+      setInsertRecordingAfterStepId(pendingRecording.afterStepId);
+      appendDiagnosticLog({
+        type: 'ui.recording-insert-cursor-advance',
+        message: '页面侧补录步骤后推进插入 cursor',
+        data: {
+          anchorStepId: pendingRecording.anchorStepId,
+          cursorStepId: pendingRecording.afterStepId,
+          insertedStepIds: result.insertedStepIds,
+        },
+      });
+    }
+    flowDraftRef.current = result.flow;
+    setFlowDraft(result.flow);
+    return result.flow;
+  }, [appendDiagnosticLog]);
+
   const queueSyntheticClickEvent = React.useCallback((event: PageContextEvent) => {
     pendingSyntheticClickEventsRef.current.push(event);
     if (syntheticFlushTimerRef.current)
@@ -423,30 +456,30 @@ export const CrxRecorder: React.FC = ({
       if (!events.length)
         return;
 
-      setFlowDraft(flow => {
-        const pendingRecording = pendingInsertRecordingRef.current;
-        const insertAfterStepId = pendingRecording?.appendToEnd ? undefined : pendingRecording?.afterStepId;
-        const result = appendSyntheticPageContextStepsWithResult(flow, events, {
-          insertAfterStepId,
-          diagnostics: appendDiagnosticLog,
-        });
-        if (pendingRecording && !pendingRecording.appendToEnd && result.insertedStepIds.length) {
-          pendingRecording.afterStepId = result.insertedStepIds[result.insertedStepIds.length - 1];
-          setInsertRecordingAfterStepId(pendingRecording.afterStepId);
-          appendDiagnosticLog({
-            type: 'ui.recording-insert-cursor-advance',
-            message: '页面侧补录步骤后推进插入 cursor',
-            data: {
-              anchorStepId: pendingRecording.anchorStepId,
-              cursorStepId: pendingRecording.afterStepId,
-              insertedStepIds: result.insertedStepIds,
-            },
-          });
-        }
-        return result.flow;
-      });
+      applyPageContextEventsToDraft(events);
     }, 1800);
-  }, [appendDiagnosticLog]);
+  }, [applyPageContextEventsToDraft]);
+
+  const flushPageContextEventsNow = React.useCallback(async () => {
+    if (syntheticFlushTimerRef.current) {
+      window.clearTimeout(syntheticFlushTimerRef.current);
+      syntheticFlushTimerRef.current = undefined;
+    }
+
+    const queuedEvents = pendingSyntheticClickEventsRef.current;
+    pendingSyntheticClickEventsRef.current = [];
+    const requestedEvents = await requestPageContextEvents();
+    const eventsById = new Map<string, PageContextEvent>();
+    for (const event of [...queuedEvents, ...requestedEvents]) {
+      eventsById.set(event.id, event);
+      if (event.kind === 'click' && event.wallTime)
+        scheduledSyntheticContextEventIdsRef.current.add(event.id);
+    }
+    const events = [...eventsById.values()];
+    if (events.length)
+      lastDiagnosticContextEventIdRef.current = events[events.length - 1]?.id;
+    return applyPageContextEventsToDraft(events);
+  }, [applyPageContextEventsToDraft]);
 
   React.useEffect(() => {
     return () => {
@@ -507,6 +540,7 @@ export const CrxRecorder: React.FC = ({
                 effectiveInsertBaseActionCount,
               },
             });
+            flowDraftRef.current = nextFlow;
             if (pendingRecording && shouldAdvancePendingBase(pendingRecording, actions.length)) {
               advancePendingBase(pendingRecording, actions.length);
               if (pendingRecording.afterStepId && insertedStepIds.length) {
@@ -1395,7 +1429,7 @@ export const CrxRecorder: React.FC = ({
     window.dispatch({ event: 'setMode', params: { mode: mode === 'recording' ? 'standby' : 'recording' } }).catch(() => {});
   }, [mode]);
 
-  const stopRecording = React.useCallback(() => {
+  const stopRecording = React.useCallback(async () => {
     appendDiagnosticLog({
       type: 'ui.recording-stop',
       message: '停止录制',
@@ -1405,12 +1439,13 @@ export const CrxRecorder: React.FC = ({
         recordedActionCount,
       },
     });
+    await flushPageContextEventsNow();
     pendingInsertRecordingRef.current = undefined;
     setInsertRecordingAfterStepId(undefined);
     setPanelStage('review');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft.steps.length, recordedActionCount]);
+  }, [appendDiagnosticLog, flowDraft.steps.length, flushPageContextEventsNow, recordedActionCount]);
 
   const continueRecording = React.useCallback(() => {
     const playbackBoundary = actionCountForMergeBoundary(flowDraft);
@@ -1503,13 +1538,15 @@ export const CrxRecorder: React.FC = ({
     window.dispatch({ event: 'setMode', params: { mode: 'inspecting' } }).catch(() => {});
   }, [mode]);
 
-  const exportBusinessFlow = React.useCallback((format: 'json' | 'yaml') => {
+  const exportBusinessFlow = React.useCallback(async (format: 'json' | 'yaml') => {
     if (!flowDraft.flow.name.trim()) {
       window.alert('导出前请先填写流程名称。');
       return;
     }
 
-    const flowWithCode = withPlaywrightCodeForExport(flowDraft, currentCodeText);
+    const flushedFlow = await flushPageContextEventsNow();
+    const exportCodeText = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaywrightCode(flushedFlow);
+    const flowWithCode = withPlaywrightCodeForExport(flushedFlow, exportCodeText);
     if (!hasEnabledAssertion(flowWithCode) && !window.confirm('当前流程还没有启用断言，仍然导出吗？'))
       return;
 
@@ -1522,7 +1559,7 @@ export const CrxRecorder: React.FC = ({
     }
 
     downloadText(`${baseFilename}.compact-flow.yaml`, toCompactFlow(exportFlow), 'text/yaml');
-  }, [currentCodeText, flowDraft, settings.redactSensitiveData]);
+  }, [currentCodeText, flowDraft.flow.name, flushPageContextEventsNow, settings.businessFlowEnabled, settings.redactSensitiveData]);
 
   const stats = flowStats(flowDraft);
   const isBusinessFlowEnabled = settings.businessFlowEnabled !== false;

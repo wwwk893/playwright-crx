@@ -23,10 +23,14 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
     return normalizeIntentSources(flow);
 
   let changed = false;
+  const usedEventIds = new Set<string>();
   const steps = flow.steps.map(step => {
     const normalizedStep = normalizeIntentSource(step);
-    const event = matchPageContextEvent(normalizedStep, events);
+    const event = matchPageContextEvent(normalizedStep, events.filter(event => !usedEventIds.has(event.id)));
     if (!event)
+      return normalizedStep;
+    usedEventIds.add(event.id);
+    if (shouldIgnoreMismatchedDropdownOptionContext(normalizedStep, event))
       return normalizedStep;
 
     const actionIndex = actionIndexForStep(flow, normalizedStep.id);
@@ -201,6 +205,29 @@ function locatorHintFromContext(contextTarget: ElementContext, scope?: FlowTarge
   if (contextTarget.role && (contextTarget.text || contextTarget.ariaLabel))
     return { strategy: 'global-role', confidence: 0.62, pageCount: contextTarget.uniqueness?.pageCount, scopeCount: contextTarget.uniqueness?.scopeCount };
   return contextTarget.text ? { strategy: 'fallback-text', confidence: 0.45 } : undefined;
+}
+
+function shouldIgnoreMismatchedDropdownOptionContext(step: FlowStep, event: PageContextEvent) {
+  const contextTarget = event.before.target;
+  if (!contextTarget || !isDropdownOptionContext(contextTarget))
+    return false;
+  const stepTestId = step.target?.testId;
+  if (stepTestId && contextTarget.testId !== stepTestId)
+    return true;
+  const recorderSelector = recorderSelectorForStep(step);
+  if (recorderSelector && /internal:testid=/.test(recorderSelector) && !contextTarget.testId)
+    return true;
+  return false;
+}
+
+function isDropdownOptionContext(target: ElementContext) {
+  return /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(target.controlType || '') ||
+    /^(option|treeitem|menuitem)$/.test(target.role || '');
+}
+
+function recorderSelectorForStep(step: FlowStep) {
+  const rawAction = step.rawAction as { action?: { selector?: string } } | undefined;
+  return rawAction?.action?.selector || step.target?.selector || step.target?.locator;
 }
 
 function actionIndexForStep(flow: BusinessFlow, stepId: string) {

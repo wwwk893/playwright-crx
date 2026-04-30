@@ -84,13 +84,36 @@ let activeDropdownContexts: ActiveDropdownContext[] = [];
 if (!(window as any)[installKey]) {
   (window as any)[installKey] = true;
   document.addEventListener('click', event => recordEvent('click', event), true);
+  document.addEventListener('pointerdown', event => recordDropdownOptionPointerEvent(event), true);
+  document.addEventListener('mousedown', event => recordDropdownOptionPointerEvent(event), true);
   document.addEventListener('input', event => recordEvent('input', event), true);
   document.addEventListener('change', event => recordEvent('change', event), true);
   document.addEventListener('keydown', event => recordEvent('keydown', event), true);
 }
 
+function recordDropdownOptionPointerEvent(event: Event) {
+  const target = dropdownOptionEventTarget(event);
+  if (!target || shouldIgnoreTarget(target, 'click'))
+    return;
+  recordEventForTarget('click', event, target);
+}
+
+function dropdownOptionEventTarget(event: Event) {
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+  for (const candidate of path) {
+    if (candidate instanceof Element && isDropdownOptionTarget(candidate))
+      return candidate;
+  }
+  const target = event.target instanceof Element ? event.target : undefined;
+  return target && isDropdownOptionTarget(target) ? target : undefined;
+}
+
 function recordEvent(kind: ContextEventKind, event: Event) {
   const target = event.target instanceof Element ? event.target : undefined;
+  recordEventForTarget(kind, event, target);
+}
+
+function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Element) {
   if (!target || shouldIgnoreTarget(target, kind))
     return;
 
@@ -330,7 +353,7 @@ function collectTable(target: Element, anchor = actionAnchorForElement(target)) 
   const rowKind = rowKindFor(row);
   const context = compactObject({
     title: proTableTitle(wrapper) || (table ? tableTitle(table) : undefined) || sectionTitleAround(wrapper || table || row),
-    testId: (wrapper ? testIdOf(wrapper) : undefined) || (table ? testIdOf(table) : undefined),
+    testId: (wrapper ? testIdOf(wrapper) : undefined) || (table ? testIdOf(table) : undefined) || tableContainerTestId(wrapper || table || row),
     rowKey: row?.getAttribute('data-row-key') || parentExpandedRow?.getAttribute('data-row-key') || (rowIdentity?.stable ? rowIdentity.value : undefined),
     rowText,
     rowIdentity,
@@ -349,6 +372,15 @@ function collectTable(target: Element, anchor = actionAnchorForElement(target)) 
     ...context,
     fingerprint: tableFingerprint(context),
   });
+}
+
+function tableContainerTestId(element?: Element) {
+  for (let current = element?.parentElement, depth = 0; current && depth < maxAncestorDepth; current = current.parentElement, depth++) {
+    const testId = testIdOf(current);
+    if (testId && current.querySelector('.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]'))
+      return testId;
+  }
+  return undefined;
 }
 
 function collectForm(target: Element, anchor = actionAnchorForElement(target)) {

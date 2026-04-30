@@ -236,7 +236,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       continue;
     }
     const step = buildSyntheticClickStep(recorder, event);
-    const insertAt = options.insertAfterStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === options.insertAfterStepId) + 1) : steps.length;
+    const insertAt = options.insertAfterStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === options.insertAfterStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
     steps.splice(insertAt, 0, step);
     addedStepIds.push(step.id);
     options.insertAfterStepId = step.id;
@@ -278,6 +278,32 @@ export function createAssertion(type: FlowAssertionType, id: string, step?: Flow
     expected: defaultExpected(type, step),
     enabled: true,
   };
+}
+
+function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEvent) {
+  const eventWallTime = event.wallTime;
+  if (typeof eventWallTime !== 'number')
+    return steps.length;
+  let insertAt = 0;
+  let sawComparableWallTime = false;
+  steps.forEach((step, index) => {
+    const wallTime = stepWallTime(step);
+    if (typeof wallTime !== 'number')
+      return;
+    sawComparableWallTime = true;
+    if (wallTime <= eventWallTime)
+      insertAt = index + 1;
+  });
+  return sawComparableWallTime ? insertAt : steps.length;
+}
+
+function stepWallTime(step: FlowStep) {
+  const raw = asRecord(step.rawAction);
+  if (typeof raw.wallTime === 'number')
+    return raw.wallTime;
+  if (typeof step.context?.capturedAt === 'number')
+    return step.context.capturedAt;
+  return undefined;
 }
 
 function createRecordingSession(actions: unknown[], options: MergeActionsOptions): RecordingSession {
@@ -533,9 +559,16 @@ function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: Page
   const target = extractTarget(action);
   if (targetsLikelySame(target, event.before.target))
     return true;
+  if (isDropdownOptionContext(event.before.target))
+    return false;
   if (diff < 800 && isWeakPageContextClickTarget(event.before.target))
     return true;
   return diff < 400 && !target?.testId && !event.before.target?.testId;
+}
+
+function isDropdownOptionContext(target?: ElementContext) {
+  return /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(target?.controlType || '') ||
+    /^(option|treeitem|menuitem)$/.test(target?.role || '');
 }
 
 function isWeakPageContextClickTarget(target?: ElementContext) {

@@ -590,6 +590,41 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'AntD select option click is synthesized even when a combobox click was recorded nearby',
+    run: () => {
+      const wallTime = Date.now() - 2000;
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: {
+          name: 'click',
+          selector: 'internal:role=combobox[name="下方表单使用条目"i]',
+        },
+        wallTime,
+      }, {
+        action: {
+          name: 'fill',
+          selector: 'internal:role=textbox[name="使用备注"i]',
+          text: '下方表单使用刚保存的条目',
+        },
+        wallTime: wallTime + 520,
+      }], [], {});
+      const optionEvent = pageClickEventWithTarget('ctx-select-option', wallTime + 260, {
+        tag: 'div',
+        role: 'option',
+        text: 'real-item-a',
+        normalizedText: 'real-item-a',
+        framework: 'antd',
+        controlType: 'select-option',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [optionEvent]);
+      const code = generateBusinessFlowPlaywrightCode(withSynthetic);
+
+      assertEqual(withSynthetic.steps.map(step => step.action), ['click', 'click', 'fill']);
+      assertEqual(withSynthetic.steps[1].target?.text, 'real-item-a');
+      assert(code.includes('ant-select-item-option'), 'select option synthetic step should use visible AntD option content in replay code');
+    },
+  },
+  {
     name: 'synthetic page context click prefers a captured test id selector',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -1272,6 +1307,53 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('.press("CapsLock");') || firstStep.includes(`.press('CapsLock');`), 's001 should render the press action');
       assert(!firstStep.includes('.fill('), 's001 should not replay stale fill code');
+    },
+  },
+  {
+    name: 'code preview regenerates AntD select option clicks from page context instead of brittle title locators',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:attr=[title="real-item-a"i]',
+            locator: 'internal:attr=[title="real-item-a"i]',
+          },
+          context: {
+            eventId: 'ctx-select-option',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'div',
+                role: 'option',
+                title: 'real-item-a',
+                text: 'real-item-a',
+                normalizedText: 'real-item-a',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:attr=[title="real-item-a"i]',
+            },
+          },
+          sourceCode: `await page.getByTitle('real-item-a').locator('div').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes(`locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option").filter({ hasText: "real-item-a" }).last()`) || firstStep.includes(`locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').filter({ hasText: 'real-item-a' })`), 'select option should replay through the visible AntD option content locator');
+      assert(!firstStep.includes('getByTitle'), 'select option should not replay through brittle title locators');
     },
   },
   {
