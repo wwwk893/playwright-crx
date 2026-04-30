@@ -73,7 +73,10 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   expect(flow.steps.some((step: any) => step.target?.scope?.table?.rowKey === 'user-42')).toBeTruthy();
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']create-user-btn["']\)/);
   expect(flow.artifacts.playwrightCode).toMatch(/getByRole\(["']textbox["'],\s*\{\s*name:\s*["']\*?\s*用户名["']/);
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\) \.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']审计员["']\s*\}\)\.last\(\)/);
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']审计员["']\s*\}\)/);
+  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
+  expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
+  expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']users-table["']\)/);
   expect(flow.artifacts.playwrightCode).toContain('data-row-key=\\"user-42\\"');
   expect(exportedYaml).toContain('AntD 用户流程 E2E');
@@ -134,8 +137,107 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\) \.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)\.last\(\)/);
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)/);
+  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
+  expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
+  expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
+
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
+});
+
+
+test('keeps plugin edits stable across middle insert, wait, repeat segment, saved continue, and generated replay @plugin-stability', async ({ context, page, attachRecorder, baseURL }) => {
+  test.setTimeout(180_000);
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page);
+  recorderPage.on('dialog', dialog => dialog.accept('1'));
+
+  const flowName = `插件稳定性流程 ${Date.now()}`;
+  await beginNewFlowFromLibrary(recorderPage);
+  await fillFlowMeta(recorderPage, '流程名称', flowName);
+  await fillFlowMeta(recorderPage, '应用', 'AntD Admin');
+  await fillFlowMeta(recorderPage, '模块', '稳定性编辑');
+  await fillFlowMeta(recorderPage, '页面', '循环与插入');
+  await fillFlowMeta(recorderPage, '角色', '测试');
+  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+
+  await page.goto(`${baseURL}/antd-business-flow-stability.html`);
+  await expect(page.getByText('业务流程稳定性测试页')).toBeVisible();
+  await page.getByTestId('site-ip-add').click();
+  await page.getByPlaceholder('地址池名称').fill('pool-alpha');
+  await page.getByTestId('site-save-button').click();
+  await expect(page.getByRole('row', { name: /pool-alpha/ })).toBeVisible({ timeout: 10_000 });
+  await page.getByPlaceholder('填写使用备注').fill('初始保存后备注');
+
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
+  await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+
+  let flow = await exportBusinessFlowJson(recorderPage);
+  const addStepId = flow.steps.find((step: any) => step.target?.testId === 'site-ip-add')?.id || requiredStepId(flow, (step: any) => step.action === 'navigate', 'initial anchor step');
+  const fillStepId = requiredStepId(flow, (step: any) => step.value === 'pool-alpha', 'pool name fill step');
+  const saveStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-save-button' || /保存配置/.test(String(step.target?.name || step.target?.text || step.target?.displayName || '')), 'save step');
+
+  await openInsertMenuAfterStep(recorderPage, addStepId);
+  await recorderPage.getByRole('button', { name: '从这里继续录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+  await expect(recorderPage.locator('.insert-recording-banner')).toContainText(addStepId);
+  await page.getByTestId('site-ip-validate').click();
+  await expect(page.getByTestId('event-log')).toContainText('validate');
+  await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+
+  flow = await exportBusinessFlowJson(recorderPage);
+  const validateStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-validate', 'inserted validate step');
+  expect(stepIndex(flow, validateStepId)).toBe(stepIndex(flow, addStepId) + 1);
+
+  await openInsertMenuAfterStep(recorderPage, saveStepId);
+  await recorderPage.getByRole('button', { name: '插入等待' }).click();
+  await expect(recorderPage.locator('.review-step-list')).toContainText('等待');
+
+  flow = await exportBusinessFlowJson(recorderPage);
+  const waitStepId = requiredStepId(flow, (step: any) => step.action === 'wait', 'inserted wait step');
+  expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, saveStepId) + 1);
+
+  await recorderPage.getByRole('button', { name: '选择全部' }).click();
+  await expect(recorderPage.locator('.repeat-create-actions .primary')).toBeEnabled();
+  await recorderPage.locator('.repeat-create-actions .primary').click();
+  await expect(recorderPage.locator('.repeat-editor')).toBeVisible({ timeout: 10_000 });
+  if (await recorderPage.locator('.repeat-mapping').isVisible().catch(() => false)) {
+    await recorderPage.locator('.repeat-mapping label').filter({ hasText: '片段名称' }).locator('input').fill('批量保存地址池');
+    await recorderPage.getByRole('button', { name: '生成数据表' }).click();
+  }
+  await expect.poll(async () => await recorderPage.locator('.repeat-data input').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value).join('\n'))).toContain('pool-alpha');
+  await recorderPage.getByRole('button', { name: '保存片段' }).click();
+  await expect(recorderPage.locator('.repeat-segment-card')).toContainText(/批量保存地址池|批量执行/);
+
+  await recorderPage.getByRole('button', { name: '保存记录' }).click();
+  await openSavedRecord(recorderPage, flowName);
+  await recorderPage.getByRole('button', { name: '继续录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.getByTestId('stability-wan-select').click();
+  await clickVisibleAntDOption(page, 'WAN1');
+  await page.getByPlaceholder('填写使用备注').fill('循环后继续补步骤');
+  await page.getByTestId('site-post-save-action').click();
+  await expect(page.getByTestId('event-log')).toContainText('post-save');
+  await page.waitForTimeout(1200);
+  await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await recorderPage.getByRole('button', { name: '保存记录' }).click();
+
+  await openSavedRecord(recorderPage, flowName);
+  flow = await exportBusinessFlowJson(recorderPage);
+  expect(flow.repeatSegments?.[0]?.stepIds).toEqual(expect.arrayContaining([fillStepId, saveStepId, waitStepId]));
+  expect(flow.steps.some((step: any) => step.target?.testId === 'site-ip-validate')).toBeTruthy();
+  expect(flow.steps.some((step: any) => step.action === 'wait')).toBeTruthy();
+  expect(flow.artifacts.playwrightCode).toContain('for (const row of');
+  expect(flow.artifacts.playwrightCode).toMatch(/批量保存地址池|批量执行/);
+  expect(flow.artifacts.playwrightCode).toContain('WAN1');
+  expect(flow.artifacts.playwrightCode).not.toContain('WAN1-copy');
+  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode);
 });
@@ -157,16 +259,63 @@ async function fillFlowMeta(recorderPage: Page, label: string, value: string) {
 }
 
 async function clickVisibleAntDOption(page: Page, text: string) {
-  const option = page
-      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
-      .filter({ hasText: text })
-      .last();
-  await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.evaluate(element => {
+  const options = page
+      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+      .last()
+      .locator('.ant-select-item-option')
+      .filter({ hasText: text });
+  await expect(options.first()).toBeVisible({ timeout: 10_000 });
+  await options.evaluateAll((elements, expectedText) => {
+    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+    const expected = normalize(expectedText);
+    const element = elements.find(element => normalize(element.getAttribute('title')) === expected || normalize(element.textContent) === expected);
+    if (!element)
+      throw new Error(`AntD option not found exactly: ${expected}`);
     element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
     element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  });
+  }, text);
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+}
+
+
+async function exportBusinessFlowJson(recorderPage: Page) {
+  const exportedJson = await downloadTextAfterClick(
+      recorderPage,
+      recorderPage.getByRole('button', { name: '导出流程 JSON' }).last(),
+  );
+  return JSON.parse(exportedJson);
+}
+
+function requiredStepId(flow: any, predicate: (step: any) => boolean, description: string) {
+  const step = flow.steps.find(predicate);
+  if (!step)
+    throw new Error(`Unable to find ${description} in exported flow: ${JSON.stringify(flow.steps.map((step: any) => ({ id: step.id, action: step.action, target: step.target, value: step.value })), null, 2)}`);
+  return step.id;
+}
+
+function stepIndex(flow: any, stepId: string) {
+  return flow.steps.findIndex((step: any) => step.id === stepId);
+}
+
+async function openInsertMenuAfterStep(recorderPage: Page, stepId: string) {
+  await recorderPage.evaluate(id => {
+    const rows = Array.from(document.querySelectorAll('.review-step-row'));
+    const row = rows.find(row => row.textContent?.includes(id));
+    const slot = row?.nextElementSibling as HTMLElement | undefined;
+    const button = slot?.querySelector('button') as HTMLButtonElement | null;
+    if (!button)
+      throw new Error(`Unable to find insert slot after ${id}`);
+    button.click();
+  }, stepId);
+  await expect(recorderPage.locator('.review-insert-popover')).toBeVisible({ timeout: 10_000 });
+}
+
+async function openSavedRecord(recorderPage: Page, flowName: string) {
+  const card = recorderPage.locator('.library-card').filter({ hasText: flowName }).first();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await card.getByRole('button', { name: '打开' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
 }
 
 async function downloadTextAfterClick(recorderPage: Page, trigger: ReturnType<Page['locator']>) {
@@ -195,10 +344,16 @@ async function replayGeneratedPlaywrightCode(context: BrowserContext, code: stri
 }
 
 function testBody(code: string) {
-  const match = code.match(/test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{\n([\s\S]*)\n\}\);\s*$/);
-  if (!match)
+  const header = code.match(/test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{/);
+  if (!header)
+    throw new Error(`Unable to find generated Playwright test header:\n${code}`);
+  const bodyStart = (header.index ?? 0) + header[0].length;
+  let bodyEnd = code.lastIndexOf('\n});');
+  if (bodyEnd < bodyStart)
+    bodyEnd = code.lastIndexOf('});');
+  if (bodyEnd < bodyStart)
     throw new Error(`Unable to extract generated Playwright test body:\n${code}`);
-  return match[1]
+  return code.slice(bodyStart, bodyEnd)
       .split('\n')
       .filter(line => !line.trimStart().startsWith('//'))
       .join('\n');

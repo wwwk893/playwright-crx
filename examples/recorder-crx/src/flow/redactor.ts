@@ -35,7 +35,7 @@ function redact(value: unknown, key: string | undefined, seen: WeakMap<object, u
     return '***';
 
   if (typeof value === 'string')
-    return redactString(value);
+    return redactString(value, { truncate: key !== 'playwrightCode' });
   if (typeof value !== 'object' || value === null)
     return value;
 
@@ -58,7 +58,7 @@ function redact(value: unknown, key: string | undefined, seen: WeakMap<object, u
   return clone;
 }
 
-function redactString(value: string) {
+function redactString(value: string, options: { truncate?: boolean } = {}) {
   let result = value
       .replace(jwtPattern, '***token***')
       .replace(base64LikePattern, '***token***')
@@ -66,7 +66,7 @@ function redactString(value: string) {
       .replace(emailPattern, '***email***')
       .replace(idPattern, '***id***');
 
-  if (result.length > 2000)
+  if (options.truncate !== false && result.length > 2000)
     result = `${result.slice(0, 2000)}...***truncated***`;
   return result;
 }

@@ -211,6 +211,8 @@ function shouldIgnoreMismatchedDropdownOptionContext(step: FlowStep, event: Page
   const contextTarget = event.before.target;
   if (!contextTarget || !isDropdownOptionContext(contextTarget))
     return false;
+  if (!stepLooksLikeDropdownOption(step))
+    return true;
   const stepTestId = step.target?.testId;
   if (stepTestId && contextTarget.testId !== stepTestId)
     return true;
@@ -218,6 +220,15 @@ function shouldIgnoreMismatchedDropdownOptionContext(step: FlowStep, event: Page
   if (recorderSelector && /internal:testid=/.test(recorderSelector) && !contextTarget.testId)
     return true;
   return false;
+}
+
+function stepLooksLikeDropdownOption(step: FlowStep) {
+  if (step.context?.before.target && isDropdownOptionContext(step.context.before.target))
+    return true;
+  if (step.target?.role === 'option')
+    return true;
+  const recorderSelector = recorderSelectorForStep(step) || '';
+  return /internal:attr=\[title=|\.ant-select-item-option|\.ant-select-dropdown|\[role=["']option["']\]/.test(recorderSelector);
 }
 
 function isDropdownOptionContext(target: ElementContext) {

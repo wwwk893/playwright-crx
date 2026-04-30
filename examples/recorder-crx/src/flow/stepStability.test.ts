@@ -10,6 +10,7 @@ import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { mergePageContextIntoFlow } from './flowContextMerger';
 import { createRepeatSegment } from './repeatSegments';
+import { redactBusinessFlow } from './redactor';
 import type { PageContextEvent, ElementContext } from './pageContextTypes';
 import type { BusinessFlow } from './types';
 import { createEmptyBusinessFlow } from './types';
@@ -1374,8 +1375,191 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes(`locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option").filter({ hasText: "real-item-a" }).last()`) || firstStep.includes(`locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').filter({ hasText: 'real-item-a' })`), 'select option should replay through the visible AntD option content locator');
+      assert(firstStep.includes(`locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option").filter({ hasText: "real-item-a" })`), 'select option should replay through the visible AntD option locator scoped to the active dropdown');
+      assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'select option should replay through the AntD mouse event fallback');
+      assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'select option replay should wait briefly for the dropdown to close');
       assert(!firstStep.includes('getByTitle'), 'select option should not replay through brittle title locators');
+    },
+  },
+  {
+    name: 'generic ARIA option does not use AntD select replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'option',
+            name: 'Plain Listbox Option',
+            text: 'Plain Listbox Option',
+            locator: 'internal:role=option[name="Plain Listbox Option"i]',
+          },
+          context: {
+            eventId: 'ctx-generic-option',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'div',
+                role: 'option',
+                text: 'Plain Listbox Option',
+                normalizedText: 'Plain Listbox Option',
+                framework: 'generic',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: {
+            wallTime: 1000,
+            endWallTime: 1000,
+            action: {
+              name: 'click',
+              selector: 'internal:role=option[name="Plain Listbox Option"i]',
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(!firstStep.includes('.ant-select-dropdown'), 'generic role=option should not be rewritten into AntD dropdown replay');
+      assert(firstStep.includes('Plain Listbox Option'), 'generic option should keep a generic locator mentioning its option text');
+    },
+  },
+  {
+    name: 'raw title option without AntD context does not use AntD select replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:attr=[title="plain-title"i]',
+            locator: 'internal:attr=[title="plain-title"i]',
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:attr=[title="plain-title"i]',
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(!firstStep.includes('.ant-select-dropdown'), 'raw title alone should not imply AntD select option replay');
+    },
+  },
+  {
+    name: 'AntD select option replay is scoped to the active dropdown, trigger-aware, and waits for close',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:attr=[title="real-item-a"i]',
+            locator: 'internal:attr=[title="real-item-a"i]',
+            scope: {
+              form: {
+                label: '下方表单使用条目',
+                testId: 'usage-form',
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-select-option',
+            capturedAt: 1000,
+            before: {
+              form: {
+                label: '下方表单使用条目',
+                testId: 'usage-form',
+              },
+              target: {
+                tag: 'div',
+                role: 'option',
+                title: 'real-item-a',
+                text: 'real-item-a',
+                normalizedText: 'real-item-a',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:attr=[title="real-item-a"i]',
+            },
+          },
+          sourceCode: `await page.getByTitle('real-item-a').locator('div').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'AntD workaround should be documented in generated code');
+      assert(firstStep.includes('page.getByTestId("usage-form")'), 'AntD replay should open the trigger from contextual test id before falling back to .last()');
+      assert(firstStep.includes('locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option")'), 'option lookup should be scoped inside the last visible dropdown');
+      assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'AntD replay should keep the explicit mouse event fallback');
+      assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'AntD replay should wait briefly for the dropdown to close after dispatch');
+    },
+  },
+  {
+    name: 'dropdown option page context is ignored for non-option click steps',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'button',
+            name: '确定',
+            text: '确定',
+          },
+          rawAction: {
+            wallTime: 1000,
+            endWallTime: 1000,
+            action: {
+              name: 'click',
+              selector: 'internal:role=button[name="确定"i]',
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const merged = mergePageContextIntoFlow(flow, [pageClickEventWithTarget('stale-option', 1000, {
+        tag: 'div',
+        role: 'option',
+        title: '审计员',
+        text: '审计员',
+        normalizedText: '审计员',
+        framework: 'antd',
+        controlType: 'select-option',
+      })]);
+
+      assertEqual(merged.steps[0].target?.role, 'button');
+      assertEqual(merged.steps[0].target?.name, '确定');
+      assert(!merged.steps[0].context, 'stale option context should not be attached to a normal button step');
     },
   },
   {
@@ -1424,6 +1608,69 @@ test('demo', async ({ page }) => {
       assert(!playbackCode.includes('.evaluate('), 'runtime playback code should not include unsupported evaluate callbacks');
       assert(playbackCode.includes('.ant-select-item-option'), 'runtime playback should still target the visible AntD option');
       assert(playbackCode.includes('.click();'), 'runtime playback should remain a parseable click action');
+    },
+  },
+  {
+    name: 'playback action count uses parser-safe AntD option code',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:attr=[title="real-item-a"i]',
+            locator: 'internal:attr=[title="real-item-a"i]',
+          },
+          context: {
+            eventId: 'ctx-select-option',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'div',
+                role: 'option',
+                title: 'real-item-a',
+                text: 'real-item-a',
+                normalizedText: 'real-item-a',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:attr=[title="real-item-a"i]',
+            },
+          },
+          sourceCode: `await page.getByTitle('real-item-a').locator('div').click();`,
+          assertions: [],
+        }],
+      };
+
+      const exportedCode = generateBusinessFlowPlaywrightCode(flow);
+      assert(exportedCode.includes('evaluateAll'), 'exported Playwright code should keep the AntD dispatch workaround');
+      assertEqual(countBusinessFlowPlaybackActions(flow), 1);
+    },
+  },
+  {
+    name: 'redaction preserves full generated playwright code while still masking secrets',
+    run: () => {
+      const longCode = `await page.goto("/start");\n${'await page.getByRole("button", { name: "保存" }).click();\n'.repeat(80)}await page.getByRole("button", { name: "完成" }).click();`;
+      const flow = prepareBusinessFlowForExport({
+        ...createNamedFlow(),
+        artifacts: {
+          playwrightCode: longCode,
+          authorization: 'Bearer super-secret-token',
+        } as any,
+      }, longCode);
+      const redacted = redactBusinessFlow(flow);
+      assertEqual(redacted.artifacts?.playwrightCode, longCode);
+      assertEqual((redacted.artifacts as any)?.authorization, '***');
+      assert(!redacted.artifacts?.playwrightCode?.includes('***truncated***'), 'playwrightCode must not be truncated by redaction');
     },
   },
   {

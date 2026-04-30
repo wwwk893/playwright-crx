@@ -75,14 +75,14 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     if (segment) {
       const rows = segment.rows.length ? segment.rows : [{ id: 'row-1', values: {} }];
       const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
-      count += rows.length * segmentSteps.reduce((total, step) => total + countStepActions(step), 0);
+      count += rows.length * segmentSteps.reduce((total, step) => total + countStepActions(step, { parserSafe: true }), 0);
       segment.stepIds.forEach(stepId => emittedRepeatStepIds.add(stepId));
       continue;
     }
     if (emittedRepeatStepIds.has(step.id))
       continue;
 
-    count += countStepActions(step);
+    count += countStepActions(step, { parserSafe: true });
   }
   return count;
 }
@@ -134,8 +134,8 @@ function emitStep(lines: string[], step: FlowStep, indent: string, segment?: Flo
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
 }
 
-function countStepActions(step: FlowStep) {
-  const sourceActionCount = sourceCodeForStep(step)
+function countStepActions(step: FlowStep, options: EmitStepOptions = {}) {
+  const sourceActionCount = sourceCodeForStep(step, options)
       ?.filter(line => isRunnableLine(line))
       .length ?? 0;
   const assertionActionCount = step.assertions
@@ -210,9 +210,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const rawSelectOption = rawSelectOptionClickSource(step);
       if (rawSelectOption)
         return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;
-      const selectOption = selectOptionLocator(step);
+      const selectOption = antdSelectOptionLocator(step);
       if (selectOption)
-        return options.parserSafe ? `await ${selectOption}.click();` : selectOptionClickSource(selectOption);
+        return options.parserSafe ? `await ${selectOption}.last().click();` : selectOptionClickSource(selectOption);
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -268,7 +268,7 @@ function targetClickFallback(step: FlowStep) {
 
 function preferredTargetLocator(step: FlowStep) {
   return globalTestIdLocator(step) ||
-    selectOptionLocator(step) ||
+    antdSelectOptionLocator(step) ||
     tableScopedLocator(step) ||
     dialogScopedLocator(step) ||
     fieldLocator(step) ||
@@ -277,13 +277,59 @@ function preferredTargetLocator(step: FlowStep) {
     fallbackTextLocator(step);
 }
 
-function selectOptionLocator(step: FlowStep) {
+function antdSelectOptionLocator(step: FlowStep) {
+  if (!isAntdSelectOptionStep(step))
+    return undefined;
+  const optionName = antdSelectOptionName(step);
+  if (!optionName)
+    return undefined;
+  return `page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option").filter({ hasText: ${stringLiteral(optionName)} })`;
+}
+
+function isAntdSelectOptionStep(step: FlowStep) {
+  const contextTarget = step.context?.before.target;
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  const framework = contextTarget?.framework;
+  const controlType = contextTarget?.controlType;
+  const hasAntdSelector = /\.ant-select-item-option|\.ant-select-dropdown/.test(selector);
+  const hasRawTitle = !!rawSelectOptionTitle(step);
+  return ((framework === 'antd' || framework === 'procomponents') && controlType === 'select-option') ||
+    hasAntdSelector ||
+    (hasRawTitle && controlType === 'select-option' && (framework === 'antd' || framework === 'procomponents'));
+}
+
+function rawSelectOptionClickSource(step: FlowStep) {
+  const optionLocator = antdSelectOptionLocator(step);
+  if (!optionLocator)
+    return undefined;
+  return antdSelectOptionClickSource(step, optionLocator);
+}
+
+function rawSelectOptionParserSafeSource(step: FlowStep) {
+  const optionLocator = antdSelectOptionLocator(step);
+  return optionLocator ? `await ${optionLocator}.last().click();` : undefined;
+}
+
+function selectOptionClickSource(optionLocator: string) {
+  return antdSelectOptionClickSource(undefined, optionLocator);
+}
+
+function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: string) {
+  const triggerLocator = step ? antdSelectTriggerLocator(step) : `page.locator(".ant-select-selector").last()`;
+  const optionName = step ? antdSelectOptionName(step) : undefined;
+  return [
+    `// AntD Select virtual dropdown replay workaround: locator.click() may hit search input or portal/modal overlays.`,
+    `if (!await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().isVisible().catch(() => false))`,
+    `  await ${triggerLocator}.click();`,
+    antdSelectOptionDispatchSource(optionLocator, optionName),
+    `await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().waitFor({ state: "hidden", timeout: 1000 }).catch(() => {});`,
+  ].join('\n');
+}
+
+function antdSelectOptionName(step: FlowStep) {
   const contextTarget = step.context?.before.target;
   const rawTitle = rawSelectOptionTitle(step);
-  const isOption = contextTarget?.controlType === 'select-option' || contextTarget?.role === 'option' || step.target?.role === 'option' || !!rawTitle;
-  if (!isOption)
-    return undefined;
-  const optionName = contextTarget?.text ||
+  return contextTarget?.text ||
     contextTarget?.normalizedText ||
     contextTarget?.title ||
     contextTarget?.ariaLabel ||
@@ -291,44 +337,47 @@ function selectOptionLocator(step: FlowStep) {
     step.target?.name ||
     step.target?.displayName ||
     rawTitle;
-  if (!optionName)
-    return undefined;
-  return `page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option").filter({ hasText: ${stringLiteral(optionName)} }).last()`;
 }
 
-function rawSelectOptionClickSource(step: FlowStep) {
-  if (!rawSelectOptionTitle(step))
-    return undefined;
-  const optionLocator = selectOptionLocator(step);
-  if (!optionLocator)
-    return undefined;
+function antdSelectTriggerLocator(step: FlowStep) {
+  const testId = step.context?.before.form?.testId ||
+    step.target?.scope?.form?.testId ||
+    step.context?.before.target?.testId;
+  if (testId)
+    return `page.getByTestId(${stringLiteral(testId)})`;
+  const label = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label || step.target?.name;
+  if (label)
+    return `page.getByRole("combobox", { name: ${stringLiteral(label)} })`;
+  return `page.locator(".ant-select-selector").last()`;
+}
+
+function antdSelectOptionDispatchSource(locator: string, optionName?: string) {
+  if (!optionName) {
+    return [
+      `await ${locator}.last().evaluate(element => {`,
+      `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
+      `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
+      `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+      `});`,
+    ].join('\n');
+  }
   return [
-    `if (!await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().isVisible().catch(() => false))`,
-    `  await page.locator(".ant-select-selector").last().click();`,
-    selectOptionDispatchSource(optionLocator),
-  ].join('\n');
-}
-
-function rawSelectOptionParserSafeSource(step: FlowStep) {
-  const optionLocator = selectOptionLocator(step);
-  return optionLocator ? `await ${optionLocator}.click();` : undefined;
-}
-
-function selectOptionClickSource(optionLocator: string) {
-  return [
-    `if (!await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().isVisible().catch(() => false))`,
-    `  await page.locator(".ant-select-selector").last().click();`,
-    selectOptionDispatchSource(optionLocator),
-  ].join('\n');
-}
-
-function selectOptionDispatchSource(locator: string) {
-  return [
-    `await ${locator}.evaluate(element => {`,
+    `await ${locator}.first().waitFor({ state: "visible", timeout: 10000 });`,
+    `await ${locator}.evaluateAll((elements, expectedText) => {`,
+    `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
+    `  const expected = normalize(expectedText);`,
+    `  const element = elements.find(element => normalize(element.getAttribute("title")) === expected || normalize(element.textContent) === expected) || elements[elements.length - 1];`,
+    `  if (!element)`,
+    `    throw new Error(\`AntD option not found: \${expected}\`);`,
+    `  const text = normalize(element.textContent);`,
+    `  if (text !== expected && normalize(element.getAttribute("title")) !== expected)`,
+    `    throw new Error(\`AntD option text mismatch: expected \${expected}, got \${text}\`);`,
+    `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled"))`,
+    `    throw new Error(\`AntD option is disabled: \${expected}\`);`,
     `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
     `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
     `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
-    `});`,
+    `}, ${stringLiteral(optionName)});`,
   ].join('\n');
 }
 
