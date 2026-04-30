@@ -245,6 +245,70 @@ test('records real ProFormField network configuration fields and replays generat
 });
 
 
+test('records an IPv4 address pool ProFormSelect WAN flow and replays generated code @ipv4-pool', async ({ context, page, attachRecorder, baseURL }) => {
+  test.setTimeout(150_000);
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page);
+  recorderPage.on('dialog', dialog => dialog.accept());
+
+  await beginNewFlowFromLibrary(recorderPage);
+  await fillFlowMeta(recorderPage, '流程名称', '地址池');
+  await fillFlowMeta(recorderPage, '应用', 'AntD Pro');
+  await fillFlowMeta(recorderPage, '模块', '站点配置');
+  await fillFlowMeta(recorderPage, '页面', '全局配置');
+  await fillFlowMeta(recorderPage, '角色', 'admin');
+  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.goto(`${baseURL}/antd-pro-form-fields.html`);
+  await expect(page.getByText('地址池与端口池')).toBeVisible();
+  await page.getByTestId('site-ip-address-pool-create-button').click();
+  await expect(page.getByRole('dialog', { name: '新建IPv4地址池' })).toBeVisible();
+
+  await page.getByPlaceholder('地址池名称').fill('test1');
+  const ipv4Dialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '新建IPv4地址池' });
+  await ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first().click();
+  await clickVisibleAntDOption(page, 'xtest16:WAN1');
+  await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
+  await page.getByLabel('开始地址，例如：192.168.1.1').click();
+  await page.getByRole('textbox', { name: '开始地址，例如：' }).fill('1.1.1.1');
+  await page.getByLabel('结束地址，例如：192.168.1.254').click();
+  await page.getByRole('textbox', { name: '结束地址，例如：' }).fill('2.2.2.2');
+  await ipv4Dialog.getByRole('button', { name: '确 定' }).click();
+  await expect(page.getByRole('row', { name: /test1.*xtest16:WAN1.*1\.1\.1\.1.*2\.2\.2\.2/ })).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('site-save-button').click();
+  await expect(page.getByText('配置已保存')).toBeVisible();
+
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(9);
+  const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
+  await expect.poll(stepSubjects).toContain('site-ip-address-pool-create-button');
+  await expect.poll(stepSubjects).toContain('test1');
+  await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|xtest16:WAN1/);
+
+  await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+
+  const flow = await exportBusinessFlowJson(recorderPage);
+  expect(flow.flow.name).toBe('地址池');
+  expect(flow.steps.length).toBeGreaterThanOrEqual(9);
+  expect(flow.steps.some((step: any) => step.target?.testId === 'site-ip-address-pool-create-button')).toBeTruthy();
+  expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /WAN口|选择一个WAN口|xtest16:WAN1/.test(String(value || ''))))).toBeTruthy();
+  expect(flow.artifacts.playwrightCode).toContain('antd-pro-form-fields.html');
+  expect(flow.artifacts.playwrightCode).toContain('新建IPv4地址池');
+  expect(flow.artifacts.playwrightCode).toContain('test1');
+  expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
+  expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
+  expect(flow.artifacts.playwrightCode).toContain('2.2.2.2');
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-modal, \.ant-drawer, \[role=\\?["']dialog\\?["']\]["']\)[\s\S]*filter\(\{ hasText: ["']新建IPv4地址池["'] \}\)[\s\S]*locator\(["']\.ant-form-item["']\)[\s\S]*filter\(\{ hasText: ["']WAN口["'] \}\)[\s\S]*locator\(["']\.ant-select-selector["']\)/);
+  expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']WAN口["']/);
+  expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
+
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
+});
+
+
 test('keeps plugin edits stable across middle insert, wait, repeat segment, saved continue, and generated replay @plugin-stability', async ({ context, page, attachRecorder, baseURL }) => {
   test.setTimeout(180_000);
 

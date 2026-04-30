@@ -21,6 +21,14 @@ import {
 import type { FormListActionType, ProColumns } from '@ant-design/pro-components';
 import 'antd/dist/reset.css';
 
+type IPv4Pool = {
+  id: string;
+  name: string;
+  wan: string;
+  startIp: string;
+  endIp: string;
+};
+
 type NetworkResource = {
   id: string;
   name: string;
@@ -36,6 +44,8 @@ type NetworkResource = {
 };
 
 const wanOptions = [
+  { label: 'xtest16:WAN1', value: 'xtest16-wan1' },
+  { label: '34y43rt:WAN2', value: '34y43rt-wan2' },
   { label: 'edge-lab:WAN1', value: 'wan-1' },
   { label: 'edge-lab:WAN1-copy', value: 'wan-1-copy' },
   { label: 'edge-lab:WAN2', value: 'wan-2' },
@@ -127,9 +137,20 @@ function cascaderLabels(values?: string[]) {
 
 function AntDProFormFieldsApp() {
   const [open, setOpen] = React.useState(false);
+  const [ipv4PoolOpen, setIpv4PoolOpen] = React.useState(false);
   const [rows, setRows] = React.useState<NetworkResource[]>([]);
+  const [ipv4Pools, setIpv4Pools] = React.useState<IPv4Pool[]>([]);
+  const [configSaved, setConfigSaved] = React.useState(false);
   const [form] = Form.useForm();
+  const [ipv4PoolForm] = Form.useForm();
   const mappingActionRef = React.useRef<FormListActionType<{ serviceName?: string; listenPort?: number }>>();
+
+  const ipv4PoolColumns: ProColumns<IPv4Pool>[] = [
+    { title: '地址池名称', dataIndex: 'name' },
+    { title: 'WAN口', dataIndex: 'wan', render: (_, row) => <Tag color="purple">{row.wan}</Tag> },
+    { title: '开始地址', dataIndex: 'startIp' },
+    { title: '结束地址', dataIndex: 'endIp' },
+  ];
 
   const columns: ProColumns<NetworkResource>[] = [
     { title: '资源名称', dataIndex: 'name' },
@@ -142,6 +163,20 @@ function AntDProFormFieldsApp() {
     { title: '端口映射', dataIndex: 'mappings', render: (_, row) => row.mappings?.map(item => `${item.serviceName}:${item.listenPort}`).join(', ') },
     { title: '备注', dataIndex: 'remark' },
   ];
+
+  async function saveIpv4Pool() {
+    const values = await ipv4PoolForm.validateFields();
+    const next: IPv4Pool = {
+      id: `ipv4-pool-${Date.now()}`,
+      name: values.name,
+      wan: labelFromOptions(wanOptions, values.wan),
+      startIp: values.startIp,
+      endIp: values.endIp,
+    };
+    setIpv4Pools(current => [...current, next]);
+    setIpv4PoolOpen(false);
+    ipv4PoolForm.resetFields();
+  }
 
   async function save() {
     const values = await form.validateFields();
@@ -165,6 +200,87 @@ function AntDProFormFieldsApp() {
 
   return <ConfigProvider locale={zhCN}>
     <App>
+
+      <ProCard title="地址池与端口池" bordered data-testid="site-global-ip-pools-section" style={{ margin: 24 }}>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Typography.Title level={4}>IP地址池</Typography.Title>
+          <Space>
+            <Button type="primary" data-testid="site-ip-address-pool-create-button" onClick={() => setIpv4PoolOpen(true)}>新建</Button>
+            <Button data-testid="site-save-button" onClick={() => setConfigSaved(true)}>保存配置</Button>
+            {configSaved ? <Tag color="green">配置已保存</Tag> : null}
+          </Space>
+          <Table<IPv4Pool>
+            data-testid="site-ip-address-pool-table"
+            rowKey="id"
+            pagination={false}
+            columns={ipv4PoolColumns as any}
+            dataSource={ipv4Pools}
+          />
+        </Space>
+      </ProCard>
+
+      <Modal
+        title="新建IPv4地址池"
+        open={ipv4PoolOpen}
+        destroyOnClose
+        width={640}
+        data-testid="ipv4-address-pool-modal"
+        onCancel={() => setIpv4PoolOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setIpv4PoolOpen(false)}>取 消</Button>,
+          <Button key="ok" type="primary" data-testid="ipv4-address-pool-confirm" onClick={saveIpv4Pool}>确 定</Button>,
+        ]}
+      >
+        <ProForm
+          form={ipv4PoolForm}
+          submitter={false}
+          layout="vertical"
+          initialValues={{ poolType: 'shared' }}
+          data-testid="ipv4-address-pool-form"
+        >
+          <ProFormText
+            name="name"
+            label="地址池名称"
+            placeholder="地址池名称"
+            rules={[{ required: true, message: '请输入地址池名称' }]}
+          />
+          <ProFormSelect
+            name="wan"
+            label="WAN口"
+            placeholder="选择一个WAN口"
+            options={wanOptions}
+            allowClear={false}
+            fieldProps={{
+              showSearch: true,
+              optionFilterProp: 'label',
+            } as any}
+            rules={[{ required: true, message: '选择一个WAN口' }]}
+          />
+          <ProFormRadio.Group
+            name="poolType"
+            label="类型"
+            radioType="button"
+            options={[
+              { label: '共享地址池', value: 'shared' },
+              { label: '独享地址池', value: 'dedicated' },
+            ]}
+          />
+          <ProFormCheckbox name="arpProxy">开启代理ARP</ProFormCheckbox>
+          <ProFormText
+            name="startIp"
+            label="开始地址，例如：192.168.1.1"
+            placeholder="开始地址，例如："
+            rules={[{ required: true, message: '请输入开始地址' }]}
+          />
+          <ProFormText
+            name="endIp"
+            label="结束地址，例如：192.168.1.254"
+            placeholder="结束地址，例如："
+            rules={[{ required: true, message: '请输入结束地址' }]}
+          />
+        </ProForm>
+      </Modal>
+
       <ProCard title="网络配置资源" bordered data-testid="network-config-card" style={{ margin: 24 }}>
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <Space>
