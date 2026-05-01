@@ -1,0 +1,164 @@
+{
+  "name": "recorder_user_admin_modal_repeat",
+  "title": "Recorder 用户管理 Modal + Select 意图识别 + 循环数据生成",
+  "task_type": "recorder_intent_and_repeat_data",
+  "business_goal": "评测模型是否能理解用户管理表格中新建用户的 Modal 表单、角色 Select 选择和保存后表格/Toast 变化，并生成批量用户数据。",
+  "ai_intent_input": {
+    "flow": {
+      "name": "用户管理",
+      "module": "系统管理",
+      "page": "用户列表",
+      "role": "admin",
+      "businessGoal": "批量新建用户并选择角色"
+    },
+    "steps": [
+      {
+        "stepId": "u001",
+        "order": 1,
+        "action": "click",
+        "target": {
+          "role": "button",
+          "text": "新建用户",
+          "testId": "create-user-btn"
+        },
+        "before": {
+          "card": "用户管理",
+          "table": "用户列表"
+        },
+        "after": {
+          "dialog": "新建用户"
+        }
+      },
+      {
+        "stepId": "u002",
+        "order": 2,
+        "action": "fill",
+        "target": {
+          "placeholder": "请输入用户名"
+        },
+        "value": "alice.qa",
+        "before": {
+          "dialog": "新建用户",
+          "field": "用户名"
+        }
+      },
+      {
+        "stepId": "u003",
+        "order": 3,
+        "action": "click",
+        "target": {
+          "role": "combobox",
+          "text": "角色"
+        },
+        "before": {
+          "dialog": "新建用户",
+          "field": "角色"
+        },
+        "after": {
+          "dropdown": "角色选项"
+        }
+      },
+      {
+        "stepId": "u004",
+        "order": 4,
+        "action": "select",
+        "target": {
+          "text": "审计员"
+        },
+        "value": "审计员",
+        "before": {
+          "dropdown": "角色选项",
+          "field": "角色"
+        },
+        "after": {
+          "dialog": "新建用户",
+          "selectedOption": "审计员"
+        }
+      },
+      {
+        "stepId": "u005",
+        "order": 5,
+        "action": "click",
+        "target": {
+          "role": "button",
+          "text": "确定",
+          "testId": "modal-confirm"
+        },
+        "before": {
+          "dialog": "新建用户"
+        },
+        "after": {
+          "table": "用户列表",
+          "toast": "保存成功：alice.qa"
+        }
+      }
+    ]
+  },
+  "repeat_segment": {
+    "name": "批量新建用户",
+    "selected_step_ids": [
+      "u001",
+      "u002",
+      "u003",
+      "u004",
+      "u005"
+    ],
+    "parameters": [
+      {
+        "id": "p001",
+        "label": "用户名",
+        "variableName": "username",
+        "currentValue": "alice.qa",
+        "sourceStepId": "u002"
+      },
+      {
+        "id": "p002",
+        "label": "角色",
+        "variableName": "role",
+        "currentValue": "审计员",
+        "sourceStepId": "u004"
+      }
+    ]
+  },
+  "expected": {
+    "step_intents": {
+      "u001": [
+        "打开",
+        "新建用户"
+      ],
+      "u002": [
+        "填写",
+        "用户名"
+      ],
+      "u003": [
+        "打开",
+        "角色"
+      ],
+      "u004": [
+        "选择",
+        "角色",
+        "审计员"
+      ],
+      "u005": [
+        "确定",
+        "保存",
+        "用户"
+      ]
+    },
+    "repeat_data_fields": [
+      "username",
+      "role"
+    ],
+    "required_option_values": [
+      "审计员"
+    ],
+    "automation_risk_keywords": [
+      "AntD",
+      "Select",
+      "dropdown",
+      "portal",
+      "表格",
+      "toast"
+    ]
+  }
+}

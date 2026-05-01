@@ -410,6 +410,7 @@ function AntDProFormFieldsApp() {
             fieldProps={{
               'data-testid': 'network-resource-egress-cascader',
               options: egressPathOptions,
+              showSearch: true,
             } as any}
             rules={[{ required: true, message: '选择出口路径' }]}
           />

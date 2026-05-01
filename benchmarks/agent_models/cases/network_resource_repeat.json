@@ -1,0 +1,383 @@
+{
+  "name": "recorder_network_resource_complex_repeat",
+  "title": "Recorder 网络资源复杂表单意图识别 + 循环数据生成",
+  "task_type": "recorder_intent_and_repeat_data",
+  "business_goal": "评测模型是否能理解 AntD/ProComponents 复杂网络资源表单，包含 ProFormSelect、TreeSelect、Cascader、Switch、ProFormList 端口映射，并为选中的中间步骤生成可循环的数据。",
+  "ai_intent_input": {
+    "flow": {
+      "name": "网络资源",
+      "module": "站点配置",
+      "page": "全局配置",
+      "role": "admin",
+      "businessGoal": "新建网络资源并保存端口映射策略"
+    },
+    "steps": [
+      {
+        "stepId": "n001",
+        "order": 1,
+        "action": "click",
+        "target": {
+          "role": "button",
+          "text": "新建网络资源",
+          "testId": "network-resource-add"
+        },
+        "before": {
+          "page": "全局配置",
+          "section": "网络配置资源"
+        },
+        "after": {
+          "dialog": "新建网络资源"
+        }
+      },
+      {
+        "stepId": "n002",
+        "order": 2,
+        "action": "fill",
+        "target": {
+          "placeholder": "地址池名称"
+        },
+        "value": "res-web-01",
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "资源名称"
+        }
+      },
+      {
+        "stepId": "n003",
+        "order": 3,
+        "action": "click",
+        "target": {
+          "role": "combobox",
+          "text": "选择一个WAN口"
+        },
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "WAN口"
+        },
+        "after": {
+          "dropdown": "选择一个WAN口"
+        }
+      },
+      {
+        "stepId": "n004",
+        "order": 4,
+        "action": "select",
+        "target": {
+          "text": "edge-lab:WAN1"
+        },
+        "value": "edge-lab:WAN1",
+        "before": {
+          "dropdown": "选择一个WAN口",
+          "field": "WAN口"
+        },
+        "after": {
+          "dialog": "新建网络资源",
+          "selectedOption": "edge-lab:WAN1"
+        }
+      },
+      {
+        "stepId": "n005",
+        "order": 5,
+        "action": "select",
+        "target": {
+          "text": "生产VRF"
+        },
+        "value": "生产VRF",
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "关联VRF"
+        }
+      },
+      {
+        "stepId": "n006",
+        "order": 6,
+        "action": "check",
+        "target": {
+          "text": "开启代理ARP"
+        },
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "能力开关"
+        }
+      },
+      {
+        "stepId": "n007",
+        "order": 7,
+        "action": "click",
+        "target": {
+          "role": "switch",
+          "text": "启用健康检查"
+        },
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "启用健康检查"
+        },
+        "after": {
+          "field": "探测地址 visible"
+        }
+      },
+      {
+        "stepId": "n008",
+        "order": 8,
+        "action": "fill",
+        "target": {
+          "placeholder": "https://probe.example/health"
+        },
+        "value": "https://probe.example/health",
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "探测地址"
+        }
+      },
+      {
+        "stepId": "n009",
+        "order": 9,
+        "action": "select",
+        "target": {
+          "text": "华东生产区"
+        },
+        "value": "华东生产区",
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "发布范围",
+          "control": "TreeSelect"
+        }
+      },
+      {
+        "stepId": "n010",
+        "order": 10,
+        "action": "select",
+        "target": {
+          "text": "上海 / 一号机房 / NAT集群A"
+        },
+        "value": "上海/一号机房/NAT集群A",
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "出口路径",
+          "control": "Cascader"
+        }
+      },
+      {
+        "stepId": "n011",
+        "order": 11,
+        "action": "fill",
+        "target": {
+          "placeholder": "服务名称"
+        },
+        "value": "web",
+        "before": {
+          "dialog": "新建网络资源",
+          "list": "端口映射规则",
+          "field": "服务名称"
+        }
+      },
+      {
+        "stepId": "n012",
+        "order": 12,
+        "action": "fill",
+        "target": {
+          "placeholder": "监听端口"
+        },
+        "value": "443",
+        "before": {
+          "dialog": "新建网络资源",
+          "list": "端口映射规则",
+          "field": "监听端口"
+        }
+      },
+      {
+        "stepId": "n013",
+        "order": 13,
+        "action": "fill",
+        "target": {
+          "placeholder": "填写策略备注"
+        },
+        "value": "生产访问策略",
+        "before": {
+          "dialog": "新建网络资源",
+          "field": "备注"
+        }
+      },
+      {
+        "stepId": "n014",
+        "order": 14,
+        "action": "click",
+        "target": {
+          "role": "button",
+          "text": "保存",
+          "testId": "network-resource-save"
+        },
+        "before": {
+          "dialog": "新建网络资源"
+        },
+        "after": {
+          "table": "网络配置资源",
+          "row": "res-web-01 edge-lab:WAN1 web:443"
+        }
+      }
+    ]
+  },
+  "repeat_segment": {
+    "name": "批量新建网络资源",
+    "selected_step_ids": [
+      "n001",
+      "n002",
+      "n003",
+      "n004",
+      "n005",
+      "n006",
+      "n007",
+      "n008",
+      "n009",
+      "n010",
+      "n011",
+      "n012",
+      "n013",
+      "n014"
+    ],
+    "parameters": [
+      {
+        "id": "p001",
+        "label": "资源名称",
+        "variableName": "resourceName",
+        "currentValue": "res-web-01",
+        "sourceStepId": "n002"
+      },
+      {
+        "id": "p002",
+        "label": "WAN口",
+        "variableName": "wanPort",
+        "currentValue": "edge-lab:WAN1",
+        "sourceStepId": "n004"
+      },
+      {
+        "id": "p003",
+        "label": "关联VRF",
+        "variableName": "vrf",
+        "currentValue": "生产VRF",
+        "sourceStepId": "n005"
+      },
+      {
+        "id": "p004",
+        "label": "发布范围",
+        "variableName": "scope",
+        "currentValue": "华东生产区",
+        "sourceStepId": "n009"
+      },
+      {
+        "id": "p005",
+        "label": "出口路径",
+        "variableName": "egressPath",
+        "currentValue": "上海/一号机房/NAT集群A",
+        "sourceStepId": "n010"
+      },
+      {
+        "id": "p006",
+        "label": "服务名称",
+        "variableName": "serviceName",
+        "currentValue": "web",
+        "sourceStepId": "n011"
+      },
+      {
+        "id": "p007",
+        "label": "监听端口",
+        "variableName": "listenPort",
+        "currentValue": "443",
+        "sourceStepId": "n012"
+      },
+      {
+        "id": "p008",
+        "label": "备注",
+        "variableName": "remark",
+        "currentValue": "生产访问策略",
+        "sourceStepId": "n013"
+      }
+    ]
+  },
+  "expected": {
+    "step_intents": {
+      "n001": [
+        "打开",
+        "新建网络资源"
+      ],
+      "n002": [
+        "填写",
+        "资源名称"
+      ],
+      "n003": [
+        "打开",
+        "WAN口"
+      ],
+      "n004": [
+        "选择",
+        "WAN口",
+        "edge-lab:WAN1"
+      ],
+      "n005": [
+        "选择",
+        "VRF"
+      ],
+      "n006": [
+        "开启",
+        "代理ARP"
+      ],
+      "n007": [
+        "启用",
+        "健康检查"
+      ],
+      "n008": [
+        "填写",
+        "探测地址"
+      ],
+      "n009": [
+        "选择",
+        "发布范围"
+      ],
+      "n010": [
+        "选择",
+        "出口路径"
+      ],
+      "n011": [
+        "填写",
+        "服务名称"
+      ],
+      "n012": [
+        "填写",
+        "监听端口"
+      ],
+      "n013": [
+        "填写",
+        "备注"
+      ],
+      "n014": [
+        "保存",
+        "网络资源"
+      ]
+    },
+    "repeat_data_fields": [
+      "resourceName",
+      "wanPort",
+      "vrf",
+      "scope",
+      "egressPath",
+      "serviceName",
+      "listenPort",
+      "remark"
+    ],
+    "required_option_values": [
+      "edge-lab:WAN1",
+      "生产VRF",
+      "华东生产区",
+      "NAT集群A"
+    ],
+    "automation_risk_keywords": [
+      "ProFormSelect",
+      "AntD",
+      "TreeSelect",
+      "Cascader",
+      "ProFormList",
+      "portal",
+      "动态"
+    ]
+  }
+}

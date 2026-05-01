@@ -32,7 +32,9 @@
     "clean": "npm run clean:pw && npm run clean:examples && npm run clean:tests && npm run clean:crx",
     "test:install": "cd ./tests && npx playwright install --with-deps chromium",
     "test": "cd ./tests && npx playwright test",
-    "test-ui": "cd ./tests && npx playwright test --ui --timeout 0"
+    "test-ui": "cd ./tests && npx playwright test --ui --timeout 0",
+    "benchmark:agents": "python3 ./benchmarks/agent_models/agent_model_benchmark.py",
+    "test:agent-benchmark": "python3 -m unittest benchmarks.agent_models.test_agent_model_benchmark -v"
   },
   "workspaces": [
     "examples/recorder-crx",

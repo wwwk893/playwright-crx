@@ -1,0 +1,13 @@
+{
+  "name": "ipv4_address_pool_proformselect",
+  "title": "IPv4 地址池 ProFormSelect WAN 业务流",
+  "business_goal": "从业务原型中理解：用户要在网络配置插件页面里创建 IPv4 地址池，选择 WAN 口，填写开始/结束地址，确认并保存；模型需要把这个意图转成可循环批量生成的测试数据和自动化注意点。",
+  "prototype": "页面区域：地址池与端口池 / IP地址池。点击 data-testid=site-ip-address-pool-create-button 打开 Modal：新建IPv4地址池。表单字段：地址池名称、WAN口（AntD ProComponents ProFormSelect，showSearch，placeholder=选择一个WAN口，选项包含 xtest16:WAN1）、开始地址 placeholder=192.168.1.1、结束地址 placeholder=192.168.1.254。点击 确 定 后关闭弹窗，点击 data-testid=site-save-button / 保存配置。历史失败：录制生成了 page.getByRole('combobox', { name: 'WAN口' }).click()，真实 replay 超时。更稳 selector 是在 .ant-modal/.ant-drawer/[role=dialog] 中 filter 新建IPv4地址池，再找 .ant-form-item filter WAN口，最后点 .ant-select-selector。不要依赖 #rc_select_14 这种动态 id。",
+  "expected": {
+    "intent_keywords": ["IPv4", "地址池", "WAN", "保存", "批量", "测试数据"],
+    "required_entities": ["地址池名称", "WAN口", "开始地址", "结束地址", "新建IPv4地址池", "保存配置"],
+    "required_data_fields": ["地址池名称", "WAN口", "开始地址", "结束地址"],
+    "required_option_values": ["xtest16:WAN1"],
+    "automation_risk_keywords": ["ProFormSelect", "AntD", "ant-select-selector", "combobox", "rc_select", "动态"]
+  }
+}

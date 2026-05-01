@@ -463,6 +463,84 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat segment infers AntD option click as selectable WAN parameter',
+    run: () => {
+      const flow = createNamedFlow();
+      const withSteps: BusinessFlow = {
+        ...flow,
+        steps: [
+          { id: 's001', order: 1, action: 'click', target: { testId: 'site-ip-address-pool-create-button', text: '新建' }, assertions: [] },
+          { id: 's002', order: 2, action: 'fill', target: { label: '地址池名称' }, value: 'test1', assertions: [] },
+          { id: 's003', order: 3, action: 'click', target: { role: 'combobox', text: '选择一个WAN口' }, context: { eventId: 'ctx-s003', capturedAt: 3, before: { form: { label: 'WAN口' }, dialog: { title: '新建IPv4地址池', type: 'modal', visible: true } }, after: { dialog: { title: '选择一个WAN口', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 's004', order: 4, action: 'click', target: { text: 'xtest16:WAN1' }, context: { eventId: 'ctx-s004', capturedAt: 4, before: { form: { label: 'WAN口' }, dialog: { title: '选择一个WAN口', type: 'dropdown', visible: true } }, after: { dialog: { title: '新建IPv4地址池', type: 'modal', visible: true } } }, assertions: [] },
+          { id: 's005', order: 5, action: 'fill', target: { label: '开始地址' }, value: '1.1.1.1', assertions: [] },
+          { id: 's006', order: 6, action: 'fill', target: { label: '结束地址' }, value: '2.2.2.2', assertions: [] },
+          { id: 's007', order: 7, action: 'click', target: { text: '确 定' }, assertions: [] },
+        ],
+      };
+
+      const segment = createRepeatSegment(withSteps, withSteps.steps.map(step => step.id));
+      const wanParameter = segment.parameters.find(parameter => parameter.variableName === 'wanPort');
+
+      assert(wanParameter, 'WAN option click should become repeat parameter');
+      assertEqual(wanParameter?.label, 'WAN口');
+      assertEqual(wanParameter?.currentValue, 'xtest16:WAN1');
+      assertEqual(segment.rows.map(row => row.values[wanParameter!.id]), ['xtest16:WAN1', 'xtest16:WAN1', 'xtest16:WAN1']);
+    },
+  },
+  {
+    name: 'repeat segment inherits role select label for context-light option click',
+    run: () => {
+      const flow = createNamedFlow();
+      const withSteps: BusinessFlow = {
+        ...flow,
+        steps: [
+          { id: 'u001', order: 1, action: 'click', target: { testId: 'create-user-btn', text: '新建用户' }, assertions: [] },
+          { id: 'u002', order: 2, action: 'fill', target: { placeholder: '请输入用户名', label: '用户名' }, value: 'alice.qa', assertions: [] },
+          { id: 'u003', order: 3, action: 'click', target: { role: 'combobox', text: '角色' }, context: { eventId: 'ctx-u003', capturedAt: 3, before: { form: { label: '角色' }, dialog: { title: '新建用户', type: 'modal', visible: true } }, after: { dialog: { title: '角色选项', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 'u004', order: 4, action: 'click', target: { text: '审计员' }, context: { eventId: 'ctx-u004', capturedAt: 4, before: { dialog: { title: '角色选项', type: 'dropdown', visible: true } }, after: { dialog: { title: '新建用户', type: 'modal', visible: true } } }, assertions: [] },
+          { id: 'u005', order: 5, action: 'click', target: { testId: 'modal-confirm', text: '确定' }, assertions: [] },
+        ],
+      };
+
+      const segment = createRepeatSegment(withSteps, withSteps.steps.map(step => step.id));
+      const usernameParameter = segment.parameters.find(parameter => parameter.variableName === 'username');
+      const roleParameter = segment.parameters.find(parameter => parameter.variableName === 'role');
+
+      assert(usernameParameter, 'username input should use stable username variable');
+      assert(roleParameter, 'role option click should inherit role label instead of generic param');
+      assertEqual(roleParameter?.label, '角色');
+      assertEqual(roleParameter?.currentValue, '审计员');
+      assertEqual(segment.rows.map(row => row.values[roleParameter!.id]), ['审计员', '审计员', '审计员']);
+    },
+  },
+  {
+    name: 'repeat segment keeps generated rows valid for duplicate network select parameters',
+    run: () => {
+      const flow = createNamedFlow();
+      const withSteps: BusinessFlow = {
+        ...flow,
+        steps: [
+          { id: 'n001', order: 1, action: 'fill', target: { placeholder: '地址池名称', label: '资源名称' }, value: 'res-web-01', assertions: [] },
+          { id: 'n002', order: 2, action: 'click', target: { role: 'combobox', text: '关联VRF' }, context: { eventId: 'ctx-n002', capturedAt: 2, before: { form: { label: '关联VRF' } }, after: { dialog: { title: '关联VRF选项', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 'n003', order: 3, action: 'click', target: { text: '生产VRF' }, context: { eventId: 'ctx-n003', capturedAt: 3, before: { dialog: { title: '关联VRF选项', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 'n004', order: 4, action: 'click', target: { role: 'combobox', text: '关联VRF' }, context: { eventId: 'ctx-n004', capturedAt: 4, before: { form: { label: '关联VRF' } }, after: { dialog: { title: '关联VRF选项', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 'n005', order: 5, action: 'click', target: { text: '生产VRF' }, context: { eventId: 'ctx-n005', capturedAt: 5, before: { dialog: { title: '关联VRF选项', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 'n006', order: 6, action: 'click', target: { role: 'combobox', text: '发布范围' }, context: { eventId: 'ctx-n006', capturedAt: 6, before: { form: { label: '发布范围' } }, after: { dialog: { title: '发布范围选项', type: 'dropdown', visible: true } } }, assertions: [] },
+          { id: 'n007', order: 7, action: 'click', target: { text: '华东生产区' }, context: { eventId: 'ctx-n007', capturedAt: 7, before: { dialog: { title: '发布范围选项', type: 'dropdown', visible: true } } }, assertions: [] },
+        ],
+      };
+
+      const segment = createRepeatSegment(withSteps, withSteps.steps.map(step => step.id));
+      const selectParameters = segment.parameters.filter(parameter => /^(vrf|scope)/.test(parameter.variableName));
+
+      assert(selectParameters.some(parameter => parameter.variableName === 'vrf'), 'primary VRF parameter should exist');
+      assert(selectParameters.some(parameter => parameter.variableName === 'vrf2'), 'duplicate VRF parameter should keep vrf prefix');
+      for (const parameter of selectParameters)
+        assertEqual(segment.rows.map(row => row.values[parameter.id]), [parameter.currentValue, parameter.currentValue, parameter.currentValue]);
+    },
+  },
+  {
     name: 'playback action count expands repeat segments for continue-recording boundaries',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -1448,6 +1526,124 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'human-like AntD option inner content click still replays through active dropdown workaround',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: 'xtest16:WAN1',
+            locator: 'internal:text="xtest16:WAN1"i',
+            scope: {
+              form: { label: 'WAN口' },
+              dialog: { title: '选择一个WAN口', type: 'dropdown', visible: true },
+            },
+          },
+          context: {
+            eventId: 'ctx-human-option',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'WAN口' },
+              dialog: { title: '选择一个WAN口', type: 'dropdown', visible: true },
+            },
+            after: {
+              dialog: { title: '新建IPv4地址池', type: 'modal', visible: true },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:text="xtest16:WAN1"i',
+            },
+          },
+          sourceCode: `await page.getByText('xtest16:WAN1').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'human-like inner option click should still use AntD dropdown replay');
+      assert(firstStep.includes('locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option")'), 'option lookup should be scoped to active dropdown');
+      assert(!firstStep.includes('getByText'), 'human-like option replay must not use ambiguous global text locator');
+    },
+  },
+  {
+    name: 'contextless option text click after AntD select fill inherits select field context for replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'fill',
+            target: {
+              role: 'combobox',
+              name: '* WAN口',
+              label: 'WAN口',
+              text: '选择一个WAN口',
+              scope: {
+                dialog: { title: '新建IPv4地址池', type: 'modal', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+              },
+            },
+            value: 'xtest16',
+            context: {
+              eventId: 'ctx-select-fill',
+              capturedAt: 1000,
+              before: {
+                dialog: { title: '新建IPv4地址池', type: 'modal', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+                target: {
+                  tag: 'div',
+                  text: '选择一个WAN口',
+                  normalizedText: '选择一个WAN口',
+                  framework: 'procomponents',
+                  controlType: 'select',
+                },
+              },
+            },
+            sourceCode: `await page.getByRole('combobox', { name: '* WAN口' }).fill('xtest16');`,
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: {
+              text: 'xtest16:WAN1',
+              locator: 'internal:text="xtest16:WAN1"s',
+            },
+            rawAction: {
+              action: {
+                name: 'click',
+                selector: 'internal:text="xtest16:WAN1"s',
+              },
+            },
+            sourceCode: `await page.getByText('xtest16:WAN1', { exact: true }).click();`,
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+
+      assert(optionStep.includes('AntD Select virtual dropdown replay workaround'), 'contextless option click should inherit the previous AntD select field context');
+      assert(optionStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first()'), 'fallback should reopen the owning WAN ProFormSelect trigger');
+      assert(!optionStep.includes('getByText'), 'option click should not use ambiguous global text replay');
+    },
+  },
+  {
     name: 'generic ARIA option does not use AntD select replay',
     run: () => {
       const flow: BusinessFlow = {
@@ -1584,6 +1780,136 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option")'), 'option lookup should be scoped inside the last visible dropdown');
       assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'AntD replay should keep the explicit mouse event fallback');
       assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'AntD replay should wait briefly for the dropdown to close after dispatch');
+    },
+  },
+  {
+    name: 'contextless tree option after combobox trigger inherits active dropdown scope from source code',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              scope: { form: { label: '发布范围' } },
+            },
+            sourceCode: `await page.getByRole("combobox", { name: "* 发布范围" }).click();`,
+            rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="* 发布范围"i]' } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: { text: '华东生产区', name: '华东生产区' },
+            sourceCode: `await page.getByText('华东生产区').click();`,
+            rawAction: { action: { name: 'click', selector: 'internal:text="华东生产区"i' } },
+            assertions: [],
+          },
+        ],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+
+      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'contextless tree option should inherit active dropdown scope');
+      assert(!optionStep.includes('page.getByText("华东生产区")'), 'contextless tree option should not replay through global text');
+    },
+  },
+  {
+    name: 'contextless checkbox after select is not inherited as dropdown option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: { scope: { form: { label: '关联VRF' } } },
+            sourceCode: `await page.getByRole("combobox", { name: "关联VRF" }).click();`,
+            rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="关联VRF"i]' } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: { role: 'checkbox', text: '开启代理ARP', name: '开启代理ARP' },
+            sourceCode: `await page.locator('label').filter({ hasText: '开启代理ARP' }).click();`,
+            rawAction: { action: { name: 'click', selector: 'internal:label="开启代理ARP"i' } },
+            assertions: [],
+          },
+        ],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const checkboxStep = stepCodeBlock(code, 's002');
+
+      assert(!checkboxStep.includes('AntD Select virtual dropdown replay workaround'), 'checkbox should not inherit previous select option replay');
+      assert(checkboxStep.includes('开启代理ARP'), 'checkbox replay should keep its own label');
+    },
+  },
+  {
+    name: 'dropdown tree and cascader option clicks are scoped to the active popup instead of page text',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: '华东生产区',
+            name: '华东生产区',
+          },
+          context: {
+            eventId: 'ctx-tree-option',
+            capturedAt: 1000,
+            before: {
+              dialog: {
+                type: 'dropdown',
+                title: '发布范围选项',
+                visible: true,
+              },
+              target: {
+                tag: 'span',
+                text: '华东生产区',
+                normalizedText: '华东生产区',
+                framework: 'antd',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:text="华东生产区"i',
+            },
+          },
+          sourceCode: `await page.getByText('华东生产区').click();`,
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'popup option should be scoped to the active AntD dropdown');
+      assert(firstStep.includes('.ant-select-tree-node-content-wrapper'), 'tree-select option lookup should be available');
+      assert(firstStep.includes('.ant-cascader-menu-item'), 'cascader option lookup should be available');
+      assert(!firstStep.includes('page.getByText("华东生产区")'), 'active dropdown option should not replay through global page text');
     },
   },
   {

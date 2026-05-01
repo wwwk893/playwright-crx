@@ -78,26 +78,82 @@ export function repeatSegmentStats(flow: BusinessFlow) {
 function inferRepeatParameters(steps: FlowStep[]): FlowRepeatParameter[] {
   const usedNames = new Map<string, number>();
   const variableNameByValue = new Map<string, string>();
-  return steps
-      .filter(step => (step.action === 'fill' || step.action === 'select') && !!step.value?.trim())
-      .map((step, index) => {
-        const label = parameterLabel(step);
-        const currentValue = step.value?.trim() || '';
-        const sharedVariableName = currentValue ? variableNameByValue.get(currentValue) : undefined;
-        const baseVariableName = sharedVariableName || variableNameFor(label, currentValue);
-        if (currentValue && !sharedVariableName)
-          variableNameByValue.set(currentValue, baseVariableName);
-        const count = usedNames.get(baseVariableName) ?? 0;
-        usedNames.set(baseVariableName, count + (sharedVariableName ? 0 : 1));
-        return {
-          id: `p${String(index + 1).padStart(3, '0')}`,
-          label,
-          sourceStepId: step.id,
-          currentValue,
-          variableName: sharedVariableName || (count ? `${baseVariableName}${count + 1}` : baseVariableName),
-          enabled: true,
-        };
-      });
+  const entries: { step: FlowStep, repeatValue: string, inheritedSelectLabel?: string }[] = [];
+  let pendingSelectLabel: string | undefined;
+
+  for (const step of steps) {
+    const repeatValue = repeatParameterValue(step) || (pendingSelectLabel ? contextLightSelectOptionValue(step) : undefined);
+    if (repeatValue)
+      entries.push({ step, repeatValue, inheritedSelectLabel: pendingSelectLabel });
+
+    const selectLabel = selectFieldLabelCandidate(step);
+    if (selectLabel)
+      pendingSelectLabel = selectLabel;
+    else if (repeatValue && pendingSelectLabel)
+      pendingSelectLabel = undefined;
+  }
+
+  return entries.map(({ step, repeatValue, inheritedSelectLabel }, index) => {
+    const rawLabel = parameterLabel(step);
+    const label = inheritedSelectLabel && shouldUseInheritedSelectLabel(rawLabel, repeatValue) ? inheritedSelectLabel : rawLabel;
+    const currentValue = repeatValue || '';
+    const sharedVariableName = currentValue ? variableNameByValue.get(currentValue) : undefined;
+    const baseVariableName = sharedVariableName || variableNameFor(label, currentValue);
+    if (currentValue && !sharedVariableName)
+      variableNameByValue.set(currentValue, baseVariableName);
+    const count = usedNames.get(baseVariableName) ?? 0;
+    usedNames.set(baseVariableName, count + (sharedVariableName ? 0 : 1));
+    return {
+      id: `p${String(index + 1).padStart(3, '0')}`,
+      label,
+      sourceStepId: step.id,
+      currentValue,
+      variableName: sharedVariableName || (count ? `${baseVariableName}${count + 1}` : baseVariableName),
+      enabled: true,
+    };
+  });
+}
+
+function selectFieldLabelCandidate(step: FlowStep) {
+  const label = step.context?.before?.form?.label || step.target?.scope?.form?.label || step.target?.label || step.target?.name || step.target?.text || '';
+  const role = step.target?.role || '';
+  if (step.action === 'click' && (/combobox|select/i.test(role) || /选择|select|WAN口|角色|类型|VRF|发布范围|出口路径/.test(label)))
+    return label.trim() || undefined;
+  return undefined;
+}
+
+function shouldUseInheritedSelectLabel(rawLabel: string, repeatValue: string) {
+  return !rawLabel || rawLabel === repeatValue || variableNameFor(rawLabel, repeatValue) === 'param';
+}
+
+function contextLightSelectOptionValue(step: FlowStep) {
+  if (step.action !== 'click')
+    return undefined;
+  const role = step.target?.role || '';
+  if (/button|link/i.test(role))
+    return undefined;
+  return step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim() || undefined;
+}
+
+function repeatParameterValue(step: FlowStep) {
+  const value = step.value?.trim();
+  if ((step.action === 'fill' || step.action === 'select') && value)
+    return value;
+
+  // AntD / ProComponents select options are often recorded as a click on a portal option
+  // rather than a semantic select action. If the click happened inside a dropdown tied to
+  // a form field, treat the clicked option text as a loop parameter value.
+  if (step.action !== 'click')
+    return undefined;
+  const optionText = step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim();
+  if (!optionText)
+    return undefined;
+  const before = step.context?.before;
+  const fieldLabel = before?.form?.label || step.target?.scope?.form?.label || step.target?.label;
+  const inDropdown = before?.dialog?.type === 'dropdown' || /dropdown|select/i.test(step.target?.role || '');
+  if (fieldLabel && inDropdown)
+    return optionText;
+  return undefined;
 }
 
 function createInitialRows(parameters: FlowRepeatParameter[]): FlowRepeatRow[] {
@@ -133,7 +189,9 @@ function defaultSegmentName(flow: BusinessFlow) {
 }
 
 function parameterLabel(step: FlowStep) {
-  return step.target?.label ||
+  return step.context?.before?.form?.label ||
+    step.target?.scope?.form?.label ||
+    step.target?.label ||
     step.target?.name ||
     step.target?.placeholder ||
     step.target?.text ||
@@ -142,12 +200,28 @@ function parameterLabel(step: FlowStep) {
 
 function variableNameFor(label: string, value?: string) {
   const source = `${label} ${value ?? ''}`;
+  if (/发布范围|scope|华东生产区|华南办公区|新加坡边缘区/i.test(source))
+    return 'scope';
+  if (/出口路径|egress|NAT集群|一号机房|二号机房|上海|深圳/i.test(source))
+    return 'egressPath';
+  if (/关联?VRF|\bVRF\b|生产VRF|办公VRF|灾备VRF/i.test(source))
+    return 'vrf';
+  if (/资源名称|resourceName/i.test(source) || /^res[-_]/i.test(value ?? ''))
+    return 'resourceName';
+  if (/服务名称|service/i.test(source))
+    return 'serviceName';
+  if (/监听端口|listen/i.test(source))
+    return 'listenPort';
+  if (/源端口|sourcePort/i.test(source))
+    return 'sourcePort';
+  if (/探测地址|health|probe/i.test(source))
+    return 'healthUrl';
   if (/地址池|pool/i.test(source))
     return 'poolName';
-  if (/用户名|用户|账号|account|user/i.test(source))
-    return 'userName';
-  if (/条目|项目|记录|名称|name/i.test(source))
-    return 'name';
+  if (/用户名|账号|account|user/i.test(source))
+    return 'username';
+  if (/角色|权限|role/i.test(source))
+    return 'role';
   if (/描述|备注|comment|description/i.test(source))
     return 'description';
   if (/wan/i.test(source))
@@ -171,8 +245,8 @@ function sampleValue(parameter: FlowRepeatParameter, rowIndex: number) {
     return value;
   if (parameter.variableName === 'poolName')
     return numberedValue(value, rowIndex + 1, 'pool-test');
-  if (parameter.variableName === 'wanPort')
-    return numberedValue(value, rowIndex + 1, 'WAN');
+  if (/^(wanPort|role|vrf|scope|egressPath|type)/.test(parameter.variableName))
+    return value;
   if (parameter.variableName === 'startIp')
     return ipValue(value, rowIndex + 1, 1);
   if (parameter.variableName === 'endIp')

@@ -18,17 +18,18 @@ import { actionLabel, summarizeStepSubject } from './display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 
 export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
+  const effectiveFlow = withInheritedAntdSelectOptionContext(flow);
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
-    `test(${stringLiteral(flow.flow.name || 'business flow')}, async ({ page }) => {`,
+    `test(${stringLiteral(effectiveFlow.flow.name || 'business flow')}, async ({ page }) => {`,
   ];
 
   const emittedRepeatStepIds = new Set<string>();
-  for (const step of flow.steps) {
-    const segment = (flow.repeatSegments ?? []).find(segment => firstSegmentStepId(flow, segment) === step.id);
+  for (const step of effectiveFlow.steps) {
+    const segment = (effectiveFlow.repeatSegments ?? []).find(segment => firstSegmentStepId(effectiveFlow, segment) === step.id);
     if (segment) {
-      emitRepeatSegment(lines, flow, segment);
+      emitRepeatSegment(lines, effectiveFlow, segment);
       segment.stepIds.forEach(stepId => emittedRepeatStepIds.add(stepId));
       continue;
     }
@@ -43,17 +44,18 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
 }
 
 export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
+  const effectiveFlow = withInheritedAntdSelectOptionContext(flow);
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
-    `test(${stringLiteral(flow.flow.name || 'business flow')}, async ({ page }) => {`,
+    `test(${stringLiteral(effectiveFlow.flow.name || 'business flow')}, async ({ page }) => {`,
   ];
 
   const emittedRepeatStepIds = new Set<string>();
-  for (const step of flow.steps) {
-    const segment = (flow.repeatSegments ?? []).find(segment => firstSegmentStepId(flow, segment) === step.id);
+  for (const step of effectiveFlow.steps) {
+    const segment = (effectiveFlow.repeatSegments ?? []).find(segment => firstSegmentStepId(effectiveFlow, segment) === step.id);
     if (segment) {
-      emitExpandedRepeatSegment(lines, flow, segment, { parserSafe: true });
+      emitExpandedRepeatSegment(lines, effectiveFlow, segment, { parserSafe: true });
       segment.stepIds.forEach(stepId => emittedRepeatStepIds.add(stepId));
       continue;
     }
@@ -68,13 +70,14 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
 }
 
 export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
+  const effectiveFlow = withInheritedAntdSelectOptionContext(flow);
   let count = 0;
   const emittedRepeatStepIds = new Set<string>();
-  for (const step of flow.steps) {
-    const segment = (flow.repeatSegments ?? []).find(segment => firstSegmentStepId(flow, segment) === step.id);
+  for (const step of effectiveFlow.steps) {
+    const segment = (effectiveFlow.repeatSegments ?? []).find(segment => firstSegmentStepId(effectiveFlow, segment) === step.id);
     if (segment) {
       const rows = segment.rows.length ? segment.rows : [{ id: 'row-1', values: {} }];
-      const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
+      const segmentSteps = effectiveFlow.steps.filter(step => segment.stepIds.includes(step.id));
       count += rows.length * segmentSteps.reduce((total, step) => total + countStepActions(step, { parserSafe: true }), 0);
       segment.stepIds.forEach(stepId => emittedRepeatStepIds.add(stepId));
       continue;
@@ -85,6 +88,111 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     count += countStepActions(step, { parserSafe: true });
   }
   return count;
+}
+
+function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow {
+  let activeSelectStep: FlowStep | undefined;
+  let changed = false;
+  const steps = flow.steps.map(step => {
+    if (isAntdSelectFieldStep(step)) {
+      activeSelectStep = step;
+      return step;
+    }
+
+    if (activeSelectStep && isContextlessOptionTextClickAfterSelect(step, activeSelectStep)) {
+      changed = true;
+      const optionText = step.target?.text || step.target?.name || step.target?.displayName;
+      const activeForm = selectStepFormContext(activeSelectStep);
+      return {
+        ...step,
+        target: {
+          ...step.target,
+          scope: {
+            ...step.target?.scope,
+            dialog: selectTriggerDialog(activeSelectStep),
+            form: activeForm,
+          },
+        },
+        context: {
+          ...step.context,
+          before: {
+            ...step.context?.before,
+            dialog: { type: 'dropdown', visible: true },
+            form: activeForm,
+            target: {
+              ...step.context?.before.target,
+              framework: activeSelectStep.context?.before.target?.framework || 'antd',
+              controlType: inheritedPopupOptionControlType(activeForm?.label),
+              text: optionText,
+              normalizedText: optionText,
+            },
+          },
+          after: {
+            ...step.context?.after,
+            dialog: selectTriggerDialog(activeSelectStep),
+          },
+        },
+      } as FlowStep;
+    }
+
+    if (step.action !== 'fill' && step.action !== 'press')
+      activeSelectStep = undefined;
+    return step;
+  });
+  return changed ? { ...flow, steps } : flow;
+}
+
+function inheritedPopupOptionControlType(label?: string) {
+  if (/发布范围/.test(label || ''))
+    return 'tree-select-option';
+  if (/出口路径/.test(label || ''))
+    return 'cascader-option';
+  return 'select-option';
+}
+
+function isAntdSelectFieldStep(step: FlowStep) {
+  const controlType = step.context?.before.target?.controlType;
+  const framework = step.context?.before.target?.framework;
+  const label = selectStepFormContext(step)?.label;
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  const source = step.sourceCode || '';
+  const sourceCombobox = /getByRole\(["']combobox["']/.test(source) || /role=combobox/.test(selector);
+  const isAntdLike = framework === 'antd' || framework === 'procomponents' || step.target?.role === 'combobox' || sourceCombobox;
+  const isPopupField = controlType === 'select' || controlType === 'tree-select' || controlType === 'cascader' || step.target?.role === 'combobox' || sourceCombobox;
+  return !!label && isAntdLike && isPopupField && (step.action === 'click' || step.action === 'fill');
+}
+
+function selectStepFormContext(step: FlowStep) {
+  const form = step.context?.before.form || step.target?.scope?.form;
+  if (form?.label)
+    return form;
+  const label = step.target?.label || popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
+  return label ? { ...form, label } : form;
+}
+
+function popupFieldLabelFromName(value?: string) {
+  const text = value?.replace(/^\*\s*/, '').trim();
+  if (!text)
+    return undefined;
+  if (/发布范围|出口路径|关联VRF|WAN口/.test(text))
+    return text;
+  return undefined;
+}
+
+function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: FlowStep) {
+  if (step.action !== 'click' || isAntdSelectOptionStep(step))
+    return false;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (/^(checkbox|radio|switch)$/.test(controlType) || /^(checkbox|radio|switch)$/.test(step.target?.role || ''))
+    return false;
+  const optionText = step.target?.text || step.target?.name || step.target?.displayName;
+  if (!optionText)
+    return false;
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  if (selector && !selector.includes('internal:text') && !/getByText|text=/.test(step.sourceCode || ''))
+    return false;
+  const query = String(selectStep.value || rawAction(selectStep.rawAction).text || rawAction(selectStep.rawAction).value || '').trim();
+  return !query || optionText.includes(query);
 }
 
 function emitRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment) {
@@ -216,6 +324,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const popupOption = antdTreeSelectOptionLocator(step) || antdCascaderOptionLocator(step);
       if (popupOption)
         return antdSelectOptionDispatchSource(popupOption, popupOptionName(step));
+      const activePopupOption = activeDropdownOptionLocator(step);
+      if (activePopupOption)
+        return `await ${activePopupOption}.last().click();`;
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -271,9 +382,10 @@ function targetClickFallback(step: FlowStep) {
 
 function preferredTargetLocator(step: FlowStep) {
   return globalTestIdLocator(step) ||
-    antdSelectOptionLocator(step) ||
     antdTreeSelectOptionLocator(step) ||
     antdCascaderOptionLocator(step) ||
+    antdSelectOptionLocator(step) ||
+    activeDropdownOptionLocator(step) ||
     tableScopedLocator(step) ||
     choiceControlLocator(step) ||
     fieldLocator(step) ||
@@ -299,8 +411,16 @@ function isAntdSelectOptionStep(step: FlowStep) {
   const controlType = contextTarget?.controlType;
   const hasAntdSelector = /\.ant-select-item-option|\.ant-select-dropdown/.test(selector);
   const hasRawTitle = !!rawSelectOptionTitle(step);
+  const fieldLabel = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label;
+  if (/tree-select-option|cascader-option/.test(controlType || ''))
+    return false;
+  const optionName = step.target?.text || step.target?.name || step.target?.displayName || contextTarget?.text || contextTarget?.normalizedText;
+  const isFormScopedDropdownOption = step.action === 'click' && !!fieldLabel && !!optionName && (
+    step.context?.before.dialog?.type === 'dropdown' || step.target?.scope?.dialog?.type === 'dropdown'
+  );
   return ((framework === 'antd' || framework === 'procomponents') && controlType === 'select-option') ||
     hasAntdSelector ||
+    isFormScopedDropdownOption ||
     (hasRawTitle && controlType === 'select-option' && (framework === 'antd' || framework === 'procomponents'));
 }
 
@@ -324,6 +444,22 @@ function antdCascaderOptionLocator(step: FlowStep) {
   if (!optionName)
     return undefined;
   return `page.locator(".ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)").last().locator(".ant-cascader-menu-item").filter({ hasText: ${stringLiteral(optionName)} })`;
+}
+
+function activeDropdownOptionLocator(step: FlowStep) {
+  if (step.action !== 'click')
+    return undefined;
+  const optionName = popupOptionName(step);
+  if (!optionName)
+    return undefined;
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  const dropdown = step.context?.before.dialog || step.target?.scope?.dialog;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const framework = step.context?.before.target?.framework || String((step.target?.raw as { framework?: unknown } | undefined)?.framework || '');
+  const looksLikeActivePopupOption = dropdown?.type === 'dropdown' || (/option/.test(controlType) && /^(antd|procomponents)$/.test(framework)) || /ant-select|ant-cascader/.test(selector);
+  if (!looksLikeActivePopupOption)
+    return undefined;
+  return `page.locator(${stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item')}).filter({ hasText: ${stringLiteral(optionName)} })`;
 }
 
 function popupOptionName(step: FlowStep) {
@@ -396,13 +532,13 @@ function antdSelectFieldLocator(step: FlowStep) {
 
 function selectTriggerDialog(step: FlowStep) {
   const scoped = step.target?.scope?.dialog;
-  if (scoped?.title || scoped?.testId)
+  if ((scoped?.title || scoped?.testId) && scoped.type !== 'dropdown')
     return scoped;
   const before = step.context?.before.dialog;
-  if (before?.title || before?.testId)
+  if ((before?.title || before?.testId) && before.type !== 'dropdown')
     return before;
   const after = step.context?.after?.dialog;
-  if (after?.title || after?.testId)
+  if ((after?.title || after?.testId) && after.type !== 'dropdown')
     return after;
   return undefined;
 }

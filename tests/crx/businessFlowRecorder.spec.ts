@@ -290,11 +290,44 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText('复查');
 
-  const flow = await exportBusinessFlowJson(recorderPage);
+  let flow = await exportBusinessFlowJson(recorderPage);
   expect(flow.flow.name).toBe('地址池');
   expect(flow.steps.length).toBeGreaterThanOrEqual(9);
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-ip-address-pool-create-button')).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /WAN口|选择一个WAN口|xtest16:WAN1/.test(String(value || ''))))).toBeTruthy();
+
+  const createStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-address-pool-create-button', 'IPv4 pool create button step');
+  const confirmStepId = requiredStepId(flow, (step: any) => /确\s*定/.test(String(step.target?.name || step.target?.text || step.target?.displayName || '')), 'IPv4 pool modal confirm step');
+  const saveConfigStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-save-button', 'site save config step');
+  const repeatStepIds = flow.steps
+      .filter((step: any) => stepIndex(flow, step.id) >= stepIndex(flow, createStepId) && stepIndex(flow, step.id) <= stepIndex(flow, confirmStepId))
+      .map((step: any) => step.id);
+  expect(repeatStepIds.length).toBeGreaterThanOrEqual(6);
+  expect(repeatStepIds).toContain(createStepId);
+  expect(repeatStepIds).toContain(confirmStepId);
+  expect(repeatStepIds).not.toContain(saveConfigStepId);
+
+  for (const stepId of repeatStepIds)
+    await recorderPage.locator(`button[aria-label="选择 ${stepId} 作为循环步骤"]`).click();
+  await expect(recorderPage.locator('.repeat-create-actions .primary')).toBeEnabled();
+  await recorderPage.locator('.repeat-create-actions .primary').click();
+  await expect(recorderPage.locator('.repeat-editor')).toBeVisible({ timeout: 10_000 });
+  if (await recorderPage.locator('.repeat-data').isVisible().catch(() => false))
+    await recorderPage.getByRole('button', { name: '返回上一步' }).click();
+  await expect(recorderPage.locator('.repeat-mapping')).toBeVisible({ timeout: 10_000 });
+  await recorderPage.locator('.repeat-mapping label').filter({ hasText: '片段名称' }).locator('input').fill('批量创建IPv4地址池');
+  await recorderPage.getByRole('button', { name: '生成数据表' }).click();
+  await expect.poll(async () => await recorderPage.locator('.repeat-data input').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value).join('\n'))).toContain('test1');
+  await recorderPage.getByRole('button', { name: '保存片段' }).click();
+  await expect(recorderPage.locator('.repeat-segment-card')).toContainText('批量创建IPv4地址池');
+
+  flow = await exportBusinessFlowJson(recorderPage);
+  expect(flow.repeatSegments?.[0]?.stepIds).toEqual(repeatStepIds);
+  expect(flow.repeatSegments?.[0]?.stepIds).not.toContain(saveConfigStepId);
+  expect(flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName)).toEqual(expect.arrayContaining(['poolName', 'wanPort', 'startIp', 'endIp']));
+  expect(flow.repeatSegments?.[0]?.rows.length).toBeGreaterThanOrEqual(3);
+  expect(flow.artifacts.playwrightCode).toContain('for (const row of');
+  expect(flow.artifacts.playwrightCode).toContain('批量创建IPv4地址池');
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-form-fields.html');
   expect(flow.artifacts.playwrightCode).toContain('新建IPv4地址池');
   expect(flow.artifacts.playwrightCode).toContain('test1');
@@ -404,6 +437,10 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
 
+// L2 deterministic recorder helpers: these specs intentionally use Playwright's
+// high-level click/fill plus dispatchEvent for difficult AntD portals so they stay
+// stable as regression tests. They are not treated as human-like coverage; see
+// humanLikeRecorder.spec.ts for the L3 smoke path that drives mouse/keyboard actions.
 async function beginNewFlowFromLibrary(recorderPage: Page) {
   const newFlowButton = recorderPage.getByRole('button', { name: '+ 新建流程' });
   if (!await newFlowButton.isVisible({ timeout: 3000 }).catch(() => false)) {

@@ -1,0 +1,107 @@
+{
+  "name": "recorder_ipv4_pool_step_intent_repeat_data",
+  "title": "Recorder 下一步业务意图识别 + 中间步骤循环数据生成",
+  "task_type": "recorder_intent_and_repeat_data",
+  "business_goal": "评测模型是否能像 recorder 的 AI 意图助手一样，根据点击/输入前后的局部上下文识别每一步业务意图，并在用户选中一段中间步骤设为循环片段时生成可批量执行的测试数据。",
+  "ai_intent_input": {
+    "flow": {
+      "name": "地址池",
+      "module": "站点配置",
+      "page": "全局配置",
+      "role": "admin",
+      "businessGoal": "创建 IPv4 地址池并保存配置"
+    },
+    "steps": [
+      {
+        "stepId": "s001",
+        "order": 1,
+        "action": "click",
+        "target": { "role": "button", "text": "新建", "testId": "site-ip-address-pool-create-button" },
+        "before": { "page": "网络配置资源", "section": "地址池与端口池", "table": "IP地址池" },
+        "after": { "dialog": "新建IPv4地址池" }
+      },
+      {
+        "stepId": "s002",
+        "order": 2,
+        "action": "fill",
+        "target": { "placeholder": "地址池名称" },
+        "value": "test1",
+        "before": { "dialog": "新建IPv4地址池", "form": "IPv4地址池表单", "field": "地址池名称" }
+      },
+      {
+        "stepId": "s003",
+        "order": 3,
+        "action": "click",
+        "target": { "role": "combobox", "text": "选择一个WAN口" },
+        "before": { "dialog": "新建IPv4地址池", "form": "IPv4地址池表单", "field": "WAN口" },
+        "after": { "dropdown": "选择一个WAN口" }
+      },
+      {
+        "stepId": "s004",
+        "order": 4,
+        "action": "select",
+        "target": { "text": "xtest16:WAN1" },
+        "value": "xtest16:WAN1",
+        "before": { "dropdown": "选择一个WAN口", "field": "WAN口" },
+        "after": { "dialog": "新建IPv4地址池", "selectedOption": "xtest16:WAN1" }
+      },
+      {
+        "stepId": "s005",
+        "order": 5,
+        "action": "fill",
+        "target": { "placeholder": "192.168.1.1" },
+        "value": "1.1.1.1",
+        "before": { "dialog": "新建IPv4地址池", "form": "IPv4地址池表单", "field": "开始地址" }
+      },
+      {
+        "stepId": "s006",
+        "order": 6,
+        "action": "fill",
+        "target": { "placeholder": "192.168.1.254" },
+        "value": "2.2.2.2",
+        "before": { "dialog": "新建IPv4地址池", "form": "IPv4地址池表单", "field": "结束地址" }
+      },
+      {
+        "stepId": "s007",
+        "order": 7,
+        "action": "click",
+        "target": { "role": "button", "text": "确 定" },
+        "before": { "dialog": "新建IPv4地址池", "form": "IPv4地址池表单" },
+        "after": { "table": "IP地址池", "toast": "地址池已添加到待保存配置" }
+      },
+      {
+        "stepId": "s008",
+        "order": 8,
+        "action": "click",
+        "target": { "role": "button", "text": "保存配置", "testId": "site-save-button" },
+        "before": { "section": "地址池与端口池", "table": "IP地址池", "row": "test1 xtest16:WAN1 1.1.1.1 2.2.2.2" },
+        "after": { "toast": "配置已保存" }
+      }
+    ]
+  },
+  "repeat_segment": {
+    "name": "批量创建IPv4地址池",
+    "selected_step_ids": ["s001", "s002", "s003", "s004", "s005", "s006", "s007"],
+    "parameters": [
+      { "id": "p001", "label": "地址池名称", "variableName": "poolName", "currentValue": "test1", "sourceStepId": "s002" },
+      { "id": "p002", "label": "WAN口", "variableName": "wanPort", "currentValue": "xtest16:WAN1", "sourceStepId": "s004" },
+      { "id": "p003", "label": "开始地址", "variableName": "startIp", "currentValue": "1.1.1.1", "sourceStepId": "s005" },
+      { "id": "p004", "label": "结束地址", "variableName": "endIp", "currentValue": "2.2.2.2", "sourceStepId": "s006" }
+    ]
+  },
+  "expected": {
+    "step_intents": {
+      "s001": ["打开", "新建IPv4地址池"],
+      "s002": ["填写", "地址池名称"],
+      "s003": ["打开", "WAN口"],
+      "s004": ["选择", "WAN口", "xtest16:WAN1"],
+      "s005": ["填写", "开始地址"],
+      "s006": ["填写", "结束地址"],
+      "s007": ["确认", "添加", "地址池"],
+      "s008": ["保存配置"]
+    },
+    "repeat_data_fields": ["poolName", "wanPort", "startIp", "endIp"],
+    "required_option_values": ["xtest16:WAN1"],
+    "automation_risk_keywords": ["ProFormSelect", "AntD", "ant-select-selector", "combobox", "rc_select", "动态"]
+  }
+}
