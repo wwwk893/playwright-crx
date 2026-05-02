@@ -1308,6 +1308,52 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'late recorded actions stay before later synthetic page context clicks by wall time',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickActionWithWallTime('打开新建弹窗', 1000),
+      ], [], {});
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [
+        pageClickEventWithTarget('ctx-cascader-option', 3000, {
+          tag: 'li',
+          role: 'menuitem',
+          controlType: 'cascader-option',
+          text: '上海',
+          normalizedText: '上海',
+        }),
+      ]);
+      const merged = mergeActionsIntoFlow(withSynthetic, [
+        clickActionWithWallTime('打开新建弹窗', 1000),
+        fillActionWithWallTime('关联VRF', '生产', 2000),
+      ], [], {});
+
+      assertEqual(merged.steps.map(step => step.id), ['s001', 's003', 's002']);
+      assertEqual(merged.steps.map(step => step.value), [undefined, '生产', undefined]);
+      assertEqual(merged.steps[2].target?.text, '上海');
+    },
+  },
+  {
+    name: 'synthetic page context click orders before recorded fill using end wall time',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        fillActionWithEndWallTime('探测地址', 'https://probe.example/health', 3000),
+      ], [], {});
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [
+        pageClickEventWithTarget('ctx-health-switch', 2000, {
+          tag: 'button',
+          role: 'switch',
+          testId: 'network-resource-health-switch',
+          text: '启用健康检查',
+          normalizedText: '启用健康检查',
+          controlType: 'switch',
+        }),
+      ]);
+
+      assertEqual(withSynthetic.steps.map(step => step.id), ['s002', 's001']);
+      assertEqual(withSynthetic.steps.map(step => step.target?.testId || step.value), ['network-resource-health-switch', 'https://probe.example/health']);
+    },
+  },
+  {
     name: 'continuation batch drops navigation signals between new user actions',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [clickAction('打开')], [], {});
@@ -1436,6 +1482,52 @@ test('demo', async ({ page }) => {
       ]), {});
 
       assertEqual(flow.steps[0].sourceCode, `await page.getByTestId('site-save-button').click();`);
+    },
+  },
+  {
+    name: 'explicit test id click is not replayed as an inherited cascader option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'network-resource-save',
+            text: '保 存',
+          },
+          context: {
+            eventId: 'ctx-stale-cascader-context',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', visible: true },
+              target: {
+                tag: 'button',
+                role: 'button',
+                testId: 'network-resource-save',
+                text: '保 存',
+                normalizedText: '保 存',
+                framework: 'antd',
+                controlType: 'cascader-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:testid=[data-testid="network-resource-save"s]',
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(firstStep.includes('getByTestId("network-resource-save")'), 'explicit test id should remain the replay locator');
+      assert(!firstStep.includes('ant-cascader-menu-item'), 'test id click should not inherit stale cascader option replay');
     },
   },
   {
@@ -2295,6 +2387,20 @@ function fillAction(label: string, value: string) {
       selector: `internal:label="${escapeSelectorName(label)}"i`,
       text: value,
     },
+  };
+}
+
+function fillActionWithWallTime(label: string, value: string, wallTime: number) {
+  return {
+    ...fillAction(label, value),
+    wallTime,
+  };
+}
+
+function fillActionWithEndWallTime(label: string, value: string, endWallTime: number) {
+  return {
+    ...fillAction(label, value),
+    endWallTime,
   };
 }
 

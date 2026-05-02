@@ -315,6 +315,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     case 'openPage':
       return action.url || step.url ? `await page.goto(${stringLiteral(action.url || step.url)});` : undefined;
     case 'click': {
+      const testIdLocator = globalTestIdLocator(step);
+      if (testIdLocator)
+        return `await ${testIdLocator}.click();`;
       const rawSelectOption = rawSelectOptionClickSource(step);
       if (rawSelectOption)
         return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;

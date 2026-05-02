@@ -289,14 +289,20 @@ function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEv
     return steps.length;
   let insertAt = 0;
   let sawComparableWallTime = false;
-  steps.forEach((step, index) => {
+  const preserveUntimedRecordedBarriers = !isDropdownOptionContext(event.before.target);
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
     const wallTime = stepWallTime(step);
-    if (typeof wallTime !== 'number')
-      return;
+    if (typeof wallTime !== 'number') {
+      if (preserveUntimedRecordedBarriers && sawComparableWallTime)
+        insertAt = index + 1;
+      continue;
+    }
     sawComparableWallTime = true;
-    if (wallTime <= eventWallTime)
-      insertAt = index + 1;
-  });
+    if (wallTime > eventWallTime)
+      return insertAt;
+    insertAt = index + 1;
+  }
   return sawComparableWallTime ? insertAt : steps.length;
 }
 
@@ -304,6 +310,8 @@ function stepWallTime(step: FlowStep) {
   const raw = asRecord(step.rawAction);
   if (typeof raw.wallTime === 'number')
     return raw.wallTime;
+  if (typeof raw.endWallTime === 'number')
+    return raw.endWallTime;
   if (typeof step.context?.capturedAt === 'number')
     return step.context.capturedAt;
   return undefined;
@@ -757,6 +765,15 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
       recordedActionIds: reconciled.upgradedActionIds,
     });
   }
+  if (!afterStepId && drafts.some(draft => typeof draftWallTime(draft) === 'number')) {
+    for (const draft of drafts)
+      insertProjectedDraftByWallTime(steps, draft);
+    return {
+      ...flow,
+      steps: recomputeOrders(steps),
+    };
+  }
+
   const insertAt = afterStepId ? Math.max(0, steps.findIndex(step => step.id === afterStepId) + 1) : steps.length;
   while (drafts.length) {
     const previous = steps[insertAt - 1];
@@ -786,6 +803,42 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
     ...flow,
     steps: recomputeOrders(steps),
   };
+}
+
+function insertProjectedDraftByWallTime(steps: FlowStep[], draft: StepDraft) {
+  const insertAt = projectedDraftInsertionIndex(steps, draft);
+  const previous = steps[insertAt - 1];
+  if (previous && shouldMergeTyping(previous, draft.step)) {
+    steps[insertAt - 1] = mergeFillStep(previous, draft.step);
+    return;
+  }
+  if (previous && draft.step.action === 'press' && isTypingPress(draft.step) && sameEditableTarget(previous, draft.step)) {
+    steps[insertAt - 1] = mergeSourceActions(previous, draft.step);
+    return;
+  }
+  if (previous && draft.step.action === 'assert' && draft.step.assertions.some(assertion => assertion.enabled)) {
+    steps[insertAt - 1] = {
+      ...mergeSourceActions(previous, draft.step),
+      assertions: mergeAssertions(previous.assertions, draft.step.assertions),
+    };
+    return;
+  }
+  steps.splice(insertAt, 0, draft.step);
+}
+
+function projectedDraftInsertionIndex(steps: FlowStep[], draft: StepDraft) {
+  const wallTime = draftWallTime(draft);
+  if (typeof wallTime !== 'number')
+    return steps.length;
+  const firstLaterStepIndex = steps.findIndex(step => {
+    const existingWallTime = stepWallTime(step);
+    return typeof existingWallTime === 'number' && existingWallTime > wallTime;
+  });
+  return firstLaterStepIndex >= 0 ? firstLaterStepIndex : steps.length;
+}
+
+function draftWallTime(draft: StepDraft) {
+  return draft.entries.map(entry => entry.wallTime).find((value): value is number => typeof value === 'number');
 }
 
 function upgradeSyntheticStepsCoveredByRecordedDrafts(steps: FlowStep[], drafts: StepDraft[]) {
