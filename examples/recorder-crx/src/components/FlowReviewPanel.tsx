@@ -169,6 +169,7 @@ export const FlowReviewPanel: React.FC<{
       {visibleSteps.map((step, index) => {
         const assertionCount = step.assertions.filter(assertion => assertion.enabled).length;
         const selectedForRepeat = selectedRepeatStepIds.includes(step.id);
+        const adaptiveTarget = flow.artifacts?.recorder?.adaptiveTargets?.[`step:${step.id}`];
         return <React.Fragment key={step.id}>
           <div
             className={selectedForRepeat ? 'review-step-row selected-for-repeat' : 'review-step-row'}
@@ -191,6 +192,13 @@ export const FlowReviewPanel: React.FC<{
                   onDeleteStep(step.id);
               }}>删除</button>
             </span>
+            {adaptiveTarget?.locatorCandidates?.length ? <div className='review-adaptive-target' aria-label={`${step.id} 定位候选`}>
+              <strong>定位候选</strong>
+              {adaptiveTarget.locatorCandidates.slice(0, 3).map(candidate => <span key={`${candidate.kind}:${candidate.value}`} className='review-adaptive-candidate'>
+                {candidate.kind} · {candidate.score} · {candidate.scope ?? 'page'}
+              </span>)}
+              <span className='review-inline-note'>{adaptiveTarget.locatorCandidates[0]?.reason}</span>
+            </div> : null}
           </div>
           {index < visibleSteps.length - 1 && <div className={activeInsertStepId === step.id ? 'review-insert-slot active' : 'review-insert-slot'}>
             <button type='button' onClick={() => setActiveInsertStepId(activeInsertStepId === step.id ? undefined : step.id)}>

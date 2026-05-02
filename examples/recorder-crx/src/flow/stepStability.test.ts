@@ -6,6 +6,9 @@
  */
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { selectorFromElementTarget } from './assertionTargets';
+import { buildLocatorCandidates } from './locatorCandidates';
+import { recordedTargetSnapshotFromStep } from './adaptiveTargetSnapshot';
+import { redactRecordedTargetSnapshot } from './adaptiveTargetRedactor';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
@@ -36,6 +39,200 @@ const tests: TestCase[] = [
       assertEqual(selectorFromElementTarget('table row'), undefined);
       assertEqual(selectorFromElementTarget('用户表格'), undefined);
       assertEqual(selectorFromElementTarget('alice.qa'), undefined);
+    },
+  },
+  {
+    name: 'adaptive snapshots redact sensitive data before storage',
+    run: () => {
+      const snapshot = redactRecordedTargetSnapshot({
+        version: 1,
+        tagName: 'input',
+        role: 'textbox',
+        testId: 'api-token-field',
+        normalizedText: 'Authorization bearer eyJabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz.abc.def',
+        labelText: 'API Token',
+        diagnosticAttributes: {
+          type: 'password',
+          name: 'accessToken',
+          id: 'tenant-123-api-token-input',
+          classTokens: ['ant-input', 'customer-acme-secret-token'],
+        },
+        parent: { tagName: 'form', normalizedText: '客户 acme token 表单' },
+        siblings: [{ tagName: 'span', normalizedText: 'session cookie secret' }],
+        bbox: { x: 1, y: 2, width: 3, height: 4 },
+      });
+
+      assertEqual(snapshot.labelText, '***');
+      assertEqual(snapshot.normalizedText, '***');
+      assertEqual(snapshot.diagnosticAttributes?.name, '***');
+      assertEqual(snapshot.diagnosticAttributes?.id, '***');
+      assertEqual(snapshot.diagnosticAttributes?.classTokens, ['ant-input', '***']);
+      assertEqual(snapshot.parent?.normalizedText, '客户 acme *** 表单');
+      assertEqual(snapshot.siblings?.[0]?.normalizedText, '***');
+      assertEqual(snapshot.bbox, { x: 1, y: 2, width: 3, height: 4 });
+    },
+  },
+  {
+    name: 'adaptive redaction covers scope row identity and locator candidate values',
+    run: () => {
+      const snapshot = redactRecordedTargetSnapshot({
+        version: 1,
+        role: 'button',
+        normalizedText: '编辑',
+        scope: {
+          form: { label: '访问 token', name: 'accessToken', testId: 'token-form' },
+          table: {
+            title: 'session 表',
+            testId: 'users-table',
+            rowKey: 'token-row-123',
+            rowText: 'alice.qa bearer secret',
+            rowIdentity: { source: 'data-row-key', value: 'session-token-row', confidence: 0.98, stable: true },
+            columnName: 'secret column',
+            fingerprint: 'customer-secret-fingerprint',
+          },
+        },
+        row: {
+          tableTestId: 'users-table',
+          tableTitle: 'session 表',
+          rowIdentity: { source: 'data-row-key', value: 'session-token-row', confidence: 0.98, stable: true },
+          rowKey: 'token-row-123',
+          rowTextSummary: 'alice.qa bearer secret',
+          columnName: 'secret column',
+          actionName: '编辑',
+          actionRole: 'button',
+          fingerprint: 'customer-secret-fingerprint',
+        },
+        locatorHint: { strategy: 'table-row-testid', confidence: 0.9, reason: 'token row matched' },
+      });
+
+      assertEqual(snapshot.scope?.form?.label, '访问 ***');
+      assertEqual(snapshot.scope?.form?.name, '***');
+      assertEqual(snapshot.scope?.table?.rowKey, '***');
+      assertEqual(snapshot.scope?.table?.rowIdentity?.value, '***');
+      assertEqual(snapshot.scope?.table?.rowText, '***');
+      assertEqual(snapshot.row?.rowKey, '***');
+      assertEqual(snapshot.row?.rowIdentity?.value, '***');
+      assertEqual(snapshot.row?.rowTextSummary, '***');
+      assertEqual(snapshot.locatorHint?.reason, '*** row matched');
+
+      const candidates = buildLocatorCandidates(snapshot);
+      assert(!JSON.stringify(candidates).includes('token'), 'locator candidates should not retain sensitive token text');
+      assert(!JSON.stringify(candidates).includes('secret'), 'locator candidates should not retain sensitive secret text');
+      assert(!JSON.stringify(candidates).includes('session'), 'locator candidates should not retain sensitive session text');
+    },
+  },
+  {
+    name: 'adaptive snapshot builds from existing page context with table row identity',
+    run: () => {
+      const step = {
+        id: 's001',
+        order: 1,
+        action: 'click' as const,
+        target: { testId: 'edit-user-btn', role: 'button', name: '编辑' },
+        assertions: [],
+        context: {
+          eventId: 'ctx-1',
+          capturedAt: 1000,
+          before: {
+            target: {
+              tag: 'button',
+              role: 'button',
+              testId: 'edit-user-btn',
+              text: '编辑',
+              normalizedText: '编辑',
+              framework: 'antd' as const,
+              controlType: 'table-row-action' as const,
+              uniqueness: { pageCount: 8, scopeCount: 1, scopeKind: 'table' as const },
+            },
+            table: {
+              title: '用户列表',
+              testId: 'users-table',
+              rowKey: 'user-1',
+              rowText: 'alice.qa 审计员 编辑 删除',
+              rowIdentity: { source: 'data-row-key' as const, value: 'user-1', confidence: 0.98, stable: true },
+              columnName: '操作',
+              nestingLevel: 0,
+              fixedSide: 'right' as const,
+              fingerprint: 'users-row-fp',
+            },
+            section: { title: '用户管理', testId: 'user-admin-card', kind: 'card' as const },
+          },
+        },
+      };
+
+      const snapshot = recordedTargetSnapshotFromStep(step);
+      assert(snapshot, 'snapshot should be created from existing context');
+      assertEqual(snapshot.testId, 'edit-user-btn');
+      assertEqual(snapshot.role, 'button');
+      assertEqual(snapshot.controlType, 'table-row-action');
+      assertEqual(snapshot.framework, 'antd');
+      assertEqual(snapshot.scope?.section?.testId, 'user-admin-card');
+      assertEqual(snapshot.row?.tableTestId, 'users-table');
+      assertEqual(snapshot.row?.rowIdentity?.value, 'user-1');
+      assertEqual(snapshot.row?.actionName, '编辑');
+    },
+  },
+  {
+    name: 'adaptive locator candidates prefer table row and unique test id over text/css',
+    run: () => {
+      const candidates = buildLocatorCandidates({
+        version: 1,
+        tagName: 'button',
+        role: 'button',
+        testId: 'edit-user-btn',
+        normalizedText: '编辑',
+        scope: { table: { testId: 'users-table', rowText: 'alice.qa', rowIdentity: { source: 'data-row-key', value: 'user-1', confidence: 0.98, stable: true } } },
+        locatorHint: { strategy: 'table-row-testid', confidence: 0.9, pageCount: 8, scopeCount: 1 },
+        row: {
+          tableTestId: 'users-table',
+          rowIdentity: { source: 'data-row-key', value: 'user-1', confidence: 0.98, stable: true },
+          rowTextSummary: 'alice.qa',
+          actionName: '编辑',
+          actionRole: 'button',
+        },
+      });
+
+      assertEqual(candidates[0]?.kind, 'testid');
+      assert(candidates.some(candidate => candidate.kind === 'table-row' && candidate.scope === 'table'), 'table row candidate should be present and scoped');
+      assert(candidates.every(candidate => candidate.reason), 'each candidate should explain why it exists');
+      const text = candidates.find(candidate => candidate.kind === 'text');
+      assert(!text || text.score < candidates[0].score, 'text should not outrank unique test id');
+    },
+  },
+  {
+    name: 'adaptive targets stay internal and are stripped from JSON/YAML exports',
+    run: () => {
+      const flow = createEmptyBusinessFlow({ flow: { id: 'flow-adaptive-export', name: 'Adaptive Export' } });
+      const withAdaptive: BusinessFlow = {
+        ...flow,
+        artifacts: {
+          recorder: {
+            version: 2,
+            actionLog: [],
+            nextActionSeq: 1,
+            nextStepSeq: 1,
+            sessions: [],
+            adaptiveTargets: {
+              'step:s001': {
+                version: 1,
+                ref: 'step:s001',
+                stepId: 's001',
+                action: 'click',
+                capturedAt: '2026-01-01T00:00:00.000Z',
+                source: 'page-context-sidecar',
+                snapshot: { version: 1, testId: 'create-user-btn', normalizedText: '新建用户' },
+                locatorCandidates: [{ kind: 'testid', value: 'create-user-btn', score: 100, reason: 'unique test id' }],
+              },
+            },
+          },
+        },
+      };
+
+      const exported = prepareBusinessFlowForExport(withAdaptive);
+      assert(!JSON.stringify(exported).includes('adaptiveTargets'), 'default JSON export should strip adaptive target sidecar');
+      const compact = toCompactFlow(withAdaptive);
+      assert(!compact.includes('adaptiveTargets'), 'compact YAML should not render adaptive target sidecar');
+      assert(!compact.includes('create-user-btn'), 'compact YAML should not leak adaptive target test id from sidecar');
     },
   },
   {
@@ -1179,6 +1376,10 @@ test('demo', async ({ page }) => {
       assertEqual(merged.steps[0].target?.scope?.table?.testId, 'users-table');
       assertEqual(merged.steps[0].target?.scope?.table?.rowKey, 'user-42');
       assertEqual(merged.steps[0].target?.scope?.table?.columnName, '操作');
+      const adaptive = merged.artifacts?.recorder?.adaptiveTargets?.['step:s001'];
+      assert(adaptive, 'matched page context should create an internal adaptive target record');
+      assertEqual(adaptive.snapshot.row?.tableTestId, 'users-table');
+      assertEqual(adaptive.locatorCandidates[0]?.kind, 'table-row');
     },
   },
   {

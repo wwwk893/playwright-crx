@@ -2014,6 +2014,35 @@
   border-bottom: 0;
 }
 
+.review-adaptive-target {
+  grid-column: 4 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 0 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 11px;
+}
+
+.review-adaptive-target strong {
+  color: #1d4ed8;
+}
+
+.review-adaptive-candidate {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
 .review-insert-slot {
   position: relative;
   display: grid;

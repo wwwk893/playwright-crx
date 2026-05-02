@@ -22,6 +22,7 @@ import type {
   SectionContext,
   StepContextSnapshot,
 } from './pageContextTypes';
+import type { AdaptiveTargetRecord, AdaptiveTargetRef } from './adaptiveTargetTypes';
 
 export const BUSINESS_FLOW_SCHEMA = 'business-flow/v1' as const;
 
@@ -242,6 +243,8 @@ export interface FlowRecorderState {
   nextActionSeq: number;
   nextStepSeq: number;
   sessions: RecordingSession[];
+  /** Internal only. Must be stripped by export sanitizer. */
+  adaptiveTargets?: Record<AdaptiveTargetRef, AdaptiveTargetRecord>;
 }
 
 export interface BusinessFlow {

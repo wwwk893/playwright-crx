@@ -11,10 +11,13 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
+import { recordedTargetSnapshotFromStep } from './adaptiveTargetSnapshot';
+import { buildLocatorCandidates } from './locatorCandidates';
 import { suggestIntent, stepContextFromEvent } from './intentRules';
 import { matchPageContextEvent } from './pageContextMatcher';
 import type { ElementContext, PageContextEvent, StepContextSnapshot } from './pageContextTypes';
 import type { BusinessFlow, FlowTargetScope, FlowStep, FlowTarget, LocatorHint } from './types';
+import type { AdaptiveTargetRecord, AdaptiveTargetRef } from './adaptiveTargetTypes';
 
 const autoIntentThreshold = 0.6;
 
@@ -23,6 +26,9 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
     return normalizeIntentSources(flow);
 
   let changed = false;
+  let adaptiveChanged = false;
+  const canStoreAdaptiveTargets = !!flow.artifacts?.recorder;
+  let adaptiveTargets = flow.artifacts?.recorder?.adaptiveTargets ? { ...flow.artifacts.recorder.adaptiveTargets } : undefined;
   const usedEventIds = new Set<string>();
   const steps = flow.steps.map(step => {
     const normalizedStep = normalizeIntentSource(step);
@@ -42,15 +48,32 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
       context,
       intentSuggestion: suggestion ?? upgradedStep.intentSuggestion,
     }, suggestion);
+    const adaptiveRecord = canStoreAdaptiveTargets ? adaptiveTargetRecordForStep(nextStep, context) : undefined;
+    if (adaptiveRecord) {
+      adaptiveTargets = adaptiveTargets || {};
+      const previousJson = JSON.stringify(adaptiveTargets[adaptiveRecord.ref]);
+      const nextJson = JSON.stringify(adaptiveRecord);
+      if (previousJson !== nextJson) {
+        adaptiveTargets[adaptiveRecord.ref] = adaptiveRecord;
+        adaptiveChanged = true;
+      }
+    }
     changed = changed || nextStep !== step;
     return nextStep;
   });
 
-  if (!changed)
+  if (!changed && !adaptiveChanged)
     return { ...flow, steps };
   return {
     ...flow,
     steps,
+    artifacts: adaptiveChanged && flow.artifacts?.recorder ? {
+      ...flow.artifacts,
+      recorder: {
+        ...flow.artifacts.recorder,
+        adaptiveTargets,
+      },
+    } : flow.artifacts,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -59,6 +82,23 @@ export function normalizeIntentSources(flow: BusinessFlow): BusinessFlow {
   return {
     ...flow,
     steps: flow.steps.map(normalizeIntentSource),
+  };
+}
+
+function adaptiveTargetRecordForStep(step: FlowStep, context: StepContextSnapshot): AdaptiveTargetRecord | undefined {
+  const snapshot = recordedTargetSnapshotFromStep(step);
+  if (!snapshot)
+    return undefined;
+  const ref = `step:${step.id}` as AdaptiveTargetRef;
+  return {
+    version: 1,
+    ref,
+    stepId: step.id,
+    action: step.action,
+    capturedAt: new Date(context.capturedAt).toISOString(),
+    source: 'page-context-sidecar',
+    snapshot,
+    locatorCandidates: buildLocatorCandidates(snapshot),
   };
 }
 
