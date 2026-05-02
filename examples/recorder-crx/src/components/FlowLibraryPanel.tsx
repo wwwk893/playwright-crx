@@ -31,6 +31,7 @@ export const FlowLibraryPanel: React.FC<{
   onDuplicateRecord: (flow: BusinessFlow) => void;
   onDeleteRecord: (flow: BusinessFlow) => void;
   onRestoreRecord: (flow: BusinessFlow) => void;
+  onRestoreLatestDraft: () => void;
   onImportJson: (file: File) => void;
   onExportAll: () => void;
   aiSettings: AiIntentSettings;
@@ -50,6 +51,7 @@ export const FlowLibraryPanel: React.FC<{
   onDuplicateRecord,
   onDeleteRecord,
   onRestoreRecord,
+  onRestoreLatestDraft,
   onImportJson,
   onExportAll,
   aiSettings,
@@ -158,6 +160,7 @@ export const FlowLibraryPanel: React.FC<{
 
     <div className='library-footer'>
       <div className='library-save-state'><span></span>{draftStatus || '最近草稿已保存'}</div>
+      <button type='button' onClick={onRestoreLatestDraft}>恢复最近草稿</button>
       <button type='button' onClick={onExportAll}>导出全部</button>
     </div>
 

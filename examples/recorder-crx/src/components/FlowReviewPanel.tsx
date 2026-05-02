@@ -30,13 +30,14 @@ export const FlowReviewPanel: React.FC<{
   onContinueRecordingFrom: (afterStepId: string) => void;
   onInsertEmptyStep: (afterStepId: string) => void;
   onInsertWaitStep: (afterStepId: string, milliseconds: number) => void;
+  onSaveDraft: () => void;
   onSaveRecord: () => void;
   onClearSteps: () => void;
   onExportJson: () => void;
   onExportYaml: () => void;
   onSaveRepeatSegment: (segment: FlowRepeatSegment) => void;
   onDeleteRepeatSegment: (segmentId: string) => void;
-}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
+}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveDraft, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
   const stats = flowStats(flow);
   const repeatStats = repeatSegmentStats(flow);
   const [activeInsertStepId, setActiveInsertStepId] = React.useState<string>();
@@ -127,6 +128,7 @@ export const FlowReviewPanel: React.FC<{
     <ScrollJumpDock />
     <div className='review-toolbar'>
       <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
+      <button type='button' onClick={onSaveDraft}>保存为草稿</button>
       <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
       <button type='button' className='danger-outline' onClick={onClearSteps}>清空步骤</button>
       <span>继续录制会接在当前步骤后；也可以在步骤之间插入操作。</span>

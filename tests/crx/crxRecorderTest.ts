@@ -77,6 +77,16 @@ export function dumpLogHeaders(recorderPage: Page) {
   };
 }
 
+async function enableRecorderToolbarMode(button: Locator) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await button.evaluate(element => element.classList.contains('toggled')).catch(() => false))
+      return;
+    await button.click();
+    await button.page().waitForTimeout(100);
+  }
+  await expect(button).toHaveClass(/toggled/);
+}
+
 export const test = crxTest.extend<{
   attachRecorder: (page: Page) => Promise<Page>;
   recorderPage: Page;
@@ -118,7 +128,7 @@ export const test = crxTest.extend<{
                 }
                 await locator.waitFor({ state: 'attached', timeout: 100 });
               } else {
-                await recorderPage.locator('.business-flow-panel, .recorder').first().waitFor({ state: 'attached', timeout: 1000 });
+                await recorderPage.locator('.business-flow-panel, .recorder, .toolbar-button').first().waitFor({ state: 'attached', timeout: 10_000 });
               }
             }
 
@@ -126,8 +136,17 @@ export const test = crxTest.extend<{
           });
         },
 
-        recorderPage: async ({ page, attachRecorder }, run) => {
+        recorderPage: async ({ page, attachRecorder, extensionServiceWorker }, run) => {
+          await extensionServiceWorker.evaluate(async () => {
+            await chrome.storage.sync.set({ businessFlowEnabled: false });
+          });
           const recorderPage = await attachRecorder(page);
+          recorderPage.on('dialog', dialog => dialog.accept());
+          await expect(recorderPage.getByTitle('Record')).toBeVisible({ timeout: 10_000 });
+          await expect(recorderPage.locator('.business-flow-panel')).toHaveCount(0, { timeout: 10_000 });
+          const clearButton = recorderPage.getByTitle('Clear');
+          if (await clearButton.isEnabled().catch(() => false))
+            await clearButton.click();
           await run(recorderPage);
           await recorderPage.close();
         },
@@ -136,9 +155,9 @@ export const test = crxTest.extend<{
           await run(async action => {
             // just to make sure code is up-to-date
             await recorderPage.waitForTimeout(100);
-            const count = await recorderPage.locator('.CodeMirror-line').count();
+            const sourceBefore = await recorderPage.locator('.CodeMirror-line').allInnerTexts();
             const result = await action();
-            await expect(recorderPage.locator('.CodeMirror-line')).not.toHaveCount(count);
+            await expect.poll(async () => await recorderPage.locator('.CodeMirror-line').allInnerTexts()).not.toEqual(sourceBefore);
             return result;
           });
         },
@@ -148,23 +167,20 @@ export const test = crxTest.extend<{
             await recordAction(async () => {
               switch (name) {
                 case 'assertText':
-                  await recorderPage.getByTitle('Assert text').click();
+                  await enableRecorderToolbarMode(recorderPage.getByTitle('Assert text'));
                   await locator.click();
                   await page.locator('x-pw-glass').getByTitle('Accept').click();
                   break;
                 case 'assertValue':
-                  await recorderPage.getByTitle('Assert value').click();
+                  await enableRecorderToolbarMode(recorderPage.getByTitle('Assert value'));
                   await locator.click();
                   break;
                 case 'assertVisible':
-                  await recorderPage.getByTitle('Assert visibility').click();
+                  await enableRecorderToolbarMode(recorderPage.getByTitle('Assert visibility'));
                   await locator.click();
                   break;
                 case 'assertSnapshot':
-                  // ensure snapshot is toggled (for some reason, it may take more than one click)
-                  const assertBtn = recorderPage.getByTitle('Assert snapshot');
-                  while (await assertBtn.evaluate(e => !e.classList.contains('toggled')))
-                    await assertBtn.click();
+                  await enableRecorderToolbarMode(recorderPage.getByTitle('Assert snapshot'));
                   await locator.click();
                   break;
               }

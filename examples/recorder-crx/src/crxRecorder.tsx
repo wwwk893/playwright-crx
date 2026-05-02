@@ -375,6 +375,7 @@ function exposeDiagnosticLogs(logs: RecorderDiagnosticLog[]) {
 export const CrxRecorder: React.FC = ({
 }) => {
   const [settings, setSettings] = React.useState<CrxSettings>(defaultSettings);
+  const [settingsReady, setSettingsReady] = React.useState(false);
   const [sources, setSources] = React.useState<Source[]>([]);
   const [paused, setPaused] = React.useState(false);
   const [log, setLog] = React.useState(new Map<string, CallLog>());
@@ -413,10 +414,15 @@ export const CrxRecorder: React.FC = ({
   const pendingSyntheticClickEventsRef = React.useRef<PageContextEvent[]>([]);
   const syntheticFlushTimerRef = React.useRef<number>();
   const businessFlowPlaybackCodeRef = React.useRef('');
+  const settingsRef = React.useRef<CrxSettings>(settings);
 
   React.useEffect(() => {
     flowDraftRef.current = flowDraft;
   }, [flowDraft]);
+
+  React.useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   const appendDiagnosticLog = React.useCallback((event: MergeDiagnosticEvent) => {
     const entry: RecorderDiagnosticLog = {
@@ -714,7 +720,7 @@ export const CrxRecorder: React.FC = ({
       const runtimeEvent = runtimeDispatchDiagnostic(data);
       if (runtimeEvent)
         appendDiagnosticLog(runtimeEvent);
-      if ((data.event === 'resume' || data.event === 'step') && businessFlowPlaybackCodeRef.current) {
+      if ((data.event === 'resume' || data.event === 'step') && settingsRef.current.businessFlowEnabled !== false && businessFlowPlaybackCodeRef.current) {
         postRecorderEvent({
           event: 'businessFlowCodeChanged',
           params: { code: businessFlowPlaybackCodeRef.current },
@@ -727,7 +733,8 @@ export const CrxRecorder: React.FC = ({
     loadSettings().then(settings => {
       setSettings(settings);
       setSelectedFileId(settings.targetLanguage);
-    }).catch(() => {});
+      setSettingsReady(true);
+    }).catch(() => setSettingsReady(true));
 
     addSettingsChangedListener(setSettings);
 
@@ -875,7 +882,7 @@ export const CrxRecorder: React.FC = ({
   }, [draftReady, settings.defaultApp, settings.defaultRepo, settings.defaultRole, suppressDefaultMeta]);
 
   React.useEffect(() => {
-    if (!draftReady || !settings.businessFlowEnabled)
+    if (!settingsReady || !draftReady || !settings.businessFlowEnabled)
       return;
 
     setDraftStatus('正在保存草稿');
@@ -886,7 +893,7 @@ export const CrxRecorder: React.FC = ({
     }, 1000);
 
     return () => window.clearTimeout(timeout);
-  }, [draftReady, flowDraft, settings.businessFlowEnabled]);
+  }, [draftReady, flowDraft, settings.businessFlowEnabled, settingsReady]);
 
   const source = React.useMemo(() => sources.find(s => s.id === selectedFileId), [sources, selectedFileId]);
   const activeAiProfile = React.useMemo(() => aiProfiles.find(profile => profile.id === aiSettings.activeProfileId) ?? aiProfiles[0], [aiProfiles, aiSettings.activeProfileId]);
@@ -922,12 +929,19 @@ export const CrxRecorder: React.FC = ({
   }, [activeAiProfile]);
 
   React.useEffect(() => {
-    if (settings.businessFlowEnabled === false || panelStage === 'setup' || panelStage === 'library' || panelStage === 'editRecord')
+    if (!settingsReady || settings.businessFlowEnabled === false || panelStage === 'setup' || panelStage === 'library' || panelStage === 'editRecord')
       return;
     setSelectedFileId('playwright-test');
     window.dispatch({ event: 'fileChanged', params: { file: 'playwright-test' } }).catch(() => {});
     window.dispatch({ event: 'businessFlowCodeChanged', params: { code: businessFlowPlaybackCode } }).catch(() => {});
-  }, [businessFlowPlaybackCode, panelStage, settings.businessFlowEnabled]);
+  }, [businessFlowPlaybackCode, panelStage, settings.businessFlowEnabled, settingsReady]);
+
+  React.useEffect(() => {
+    if (!settingsReady || settings.businessFlowEnabled !== false || !source?.text)
+      return;
+    window.dispatch({ event: 'fileChanged', params: { file: selectedFileId } }).catch(() => {});
+    window.dispatch({ event: 'codeChanged', params: { code: source.text } }).catch(() => {});
+  }, [selectedFileId, settings.businessFlowEnabled, settingsReady, source?.text]);
 
   const requestStorageState = React.useCallback(() => {
     if (!settings.experimental)
@@ -986,8 +1000,10 @@ export const CrxRecorder: React.FC = ({
   }, [selectedFileId, settings, saveCode]);
 
   const dispatchEditedCode = React.useCallback((code: string) => {
+    if (!settingsReady)
+      return;
     window.dispatch({ event: settings.businessFlowEnabled === false ? 'codeChanged' : 'businessFlowCodeChanged', params: { code } });
-  }, [settings.businessFlowEnabled]);
+  }, [settings.businessFlowEnabled, settingsReady]);
 
   const dispatchCursorActivity = React.useCallback((position: { line: number }) => {
     window.dispatch({ event: 'cursorActivity', params: { position } });
@@ -1147,13 +1163,13 @@ export const CrxRecorder: React.FC = ({
   }, [flowRecords, settings.redactSensitiveData]);
 
   const saveDraftNow = React.useCallback(() => {
-    saveFlowDraft(flowDraft)
+    saveFlowDraft(flowDraftRef.current)
         .then(() => setDraftStatus(`草稿已保存 ${new Date().toLocaleTimeString()}`))
         .catch(() => {
           setDraftStatus('草稿保存失败');
           window.alert('草稿保存失败。');
         });
-  }, [flowDraft]);
+  }, []);
 
   const updateStep = React.useCallback((stepId: string, patch: Partial<FlowStep>) => {
     setFlowDraft(flow => ({
@@ -1527,7 +1543,7 @@ export const CrxRecorder: React.FC = ({
           const normalizedDraft = normalizeIntentSources(normalizeFlowStepIds(draft));
           setFlowDraft(normalizedDraft);
           setSuppressDefaultMeta(false);
-          setPanelStage(normalizedDraft.steps.length ? 'recording' : 'setup');
+          setPanelStage(normalizedDraft.steps.length ? 'review' : 'setup');
           setActiveTab('business');
           setDraftStatus(`已恢复草稿 ${new Date(normalizedDraft.updatedAt).toLocaleTimeString()}`);
         })
@@ -1760,6 +1776,7 @@ export const CrxRecorder: React.FC = ({
             onDuplicateRecord={duplicateRecord}
             onDeleteRecord={deleteRecord}
             onRestoreRecord={restoreRecord}
+            onRestoreLatestDraft={restoreDraft}
             onImportJson={importRecord}
             onExportAll={exportAllRecords}
             onAiSettingsChange={updateAiSettings}
@@ -1918,6 +1935,7 @@ export const CrxRecorder: React.FC = ({
               onContinueRecordingFrom={continueRecordingFrom}
               onInsertEmptyStep={insertEmptyStep}
               onInsertWaitStep={insertWaitStep}
+              onSaveDraft={saveDraftNow}
               onSaveRecord={() => {
                 saveCurrentRecord().then(saved => {
                   if (saved)

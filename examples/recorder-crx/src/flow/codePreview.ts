@@ -159,15 +159,22 @@ function isAntdSelectFieldStep(step: FlowStep) {
   const sourceCombobox = /getByRole\(["']combobox["']/.test(source) || /role=combobox/.test(selector);
   const isAntdLike = framework === 'antd' || framework === 'procomponents' || step.target?.role === 'combobox' || sourceCombobox;
   const isPopupField = controlType === 'select' || controlType === 'tree-select' || controlType === 'cascader' || step.target?.role === 'combobox' || sourceCombobox;
-  return !!label && isAntdLike && isPopupField && (step.action === 'click' || step.action === 'fill');
+  return !!label && isAntdLike && isPopupField && (step.action === 'click' || step.action === 'fill' || step.action === 'press');
 }
 
 function selectStepFormContext(step: FlowStep) {
   const form = step.context?.before.form || step.target?.scope?.form;
   if (form?.label)
     return form;
-  const label = step.target?.label || popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
+  const label = step.target?.label || popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName) || popupFieldLabelFromSource(step.sourceCode);
   return label ? { ...form, label } : form;
+}
+
+function popupFieldLabelFromSource(sourceCode?: string) {
+  const source = sourceCode || '';
+  const roleName = /getByRole\(["']combobox["']\s*,\s*\{\s*name:\s*["']([^"']+)["']/.exec(source)?.[1];
+  const label = /getByLabel\(["']([^"']+)["']/.exec(source)?.[1];
+  return popupFieldLabelFromName(roleName || label);
 }
 
 function popupFieldLabelFromName(value?: string) {
@@ -191,7 +198,7 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   if (selector && !selector.includes('internal:text') && !/getByText|text=/.test(step.sourceCode || ''))
     return false;
-  const query = String(selectStep.value || rawAction(selectStep.rawAction).text || rawAction(selectStep.rawAction).value || '').trim();
+  const query = selectStep.action === 'press' ? '' : String(selectStep.value || rawAction(selectStep.rawAction).text || rawAction(selectStep.rawAction).value || '').trim();
   return !query || optionText.includes(query);
 }
 
@@ -238,7 +245,8 @@ function emitStep(lines: string[], step: FlowStep, indent: string, segment?: Flo
   else
     lines.push(`${indent}// ${step.id} has no runnable Playwright action source.`);
 
-  for (const assertion of step.assertions.filter(assertion => assertion.enabled))
+  const enabledAssertions = step.assertions.filter(assertion => assertion.enabled);
+  for (const assertion of enabledAssertions)
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
 }
 
@@ -259,6 +267,8 @@ function isRunnableLine(line: string) {
 }
 
 function sourceCodeForStep(step: FlowStep, options: EmitStepOptions = {}) {
+  if (isIncidentalContainerClick(step))
+    return undefined;
   const sourceCode = normalizeActionSource(step.sourceCode);
   const fallback = renderRawActionSource(step, options);
   if (fallback)
@@ -266,6 +276,19 @@ function sourceCodeForStep(step: FlowStep, options: EmitStepOptions = {}) {
   if (sourceCode && sourceMatchesStep(sourceCode, step))
     return sourceCode;
   return sourceCode;
+}
+
+function isIncidentalContainerClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const action = rawAction(step.rawAction);
+  const testId = step.target?.testId || '';
+  const selector = action.selector || step.target?.selector || step.target?.locator || '';
+  const targetText = targetNameForLocator(step);
+  const hasExplicitIntent = !!(step.intent || step.comment || step.assertions.some(assertion => assertion.enabled) || targetText);
+  if (hasExplicitIntent)
+    return false;
+  return /(?:^|[-_])(modal|drawer)$/.test(testId) || /\[data-testid=["'][^"']*(?:modal|drawer)["']\]/.test(selector);
 }
 
 function sourceMatchesStep(sourceCode: string[], step: FlowStep) {
@@ -323,7 +346,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         return options.parserSafe ? `await ${selectOption}.last().click();` : selectOptionClickSource(selectOption);
       const popupOption = antdTreeSelectOptionLocator(step) || antdCascaderOptionLocator(step);
       if (popupOption)
-        return antdSelectOptionDispatchSource(popupOption, popupOptionName(step));
+        return options.parserSafe ? `await ${popupOption}.last().click();` : antdSelectOptionDispatchSource(popupOption, popupOptionName(step));
       const activePopupOption = activeDropdownOptionLocator(step);
       if (activePopupOption)
         return `await ${activePopupOption}.last().click();`;
@@ -333,7 +356,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       return selector ? `await ${locatorExpressionForSelector(selector)}.click();` : targetClickFallback(step);
     }
     case 'fill': {
-      const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
+      const value = stringLiteral(step.value ?? action.text ?? action.value ?? '');
       if (step.target?.label)
         return `await page.getByLabel(${stringLiteral(step.target.label)}).fill(${value});`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
@@ -726,12 +749,12 @@ function renderAssertion(assertion: FlowAssertion) {
       const targetExpression = locatorExpressionForSelector(assertion.target?.selector) ||
         `page.getByText(${stringLiteral(assertion.params?.targetSummary || assertion.target?.label || assertion.target?.text || '目标元素')})`;
       if (assertion.type === 'visible')
-        return `await expect(${targetExpression}).toBeVisible();`;
+        return `await expect(${targetExpression}).toBeVisible({ timeout: 10000 });`;
       if (assertion.type === 'valueEquals')
-        return `await expect(${targetExpression}).toHaveValue(${stringLiteral(assertion.expected || '')});`;
+        return `await expect(${targetExpression}).toHaveValue(${stringLiteral(assertion.expected || '')}, { timeout: 10000 });`;
       if (assertion.type === 'textEquals')
-        return `await expect(${targetExpression}).toHaveText(${stringLiteral(assertion.expected || '')});`;
-      return `await expect(${targetExpression}).toContainText(${stringLiteral(assertion.expected || '')});`;
+        return `await expect(${targetExpression}).toHaveText(${stringLiteral(assertion.expected || '')}, { timeout: 10000 });`;
+      return `await expect(${targetExpression}).toContainText(${stringLiteral(assertion.expected || '')}, { timeout: 10000 });`;
     }
     case 'table': {
       const tableLocator = locatorExpressionForSelector(assertion.params?.tableSelector) ||
@@ -741,11 +764,11 @@ function renderAssertion(assertion: FlowAssertion) {
       const columnValue = assertion.params?.columnValue;
       const rowLocator = `${tableLocator}.getByRole('row').filter({ hasText: ${rowKeyword} })`;
       if (columnName && columnValue)
-        return `await expect(${rowLocator}).toContainText(${stringLiteral(columnValue)});`;
-      return `await expect(${rowLocator}).toBeVisible();`;
+        return `await expect(${rowLocator}).toContainText(${stringLiteral(columnValue)}, { timeout: 10000 });`;
+      return `await expect(${rowLocator}).toBeVisible({ timeout: 10000 });`;
     }
     case 'toast':
-      return `await expect(page.getByText(${stringLiteral(assertion.expected || assertion.params?.message || '')})).toBeVisible();`;
+      return `await expect(page.getByText(${stringLiteral(assertion.expected || assertion.params?.message || '')})).toBeVisible({ timeout: 10000 });`;
     case 'api':
       return `// expect response ${[assertion.params?.method, assertion.params?.url, assertion.params?.status || assertion.params?.requestContains].filter(Boolean).join(' ')}`;
     default:
@@ -794,11 +817,26 @@ function escapeSingleQuoted(value: string) {
 function locatorExpressionForSelector(selector: unknown) {
   if (typeof selector !== 'string' || !selector.trim())
     return undefined;
+  const testId = testIdFromSelector(selector);
+  if (testId)
+    return `page.getByTestId(${stringLiteral(testId)})`;
   try {
     return `page.${asLocator('javascript', selector)}`;
   } catch {
     return `page.locator(${stringLiteral(selector)})`;
   }
+}
+
+function testIdFromSelector(selector: string) {
+  const text = selector.trim();
+  const match = /^(?:testid:|testid=)(.+)$/.exec(text);
+  const value = match?.[1]?.trim();
+  if (!value)
+    return undefined;
+  const quote = value[0];
+  if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length >= 2)
+    return value.slice(1, -1).trim() || undefined;
+  return value;
 }
 
 function stringLiteral(value: unknown) {

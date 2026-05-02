@@ -25,7 +25,7 @@ test.beforeEach(async ({ mockPaths }) => {
       <input type="text" value="input with value">
       <select><option>A</option><option selected>B</option></select>
       <div data-testid="text">Some long text</div>
-      <body>
+      </body>
     </html>`,
   });
 });

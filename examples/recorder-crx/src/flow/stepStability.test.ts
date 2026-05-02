@@ -5,6 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
+import { selectorFromElementTarget } from './assertionTargets';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
@@ -21,6 +22,141 @@ type TestCase = {
 };
 
 const tests: TestCase[] = [
+  {
+    name: 'element assertion target only treats explicit selector syntax as selector',
+    run: () => {
+      assertEqual(selectorFromElementTarget('[data-testid="users-table"] tr:has-text("alice.qa")'), '[data-testid="users-table"] tr:has-text("alice.qa")');
+      assertEqual(selectorFromElementTarget('.ant-modal .primary'), '.ant-modal .primary');
+      assertEqual(selectorFromElementTarget('#submit'), '#submit');
+      assertEqual(selectorFromElementTarget('css=button.primary'), 'css=button.primary');
+      assertEqual(selectorFromElementTarget('testid:users-table'), 'testid:users-table');
+      assertEqual(selectorFromElementTarget('testid:"users-table"'), 'testid:"users-table"');
+      assertEqual(selectorFromElementTarget("testid='users-table'"), "testid='users-table'");
+      assertEqual(selectorFromElementTarget('button 保存'), undefined);
+      assertEqual(selectorFromElementTarget('table row'), undefined);
+      assertEqual(selectorFromElementTarget('用户表格'), undefined);
+      assertEqual(selectorFromElementTarget('alice.qa'), undefined);
+    },
+  },
+  {
+    name: 'assertion codegen maps testid shorthand selectors to getByTestId',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createEmptyBusinessFlow({ flow: { id: 'flow-testid-assertion', name: 'TestID 断言' } }),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          assertions: [
+            {
+              id: 'assertion-testid-colon',
+              subject: 'element',
+              type: 'visible',
+              enabled: true,
+              expected: 'alice.qa',
+              target: { selector: 'testid:users-table' },
+              params: { targetSummary: 'testid:users-table' },
+            },
+            {
+              id: 'assertion-testid-equals',
+              subject: 'table',
+              type: 'tableRowExists',
+              enabled: true,
+              expected: 'alice.qa',
+              params: { tableSelector: 'testid=users-table', rowKeyword: 'alice.qa' },
+              target: { selector: 'testid=users-table', text: 'alice.qa' },
+            },
+            {
+              id: 'assertion-testid-quoted',
+              subject: 'element',
+              type: 'visible',
+              enabled: true,
+              expected: 'bob.qa',
+              target: { selector: 'testid:"quoted-table"' },
+              params: { targetSummary: 'testid:"quoted-table"' },
+            },
+            {
+              id: 'assertion-testid-single-quoted',
+              subject: 'element',
+              type: 'visible',
+              enabled: true,
+              expected: 'carol.qa',
+              target: { selector: "testid='single-quoted-table'" },
+              params: { targetSummary: "testid='single-quoted-table'" },
+            },
+          ],
+          rawAction: { action: { name: 'click', selector: 'testid:create-user-btn' } },
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      assert(code.includes('page.getByTestId("users-table")'), 'testid: and testid= selectors should generate getByTestId');
+      assert(code.includes('page.getByTestId("quoted-table")'), 'quoted testid: selector should strip wrapping double quotes');
+      assert(code.includes('page.getByTestId("single-quoted-table")'), 'quoted testid= selector should strip wrapping single quotes');
+      assert(!code.includes('page.getByTestId("\\\"quoted-table\\\"")'), 'quoted testid shorthand must not keep double quotes in the test id');
+      assert(!code.includes('page.getByTestId("\'single-quoted-table\'")'), 'quoted testid shorthand must not keep single quotes in the test id');
+      assert(!code.includes('page.locator("testid:users-table")'), 'testid: shorthand must not fall back to page.locator');
+      assert(!code.includes('page.locator("testid=users-table")'), 'testid= shorthand must not fall back to page.locator');
+    },
+  },
+  {
+    name: 'assertion codegen covers element text/value and table row assertions',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createEmptyBusinessFlow({ flow: { id: 'flow-assertion-types', name: '断言类型覆盖' } }),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: { selector: 'css=input[placeholder="请输入用户名"]' },
+          value: 'alice.qa',
+          assertions: [
+            {
+              id: 'assertion-1',
+              subject: 'element',
+              type: 'valueEquals',
+              enabled: true,
+              expected: 'alice.qa',
+              target: { selector: 'css=input[placeholder="请输入用户名"]' },
+              params: { targetSummary: 'css=input[placeholder="请输入用户名"]' },
+            },
+            {
+              id: 'assertion-2',
+              subject: 'element',
+              type: 'textContains',
+              enabled: true,
+              expected: '保存成功：alice.qa',
+              target: { selector: 'css=body' },
+              params: { targetSummary: 'css=body' },
+            },
+            {
+              id: 'assertion-3',
+              subject: 'table',
+              type: 'tableRowExists',
+              enabled: true,
+              expected: 'alice.qa',
+              params: { tableArea: 'css=[data-testid="users-table"]', tableSelector: 'css=[data-testid="users-table"]', rowKeyword: 'alice.qa', columnName: '角色', columnValue: '审计员' },
+              target: { selector: 'css=[data-testid="users-table"]', text: 'alice.qa' },
+            },
+          ],
+          rawAction: { action: { name: 'fill', selector: 'css=input[placeholder="请输入用户名"]', text: 'alice.qa' } },
+          sourceCode: `await page.locator('input[placeholder="请输入用户名"]').fill('alice.qa');`,
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      assert(code.includes('toHaveValue("alice.qa"'), 'valueEquals should generate toHaveValue');
+      assert(code.includes('toContainText("保存成功：alice.qa"'), 'textContains should generate toContainText');
+      assert(code.includes('getByRole(\'row\').filter({ hasText: "alice.qa" })'), 'tableRowExists should scope to a table row');
+      assert(code.includes('toContainText("审计员"'), 'tableRowExists with column condition should assert the column value');
+      assert(code.includes('{ timeout: 10000 }'), 'generated assertions should rely on Playwright expect timeout');
+      assert(!code.includes('waitForTimeout(1000)'), 'generated assertions should not add a fixed pre-assertion sleep');
+    },
+  },
   {
     name: 'continue recording appends only new actions and keeps user edits',
     run: () => {
@@ -1820,6 +1956,47 @@ test('demo', async ({ page }) => {
 
       assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'contextless tree option should inherit active dropdown scope');
       assert(!optionStep.includes('page.getByText("华东生产区")'), 'contextless tree option should not replay through global text');
+    },
+  },
+  {
+    name: 'contextless tree option after combobox keyboard open ignores ArrowDown value and stays popup scoped',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'press',
+            value: 'ArrowDown',
+            target: {
+              role: 'combobox',
+            },
+            sourceCode: `await page.getByRole("combobox", { name: "* 发布范围" }).press("ArrowDown");`,
+            rawAction: { action: { name: 'press', selector: 'internal:role=combobox[name="* 发布范围"i]', key: 'ArrowDown' } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: { text: '华东生产区', name: '华东生产区' },
+            sourceCode: `await page.getByText('华东生产区').click();`,
+            rawAction: { action: { name: 'click', selector: 'internal:text="华东生产区"i' } },
+            assertions: [],
+          },
+        ],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+
+      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'keyboard opened tree option should inherit active dropdown scope');
+      assert(!optionStep.includes('page.getByText("华东生产区")'), 'keyboard opened tree option should not replay through global text');
     },
   },
   {

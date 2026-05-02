@@ -26,12 +26,13 @@ import { toKeyboardModifiers } from 'playwright-core/lib/server/codegen/language
 import type { ActionInContextWithLocation, Location } from './parser';
 import type { ActionInContext, FrameDescription } from '@recorder/actions';
 import { toClickOptions } from 'playwright-core/lib/server/recorder/recorderRunner';
-import { parseAriaSnapshotUnsafe } from 'playwright-core/lib/utils/isomorphic/ariaSnapshot';
 import { serverSideCallMetadata } from 'playwright-core/lib/server';
 import type { Crx } from '../crx';
 import type { InstrumentationListener } from 'playwright-core/lib/server/instrumentation';
 import { traceParamsForAction } from './recorderUtils';
+import { parseAriaSnapshotUnsafe } from 'playwright-core/lib/utils/isomorphic/ariaSnapshot';
 import { yaml } from 'playwright-core/lib/utilsBundle';
+
 
 class Stopped extends Error {}
 
@@ -93,14 +94,13 @@ export default class CrxPlayer extends EventEmitter {
 
     if (recorder && crxApp && crxApp._context !== context) {
       // we intercept incognito call logs and forward them into the recorder
-      const instrumentationListener: InstrumentationListener = {
+      instrumentationListener = {
         onBeforeCall: recorder.onBeforeCall.bind(recorder),
         onBeforeInputAction: recorder.onBeforeInputAction.bind(recorder),
         onCallLog: recorder.onCallLog.bind(recorder),
         onAfterCall: recorder.onAfterCall.bind(recorder),
       };
-      if (instrumentationListener)
-        context.instrumentation.addListener(instrumentationListener, context);
+      context.instrumentation.addListener(instrumentationListener, context);
     }
 
     this._pageAliases.clear();

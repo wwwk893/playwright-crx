@@ -15,6 +15,7 @@
  */
 import React from 'react';
 import { assertionLabel, assertionSubjectForType, assertionSubjectLabel, summarizeAssertion, summarizeTarget } from '../flow/display';
+import { selectorFromElementTarget } from '../flow/assertionTargets';
 import type { FlowAssertion, FlowAssertionParams, FlowAssertionSubject, FlowAssertionType, FlowStep, FlowTarget } from '../flow/types';
 
 const assertionSubjects: FlowAssertionSubject[] = ['page', 'element', 'table', 'toast', 'api', 'custom'];
@@ -412,23 +413,24 @@ function buildAssertionPatch(options: {
 
   if (options.subject === 'element') {
     const targetSummary = trimValue(options.elementTarget);
+    const selector = selectorFromElementTarget(targetSummary);
     return {
       assertionExpected: trimValue(options.expected),
       params: { targetSummary },
-      target: options.stepTarget ?? (targetSummary ? { label: targetSummary } : undefined),
+      target: targetSummary ? { label: targetSummary, text: targetSummary, selector } : options.stepTarget,
     };
   }
 
   if (options.subject === 'table') {
     const tableArea = trimValue(options.tableArea);
-    const tableSelector = trimValue(options.tableSelector);
+    const tableSelector = trimValue(options.tableSelector) || selectorFromElementTarget(tableArea);
     const rowKeyword = trimValue(options.rowKeyword);
     const columnName = options.useColumnCondition ? trimValue(options.columnName) : undefined;
     const columnValue = options.useColumnCondition ? trimValue(options.columnValue) : undefined;
     return {
       assertionExpected: rowKeyword,
       params: { tableArea, tableSelector, rowKeyword, columnName, columnValue },
-      target: tableArea || rowKeyword ? { label: tableArea, text: rowKeyword } : undefined,
+      target: tableArea || rowKeyword ? { label: tableArea, text: rowKeyword, selector: tableSelector } : undefined,
     };
   }
 

@@ -302,10 +302,18 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   const repeatStepIds = flow.steps
       .filter((step: any) => stepIndex(flow, step.id) >= stepIndex(flow, createStepId) && stepIndex(flow, step.id) <= stepIndex(flow, confirmStepId))
       .map((step: any) => step.id);
-  expect(repeatStepIds.length).toBeGreaterThanOrEqual(6);
+  const repeatStepText = flow.steps
+      .filter((step: any) => repeatStepIds.includes(step.id))
+      .map((step: any) => [step.title, step.description, step.value, step.sourceCode, step.target?.testId, step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].join('\n'))
+      .join('\n');
+  expect(repeatStepIds.length).toBeGreaterThanOrEqual(5);
   expect(repeatStepIds).toContain(createStepId);
   expect(repeatStepIds).toContain(confirmStepId);
   expect(repeatStepIds).not.toContain(saveConfigStepId);
+  expect(repeatStepText).toContain('test1');
+  expect(repeatStepText).toMatch(/xtest16:WAN1|WAN口|选择一个WAN口/);
+  expect(repeatStepText).toContain('1.1.1.1');
+  expect(repeatStepText).toContain('2.2.2.2');
 
   for (const stepId of repeatStepIds)
     await recorderPage.locator(`button[aria-label="选择 ${stepId} 作为循环步骤"]`).click();

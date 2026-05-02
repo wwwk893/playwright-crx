@@ -105,8 +105,9 @@ export function traceParamsForAction(actionInContext: recorderActions.ActionInCo
     }
     case 'assertChecked': {
       const params: channels.FrameExpectParams = {
-        selector: action.selector,
+        selector,
         expression: 'to.be.checked',
+        expectedValue: { checked: true },
         isNot: !action.checked,
         timeout: kDefaultTimeout,
       };
