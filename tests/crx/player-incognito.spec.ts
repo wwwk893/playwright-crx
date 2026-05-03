@@ -64,12 +64,16 @@ test('test', async ({ page }) => {
   await expect(recorderPage.getByTitle('Resume (F8)')).not.toBeDisabled();
 
   const getIncognitoTabIds = async () => await extensionServiceWorker.evaluate(() => chrome.tabs.query({}).then(ts => ts.filter(t => t.incognito).map(t => t.id!)));
+  await expect.poll(async () => (await getIncognitoTabIds()).length).toBe(1);
   const tabIds = await getIncognitoTabIds();
-  expect(tabIds).toHaveLength(1);
 
   await recorderPage.getByTitle('Resume (F8)').click();
   await expect(recorderPage.getByTitle('Resume (F8)')).not.toBeDisabled();
 
+  await expect.poll(async () => {
+    const ids = await getIncognitoTabIds();
+    return ids.length === 1 && ids[0] !== tabIds[0] ? ids[0] : undefined;
+  }).not.toBeUndefined();
   const newTabIds = await getIncognitoTabIds();
   expect(newTabIds).toHaveLength(1);
   expect(newTabIds[0]).not.toEqual(tabIds[0]);

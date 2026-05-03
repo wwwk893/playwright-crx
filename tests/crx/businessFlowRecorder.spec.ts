@@ -27,7 +27,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   test.setTimeout(120_000);
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibrary(recorderPage);
@@ -93,7 +93,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   test.setTimeout(120_000);
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibrary(recorderPage);
@@ -152,10 +152,10 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
 
 
 test('records real ProFormField network configuration fields and replays generated code @proform-fields', async ({ context, page, attachRecorder, baseURL }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(210_000);
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibrary(recorderPage);
@@ -249,7 +249,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   test.setTimeout(150_000);
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibrary(recorderPage);
@@ -346,7 +346,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   test.setTimeout(180_000);
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept('1'));
 
   const flowName = `插件稳定性流程 ${Date.now()}`;

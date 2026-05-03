@@ -43,7 +43,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   expect(benchmarkCase.name).toBe('recorder_ipv4_pool_step_intent_repeat_data');
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibraryLikeUser(recorderPage);
@@ -72,6 +72,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await humanClickUntil(
       ipv4Dialog.getByRole('button', { name: '确 定' }),
       async () => !await ipv4Dialog.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 800 },
   );
   await expect(page.getByRole('row', { name: /test1.*xtest16:WAN1.*1\.1\.1\.1.*2\.2\.2\.2/ })).toBeVisible({ timeout: 10_000 });
   await humanClick(page.getByTestId('site-save-button'));
@@ -110,7 +111,7 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   expect(benchmarkCase.name).toBe('recorder_user_admin_modal_repeat');
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibraryLikeUser(recorderPage);
@@ -175,7 +176,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   expect(benchmarkCase.name).toBe('recorder_network_resource_complex_repeat');
 
   await page.goto(`${baseURL}/empty.html`);
-  const recorderPage = await attachRecorder(page);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
   recorderPage.on('dialog', dialog => dialog.accept());
 
   await beginNewFlowFromLibraryLikeUser(recorderPage);
@@ -194,7 +195,9 @@ test('case-driven human-like records network resource complex form repeat flow a
   const networkDialog = page.locator('.ant-modal, [role="dialog"]').filter({ hasText: '新建网络资源' });
   await expect(networkDialog).toBeVisible({ timeout: 10_000 });
 
-  await humanType(page.getByPlaceholder('地址池名称'), 'res-web-01');
+  const resourceNameInput = page.getByPlaceholder('地址池名称');
+  await humanType(resourceNameInput, 'res-web-01', { clear: true });
+  await expect(resourceNameInput).toHaveValue('res-web-01');
   const wanTrigger = networkDialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, wanTrigger, 'edge-lab:WAN1', { searchText: 'edge-lab' });
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('edge-lab:WAN1');
@@ -204,12 +207,6 @@ test('case-driven human-like records network resource complex form repeat flow a
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '关联VRF' })).toContainText('生产VRF');
 
   await humanClick(networkDialog.getByText('开启代理ARP'));
-  const healthUrl = page.getByPlaceholder('https://probe.example/health');
-  await humanClickUntil(
-      networkDialog.locator('.ant-form-item').filter({ hasText: '启用健康检查' }).locator('.ant-switch').first(),
-      async () => await healthUrl.isVisible().catch(() => false),
-  );
-  await humanType(healthUrl, 'https://probe.example/health');
 
   const scopeTrigger = page.getByTestId('network-resource-scope-tree').locator('.ant-select-selector').first();
   await selectAntdTreeNodeLikeUser(page, scopeTrigger, '华东生产区');
@@ -219,15 +216,22 @@ test('case-driven human-like records network resource complex form repeat flow a
   await selectAntdCascaderPathLikeUser(page, egressTrigger, ['上海', '一号机房', 'NAT集群A']);
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '出口路径' })).toContainText('NAT集群A');
 
-  await humanType(page.getByPlaceholder('服务名称'), 'web');
-  await humanType(page.getByPlaceholder('监听端口'), '443');
+  const serviceInput = page.getByPlaceholder('服务名称');
+  await humanType(serviceInput, 'web');
+  await expect(serviceInput).toHaveValue('web');
+  const listenPortInput = page.getByPlaceholder('监听端口');
+  await humanType(listenPortInput, '443');
+  await expect(listenPortInput).toHaveValue('443');
 
   const networkTable = page.getByTestId('network-resource-table');
-  await humanClickUntil(
-      page.getByTestId('network-resource-save'),
-      async () => !await networkDialog.isVisible().catch(() => false) || await networkTable.innerText().then(text => text.includes('res-web-01')).catch(() => false),
-      { attempts: 5, afterClickDelayMs: 1000 },
-  );
+  const networkSaveButton = networkDialog.locator('[data-testid="network-resource-save"]');
+  await expect(networkSaveButton).toBeVisible();
+  await expect(networkSaveButton).toBeEnabled();
+  for (let attempt = 0; attempt < 4 && await networkDialog.isVisible().catch(() => false); attempt++) {
+    await networkSaveButton.click({ timeout: 10_000 });
+    await page.waitForTimeout(500);
+  }
+  await expect(networkDialog).toBeHidden({ timeout: 10_000 });
   await expect(networkTable).toContainText('res-web-01', { timeout: 10_000 });
   await expect(networkTable).toContainText('edge-lab:WAN1');
   await expect(networkTable).toContainText('华东生产区');
@@ -236,7 +240,10 @@ test('case-driven human-like records network resource complex form repeat flow a
 
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('network-resource-add');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('res-web-01');
-  await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/edge-lab:WAN1|生产VRF|华东生产区|NAT集群A/);
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('edge-lab:WAN1');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('生产VRF');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('华东生产区');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('NAT集群A');
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('复查');

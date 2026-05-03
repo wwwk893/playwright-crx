@@ -151,9 +151,39 @@ function repeatParameterValue(step: FlowStep) {
   const before = step.context?.before;
   const fieldLabel = before?.form?.label || step.target?.scope?.form?.label || step.target?.label;
   const inDropdown = before?.dialog?.type === 'dropdown' || /dropdown|select/i.test(step.target?.role || '');
-  if (fieldLabel && inDropdown)
+  if (fieldLabel && inDropdown && !isOrdinaryFormLabelClick(step, fieldLabel, optionText))
+    return optionText;
+  if (!fieldLabel && inDropdown && isPopupOptionClick(step))
     return optionText;
   return undefined;
+}
+
+function isOrdinaryFormLabelClick(step: FlowStep, fieldLabel: string, optionText: string) {
+  const tag = step.context?.before.target?.tag || String((step.target?.raw as { tag?: unknown } | undefined)?.tag || '');
+  if (tag !== 'label')
+    return false;
+  if (normalizedText(fieldLabel) !== normalizedText(optionText))
+    return false;
+  const selector = rawActionSelector(step);
+  return !/ant-select|ant-cascader|ant-tree|role=option|role=menuitem/.test(selector);
+}
+
+function isPopupOptionClick(step: FlowStep) {
+  const beforeTarget = step.context?.before.target;
+  const controlType = beforeTarget?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const role = step.target?.role || beforeTarget?.role || '';
+  const selector = rawActionSelector(step) || step.target?.selector || step.target?.locator || '';
+  return /option/.test(controlType) || /^(option|menuitem)$/i.test(role) || /ant-select-tree|ant-select-item-option|ant-cascader-menu-item/.test(selector);
+}
+
+function normalizedText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function rawActionSelector(step: FlowStep) {
+  const raw = step.rawAction && typeof step.rawAction === 'object' ? step.rawAction as { action?: unknown, selector?: unknown } : undefined;
+  const action = raw?.action && typeof raw.action === 'object' ? raw.action as { selector?: unknown } : raw;
+  return typeof action?.selector === 'string' ? action.selector : '';
 }
 
 function createInitialRows(parameters: FlowRepeatParameter[]): FlowRepeatRow[] {

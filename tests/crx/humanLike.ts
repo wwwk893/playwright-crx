@@ -61,6 +61,23 @@ export async function humanClickUntil(locator: Locator, condition: () => Promise
     if (await condition())
       return;
   }
+  await locator.click({ timeout: 10_000 }).catch(() => {});
+  await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
+  if (await condition())
+    return;
+  await locator.click({ force: true, timeout: 10_000 }).catch(() => {});
+  await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
+  if (await condition())
+    return;
+  await locator.focus({ timeout: 5_000 }).catch(() => {});
+  await locator.page().keyboard.press('Enter').catch(() => {});
+  await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
+  if (await condition())
+    return;
+  await locator.page().keyboard.press('Space').catch(() => {});
+  await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
+  if (await condition())
+    return;
   throw new Error(`humanClickUntil condition was not met after ${attempts} attempts`);
 }
 
@@ -132,6 +149,8 @@ export async function humanType(locator: Locator, text: string, options?: { clea
   if (options?.clear === true) {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
+    await expect.poll(async () => await locator.inputValue().catch(() => '')).toBe('');
+    await page.waitForTimeout(80);
   }
 
   await page.keyboard.type(text, { delay: options?.delayMs ?? 35 });
@@ -186,23 +205,28 @@ export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, opt
 }
 
 export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, nodeText: string, options?: { searchText?: string }) {
-  const dropdown = page.locator('.ant-select-dropdown:visible').last();
-  await openPopupLikeUser(trigger, dropdown);
-  await expect(dropdown).toBeVisible({ timeout: 10_000 });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const dropdown = page.locator('.ant-select-dropdown:visible').last();
+    await openPopupLikeUser(trigger, dropdown);
+    await expect(dropdown).toBeVisible({ timeout: 10_000 });
 
-  if (options?.searchText)
-    await page.keyboard.type(options.searchText, { delay: 25 });
+    if (options?.searchText)
+      await page.keyboard.type(options.searchText, { delay: 25 });
 
-  const node = await exactTextOption(dropdown.locator('.ant-select-tree-node-content-wrapper'), nodeText) || dropdown
-      .locator('.ant-select-tree-node-content-wrapper')
-      .filter({ hasText: nodeText })
-      .last();
-  await expect(node).toBeVisible({ timeout: 10_000 });
-  await humanClickVisible(node, { delayMs: 80 });
-  await dropdown.waitFor({ state: 'hidden', timeout: 800 }).catch(async () => {
-    await node.click({ force: true, timeout: 2_000 }).catch(() => {});
-  });
-  await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+    const node = await exactTextOption(dropdown.locator('.ant-select-tree-node-content-wrapper, .ant-select-tree-title'), nodeText) || dropdown
+        .locator('.ant-select-tree-node-content-wrapper, .ant-select-tree-title')
+        .filter({ hasText: nodeText })
+        .last();
+    await expect(node).toBeVisible({ timeout: 10_000 });
+    await humanClickVisible(node, { delayMs: 80 });
+    await dropdown.waitFor({ state: 'hidden', timeout: 1200 }).catch(async () => {
+      await node.click({ force: true, timeout: 2_000 }).catch(() => {});
+    });
+    await page.waitForTimeout(250);
+    if (normalized(await trigger.innerText().catch(() => '')).includes(normalized(nodeText)))
+      return;
+  }
+  await expect(trigger).toContainText(nodeText, { timeout: 5_000 });
 }
 
 export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locator, path: string[]) {
@@ -299,6 +323,25 @@ export async function createRepeatSegmentLikeUser(recorderPage: Page, options: {
 async function selectVisibleRepeatRange(recorderPage: Page, fromStepText: string, toStepText: string) {
   const rows = recorderPage.locator('.review-step-row, .flow-step');
   const count = await rows.count();
+  let fromIndex = -1;
+  let toIndex = -1;
+  for (let i = 0; i < count; i++) {
+    const text = await rows.nth(i).innerText().catch(() => '');
+    if (fromIndex < 0 && normalized(text).includes(normalized(fromStepText)))
+      fromIndex = i;
+    if (fromIndex >= 0 && normalized(text).includes(normalized(toStepText))) {
+      toIndex = i;
+      break;
+    }
+  }
+
+  if (fromIndex >= 0 && toIndex >= fromIndex) {
+    await dragSelectRepeatRange(recorderPage, rows.nth(fromIndex), rows.nth(toIndex));
+    const expected = toIndex - fromIndex + 1;
+    if (await selectedRepeatRowCount(rows) >= expected)
+      return await selectedRepeatRowCount(rows);
+  }
+
   let selecting = false;
   let selected = 0;
   for (let i = 0; i < count; i++) {
@@ -309,7 +352,13 @@ async function selectVisibleRepeatRange(recorderPage: Page, fromStepText: string
     if (selecting) {
       const selectButton = row.locator('button[aria-label^="选择 "][aria-label$="作为循环步骤"]').first();
       if (await selectButton.isVisible().catch(() => false)) {
-        await humanClick(selectButton);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (await isRepeatRowSelected(row))
+            break;
+          await humanClick(selectButton);
+          await recorderPage.waitForTimeout(120);
+        }
+        await expect.poll(() => isRepeatRowSelected(row), { timeout: 3_000 }).toBe(true);
         selected++;
       }
     }
@@ -317,6 +366,28 @@ async function selectVisibleRepeatRange(recorderPage: Page, fromStepText: string
       break;
   }
   return selected;
+}
+
+async function dragSelectRepeatRange(recorderPage: Page, fromRow: Locator, toRow: Locator) {
+  await fromRow.scrollIntoViewIfNeeded();
+  await toRow.scrollIntoViewIfNeeded();
+  const fromBox = await stableBoundingBox(fromRow.locator('.review-step-main, .review-step-id').first());
+  const toBox = await stableBoundingBox(toRow.locator('.review-step-main, .review-step-id').first());
+  if (!fromBox || !toBox)
+    return;
+  const mouse = recorderPage.mouse;
+  await mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2, { steps: 8 });
+  await mouse.down();
+  await mouse.move(toBox.x + toBox.width / 2, toBox.y + toBox.height / 2, { steps: 16 });
+  await mouse.up();
+}
+
+async function selectedRepeatRowCount(rows: Locator) {
+  return await rows.evaluateAll(elements => elements.filter(element => element.classList.contains('selected-for-repeat') || !!element.querySelector('.repeat-step-selector.selected')).length);
+}
+
+async function isRepeatRowSelected(row: Locator) {
+  return await row.evaluate(element => element.classList.contains('selected-for-repeat') || !!element.querySelector('.repeat-step-selector.selected')).catch(() => false);
 }
 
 function normalized(value: string) {

@@ -413,6 +413,11 @@ export const CrxRecorder: React.FC = ({
   const pendingSyntheticClickEventsRef = React.useRef<PageContextEvent[]>([]);
   const syntheticFlushTimerRef = React.useRef<number>();
   const businessFlowPlaybackCodeRef = React.useRef('');
+  const businessFlowEnabledRef = React.useRef(defaultSettings.businessFlowEnabled !== false);
+
+  React.useEffect(() => {
+    businessFlowEnabledRef.current = settings.businessFlowEnabled !== false;
+  }, [settings.businessFlowEnabled]);
 
   React.useEffect(() => {
     flowDraftRef.current = flowDraft;
@@ -714,7 +719,7 @@ export const CrxRecorder: React.FC = ({
       const runtimeEvent = runtimeDispatchDiagnostic(data);
       if (runtimeEvent)
         appendDiagnosticLog(runtimeEvent);
-      if ((data.event === 'resume' || data.event === 'step') && businessFlowPlaybackCodeRef.current) {
+      if ((data.event === 'resume' || data.event === 'step') && businessFlowEnabledRef.current && businessFlowPlaybackCodeRef.current) {
         postRecorderEvent({
           event: 'businessFlowCodeChanged',
           params: { code: businessFlowPlaybackCodeRef.current },

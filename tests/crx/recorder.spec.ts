@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { test, expect } from './crxRecorderTest';
+import { sourceLines } from './utils';
 
 test('should record @smoke', async ({ page, attachRecorder, recordAction, baseURL }) => {
   const recorderPage = await attachRecorder(page);
@@ -33,7 +34,7 @@ test('test', async ({ page }) => {
   await page.locator('textarea').fill('test');
 });`;
 
-  await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+  await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
 });
 
 
@@ -54,7 +55,7 @@ test('test', async ({ page, context }) => {
   await page1.goto('${baseURL}/input/textarea.html');
 });`;
 
-  await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+  await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
 });
 
 
@@ -92,7 +93,7 @@ test('should inspect element', async ({ page, attachRecorder, baseURL }) => {
 
   await page.locator('textarea').click();
 
-  await expect(recorderPage.locator('.split-view-sidebar .CodeMirror-line')).toHaveText(`locator('textarea')`);
+  await expect.poll(() => sourceLines(recorderPage.locator('.split-view-sidebar'))).toEqual([`locator('textarea')`]);
 });
 
 test('should record popups', async ({ page, attachRecorder, baseURL, mockPaths, recordAction }) => {
@@ -116,7 +117,7 @@ test('test', async ({ page }) => {
   const page1 = await page1Promise;
 });`;
 
-  await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+  await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
 });
 
 test('should record with all supported actions and assertions', async ({ context, page, recorderPage, baseURL, mockPaths, recordAction, recordAssertion, attachRecorder, basePath }) => {
@@ -204,7 +205,7 @@ test('test', async ({ page, context }) => {
     \`);
 });`;
 
-  await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+  await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
 });
 
 test('should record with custom testid', async ({ page, attachRecorder, recordAction, baseURL, extensionServiceWorker }) => {
@@ -232,7 +233,7 @@ test('test', async ({ page }) => {
   await page.getByRole('button', { name: 'Button' }).nth(1).click();
 });`;
 
-  await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+  await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
 });
 
 test('should record oopif frames', async ({ page, attachRecorder, recordAction, server, browserMajorVersion }) => {
@@ -249,7 +250,7 @@ test('test', async ({ page }) => {
   await page.locator('iframe').contentFrame().locator('div:nth-child(21)').click();
 });`;
 
-  await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+  await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
 });
 
 test.fixme('should start recording with configured language', async ({ page, attachRecorder, configureRecorder }) => {
@@ -264,7 +265,7 @@ from playwright.sync_api import Page, expect
 def test_example(page: Page) -> None:
 `;
 
-    await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+    await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
     await recorderPage.close();
   }
 
@@ -289,7 +290,7 @@ public class Tests : PageTest
     }
 }
 `;
-    await expect(recorderPage.locator('.CodeMirror-line')).toHaveText(code.split('\n'));
+    await expect.poll(() => sourceLines(recorderPage)).toEqual(code.split('\n'));
     await recorderPage.close();
   }
 });
