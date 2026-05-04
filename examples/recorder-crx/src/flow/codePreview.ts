@@ -645,10 +645,6 @@ function rawSelectOptionParserSafeSource(step: FlowStep) {
   return optionLocator ? `await ${optionLocator}.last().click();` : undefined;
 }
 
-function selectOptionClickSource(optionLocator: string) {
-  return antdSelectOptionClickSource(undefined, optionLocator);
-}
-
 function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: string) {
   const triggerLocator = step ? antdSelectTriggerLocator(step) : `page.locator(".ant-select-selector").last()`;
   const optionName = step ? antdSelectOptionName(step) : undefined;

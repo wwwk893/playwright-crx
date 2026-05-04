@@ -103,8 +103,12 @@ export const test = crxTest.extend<{
 
             let recorderPage = context.pages().find(p => p.url().startsWith(`chrome-extension://${extensionId}`));
             const recorderPagePromise = recorderPage ? undefined : context.waitForEvent('page');
-            if (recorderPage)
-              await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+            if (recorderPage) {
+              const expectedSurface = mode === 'legacy' ? '.recorder-editor' : '.business-flow-panel';
+              const hasExpectedSurface = await recorderPage.locator(expectedSurface).count().then(count => count > 0).catch(() => false);
+              if (!hasExpectedSurface)
+                await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+            }
 
             await page.bringToFront();
             await extensionServiceWorker.evaluate(async () => {
