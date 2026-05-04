@@ -130,7 +130,9 @@ function contextLightSelectOptionValue(step: FlowStep) {
   if (step.action !== 'click')
     return undefined;
   const role = step.target?.role || '';
-  if (/button|link/i.test(role))
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  if (/button|link|checkbox|radio|switch/i.test(role) || /checkbox|radio|switch/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
     return undefined;
   return step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim() || undefined;
 }
@@ -146,14 +148,49 @@ function repeatParameterValue(step: FlowStep) {
   if (step.action !== 'click')
     return undefined;
   const optionText = step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim();
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  if (/checkbox|radio|switch/i.test(role) || /checkbox|radio|switch/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
+    return undefined;
   if (!optionText)
     return undefined;
   const before = step.context?.before;
   const fieldLabel = before?.form?.label || step.target?.scope?.form?.label || step.target?.label;
   const inDropdown = before?.dialog?.type === 'dropdown' || /dropdown|select/i.test(step.target?.role || '');
-  if (fieldLabel && inDropdown)
+  if (fieldLabel && inDropdown && !isOrdinaryFormLabelClick(step, fieldLabel, optionText))
+    return optionText;
+  if (!fieldLabel && inDropdown && isPopupOptionClick(step))
     return optionText;
   return undefined;
+}
+
+function isOrdinaryFormLabelClick(step: FlowStep, fieldLabel: string, optionText: string) {
+  const tag = step.context?.before.target?.tag || String((step.target?.raw as { tag?: unknown } | undefined)?.tag || '');
+  if (tag !== 'label')
+    return false;
+  if (normalizedText(fieldLabel) !== normalizedText(optionText))
+    return false;
+  const selector = rawActionSelector(step);
+  return !/ant-select|ant-cascader|ant-tree|role=option|role=menuitem/.test(selector);
+}
+
+function isPopupOptionClick(step: FlowStep) {
+  const beforeTarget = step.context?.before.target;
+  const controlType = beforeTarget?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const role = step.target?.role || beforeTarget?.role || '';
+  const selector = rawActionSelector(step) || step.target?.selector || step.target?.locator || '';
+  return /option/.test(controlType) || /^(option|menuitem)$/i.test(role) || /ant-select-tree|ant-select-item-option|ant-cascader-menu-item/.test(selector);
+}
+
+function normalizedText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function rawActionSelector(step: FlowStep) {
+  const raw = step.rawAction && typeof step.rawAction === 'object' ? step.rawAction as { action?: unknown, selector?: unknown } : undefined;
+  const action = raw?.action && typeof raw.action === 'object' ? raw.action as { selector?: unknown } : raw;
+  return typeof action?.selector === 'string' ? action.selector : '';
 }
 
 function createInitialRows(parameters: FlowRepeatParameter[]): FlowRepeatRow[] {
@@ -222,7 +259,9 @@ function variableNameFor(label: string, value?: string) {
     return 'username';
   if (/角色|权限|role/i.test(source))
     return 'role';
-  if (/描述|备注|comment|description/i.test(source))
+  if (/备注|remark/i.test(source))
+    return 'remark';
+  if (/描述|comment|description/i.test(source))
     return 'description';
   if (/wan/i.test(source))
     return 'wanPort';

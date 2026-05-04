@@ -15,6 +15,7 @@
  */
 
 import { dumpLogHeaders, expect, test } from './crxRecorderTest';
+import { sourceMarkedLine, sourceMarkedLineNumber } from './utils';
 
 test.beforeEach(async ({ page, recordAction, baseURL }) => {
   await recordAction(() => page.goto(`${baseURL}/input/textarea.html`));
@@ -52,8 +53,8 @@ for (const [lang, { linenumber, line }] of Object.entries(langs)) {
     ]);
 
     await Promise.all([
-      expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(line),
-      expect(recorderPage.locator('.source-line-paused .CodeMirror-linenumber')).toHaveText(`${linenumber}`),
+      expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(line),
+      expect(sourceMarkedLineNumber(recorderPage, 'paused')).toHaveText(`${linenumber}`),
     ]);
   });
 }
@@ -65,13 +66,13 @@ test('should support target change while steping', async ({ recorderPage }) => {
   await recorderPage.getByTitle('Step Over (F10)').click();
 
   await Promise.all([
-    expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(langs['playwright-test'].line),
-    expect(recorderPage.locator('.source-line-paused .CodeMirror-linenumber')).toHaveText(`${langs['playwright-test'].linenumber}`),
+    expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(langs['playwright-test'].line),
+    expect(sourceMarkedLineNumber(recorderPage, 'paused')).toHaveText(`${langs['playwright-test'].linenumber}`),
   ]);
 
   await recorderPage.locator('.source-chooser').selectOption('csharp');
 
-  await expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toBeHidden();
+  await expect(sourceMarkedLine(recorderPage, 'paused')).toBeHidden();
 
   // it will resume the rest of the javascript actions
   await recorderPage.getByTitle('Resume (F8)').click();
@@ -81,7 +82,7 @@ test('should support target change while steping', async ({ recorderPage }) => {
   await recorderPage.getByTitle('Step Over (F10)').click();
 
   await Promise.all([
-    expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(langs['csharp'].line),
-    expect(recorderPage.locator('.source-line-paused .CodeMirror-linenumber')).toHaveText(`${langs['csharp'].linenumber}`),
+    expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(langs['csharp'].line),
+    expect(sourceMarkedLineNumber(recorderPage, 'paused')).toHaveText(`${langs['csharp'].linenumber}`),
   ]);
 });

@@ -515,6 +515,50 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat segment infers context-light tree select option values as parameters',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: '华东生产区',
+            name: '华东生产区',
+          },
+          context: {
+            eventId: 'ctx-tree-option',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', visible: true },
+              target: {
+                tag: 'span',
+                text: '华东生产区',
+                normalizedText: '华东生产区',
+                framework: 'antd',
+                controlType: 'tree-select-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:text="华东生产区"i',
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const segment = createRepeatSegment(flow);
+
+      assertEqual(segment.parameters.map(parameter => parameter.variableName), ['scope']);
+      assertEqual(segment.parameters[0]?.currentValue, '华东生产区');
+    },
+  },
+  {
     name: 'repeat segment keeps generated rows valid for duplicate network select parameters',
     run: () => {
       const flow = createNamedFlow();
@@ -538,6 +582,20 @@ test('demo', async ({ page }) => {
       assert(selectParameters.some(parameter => parameter.variableName === 'vrf2'), 'duplicate VRF parameter should keep vrf prefix');
       for (const parameter of selectParameters)
         assertEqual(segment.rows.map(row => row.values[parameter.id]), [parameter.currentValue, parameter.currentValue, parameter.currentValue]);
+    },
+  },
+  {
+    name: 'repeat segment maps Chinese remark fields to remark variable',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          { id: 'n001', order: 1, action: 'fill', target: { label: '备注', placeholder: '填写策略备注' }, value: '生产访问策略', assertions: [] },
+        ],
+      };
+      const segment = createRepeatSegment(flow);
+
+      assertEqual(segment.parameters.map(parameter => parameter.variableName), ['remark']);
     },
   },
   {
@@ -1528,6 +1586,110 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('getByTestId("network-resource-save")'), 'explicit test id should remain the replay locator');
       assert(!firstStep.includes('ant-cascader-menu-item'), 'test id click should not inherit stale cascader option replay');
+    },
+  },
+  {
+    name: 'code preview suppresses non-interactive modal container clicks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'network-resource-modal',
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:testid=[data-testid="network-resource-modal"s]',
+            },
+          },
+          sourceCode: `await page.getByTestId('network-resource-modal').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('has no runnable Playwright action source'), 'modal root container clicks should be documented but not replayed');
+      assert(!code.includes('page.getByTestId("network-resource-modal").click') && !code.includes("page.getByTestId('network-resource-modal').click"), 'modal root test id should not be emitted as a click target');
+    },
+  },
+  {
+    name: 'code preview suppresses stale modal container source lines',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            text: '新建网络资源',
+            role: 'button',
+          },
+          sourceCode: 'await page.getByTestId("network-resource-modal").click();',
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(!code.includes('getByTestId("network-resource-modal").click'), 'stale modal root source should not be replayed');
+    },
+  },
+  {
+    name: 'stale dropdown context does not turn ordinary form label clicks into option replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: '监听端口',
+            name: '监听端口',
+            scope: {
+              dialog: { title: '新建网络资源', type: 'modal', visible: true },
+              form: { label: '监听端口', testId: 'network-resource-modal' },
+            },
+          },
+          context: {
+            eventId: 'ctx-stale-dropdown-label',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', visible: true },
+              form: { label: '监听端口', testId: 'network-resource-modal' },
+              target: {
+                tag: 'label',
+                text: '监听端口',
+                normalizedText: '监听端口',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:text="监听端口"i',
+            },
+          },
+          sourceCode: `await page.getByText('监听端口').click();`,
+          assertions: [],
+        }],
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(!firstStep.includes('AntD Select virtual dropdown replay workaround'), 'ordinary labels should not use AntD option replay just because stale dropdown context is present');
+      assert(!firstStep.includes('.ant-select-dropdown'), 'ordinary labels should not query an active dropdown option');
     },
   },
   {

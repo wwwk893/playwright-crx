@@ -33,6 +33,9 @@
     "test:install": "cd ./tests && npx playwright install --with-deps chromium",
     "test": "cd ./tests && npx playwright test",
     "test-ui": "cd ./tests && npx playwright test --ui --timeout 0",
+    "test:crx:business-flow": "npm run test:flow --prefix examples/recorder-crx && xvfb-run -a npx playwright test -c tests/playwright.config.ts tests/crx/businessFlowRecorder.spec.ts tests/crx/humanLikeRecorder.spec.ts --project=Chrome --workers=1",
+    "test:crx:legacy-core": "xvfb-run -a npx playwright test -c tests/playwright.config.ts tests/crx/recorder.spec.ts tests/crx/player.spec.ts tests/crx/player-actions.spec.ts tests/crx/player-asserts.spec.ts --project=Chrome --workers=1",
+    "test:crx:all": "xvfb-run -a npx playwright test -c tests/playwright.config.ts --project=Chrome --workers=1",
     "benchmark:agents": "python3 ./benchmarks/agent_models/agent_model_benchmark.py",
     "test:agent-benchmark": "python3 -m unittest benchmarks.agent_models.test_agent_model_benchmark -v"
   },

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import yauzl from 'yauzl';
+import type { Page, Locator } from 'playwright-core';
 import type { UnzipFile, Entry } from 'yauzl';
 import type { ActionTraceEvent, TraceEvent } from '../../playwright/packages/trace-viewer/src/sw/versions/traceV6';
 import type { StackFrame } from '../../playwright/packages/protocol/src/channels';
@@ -173,7 +174,47 @@ export async function moveCursorToLine(recorderPage: Page, line: number) {
 }
 
 export function editorLine(recorderPage: Page, linenumber: number) {
-  return recorderPage.locator('.CodeMirror-code > div')
-      .filter({ has: recorderPage.locator('.CodeMirror-linenumber', { hasText: String(linenumber) }) })
-      .locator('.CodeMirror-line');
+  return sourceLineNumber(recorderPage, linenumber);
+}
+
+type SourceRoot = Page | Locator;
+
+function sourceRootLocator(root: SourceRoot, selector: string) {
+  return root.locator(selector);
+}
+
+export async function sourceLines(root: SourceRoot): Promise<string[]> {
+  const legacyLines = sourceRootLocator(root, '.CodeMirror-code .CodeMirror-line, .CodeMirror-line');
+  if (await legacyLines.count())
+    return (await legacyLines.allInnerTexts()).map(normalizeSourceLineText);
+
+  const cm6Lines = sourceRootLocator(root, '.cm-content .cm-line, .cm-line');
+  if (await cm6Lines.count())
+    return (await cm6Lines.allInnerTexts()).map(normalizeSourceLineText);
+
+  const fallbackLines = sourceRootLocator(root, 'pre code, code, pre');
+  if (await fallbackLines.count())
+    return (await fallbackLines.first().innerText()).split('\n').map(normalizeSourceLineText);
+
+  return [];
+}
+
+export function sourceLineNumber(root: SourceRoot, linenumber: number): Locator {
+  return sourceRootLocator(root, '.CodeMirror-line, .cm-content .cm-line, .cm-line').nth(linenumber - 1);
+}
+
+export function sourceMarkedLine(root: SourceRoot, kind: 'paused' | 'error'): Locator {
+  return sourceRootLocator(root, `.source-line-${kind} .CodeMirror-line, .source-line-${kind} .cm-line`);
+}
+
+export function sourceMarkedLineNumber(root: SourceRoot, kind: 'paused' | 'error'): Locator {
+  return sourceRootLocator(root, `.source-line-${kind} .CodeMirror-linenumber, .source-line-${kind} .cm-lineNumbers .cm-gutterElement`);
+}
+
+export function sourceErrorUnderlineLines(root: SourceRoot): Locator {
+  return sourceRootLocator(root, '.CodeMirror-line:has(.source-line-error-underline), .cm-line:has(.source-line-error-underline)');
+}
+
+function normalizeSourceLineText(text: string) {
+  return text.replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
 }

@@ -15,6 +15,7 @@
  */
 
 import { dumpLogHeaders, expect, test } from './crxRecorderTest';
+import { sourceErrorUnderlineLines, sourceMarkedLine } from './utils';
 
 test.beforeEach(async ({ page, recordAction, baseURL }) => {
   await recordAction(() => page.goto(`${baseURL}/input/textarea.html`));
@@ -49,7 +50,7 @@ test('should show errors', async ({ basePath, page, recorderPage, baseURL }) => 
 
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect(recorderPage.locator('.CodeMirror-line:has(.source-line-error-underline)')).toHaveCount(1);
+  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(1);
 
   await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
@@ -69,7 +70,7 @@ test('should clear errors when resuming after errors', async ({ basePath, page, 
 
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect(recorderPage.locator('.CodeMirror-line:has(.source-line-error-underline)')).toHaveCount(1);
+  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(1);
 
   await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
@@ -86,7 +87,7 @@ test('should clear errors when resuming after errors', async ({ basePath, page, 
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
   ]);
 
-  await expect(recorderPage.locator('.CodeMirror-line:has(.source-line-error-underline)')).toHaveCount(0);
+  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(0);
 });
 
 test('should step', async ({ recorderPage, baseURL }) => {
@@ -94,20 +95,20 @@ test('should step', async ({ recorderPage, baseURL }) => {
   await recorderPage.getByTitle('Record').click();
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(`  await page.goto('${baseURL}/input/textarea.html');`);
+  await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`  await page.goto('${baseURL}/input/textarea.html');`);
   await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
     `▼ Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(`  await page.locator('textarea').click();`);
+  await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`  await page.locator('textarea').click();`);
   await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `▼ Click( page.locator('textarea') ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(`  await page.locator('textarea').fill('test');`);
+  await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`  await page.locator('textarea').fill('test');`);
   await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
@@ -190,6 +191,7 @@ test('should resume with multiple pages', async ({ context, attachRecorder, reco
   await recordAction(() => page1.locator('button').click());
 
   // action back to page
+  await page.bringToFront();
   await recordAction(() => page.locator('input').fill('another test'));
 
   await recorderPage.getByTitle('Record').click();

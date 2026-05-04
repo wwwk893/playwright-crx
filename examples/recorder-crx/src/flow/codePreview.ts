@@ -259,6 +259,8 @@ function isRunnableLine(line: string) {
 }
 
 function sourceCodeForStep(step: FlowStep, options: EmitStepOptions = {}) {
+  if (isNonInteractiveContainerClick(step))
+    return undefined;
   const sourceCode = normalizeActionSource(step.sourceCode);
   const fallback = renderRawActionSource(step, options);
   if (fallback)
@@ -306,6 +308,21 @@ function sourceMentionsStepTarget(sourceCode: string, step: FlowStep) {
   return !targetTokens.length || targetTokens.some(token => sourceCode.includes(token));
 }
 
+function isNonInteractiveContainerClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const testId = step.target?.testId || step.context?.before.target?.testId;
+  if (!testId || !/(modal|drawer|dialog|container|panel|root)$/i.test(testId))
+    return false;
+  const role = step.target?.role || step.context?.before.target?.role;
+  if (/^(button|link|checkbox|radio|switch|combobox|option|menuitem|tab)$/i.test(role || ''))
+    return false;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (/^(button|checkbox|radio|switch|select|tree-select|cascader|select-option|tree-select-option|cascader-option)$/i.test(controlType || ''))
+    return false;
+  return true;
+}
+
 function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
   const action = rawAction(step.rawAction);
   const selector = action.selector || step.target?.selector || step.target?.locator;
@@ -337,8 +354,10 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     }
     case 'fill': {
       const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
-      if (step.target?.label)
-        return `await page.getByLabel(${stringLiteral(step.target.label)}).fill(${value});`;
+      const isComboboxFill = step.target?.role === 'combobox' || /^(select|tree-select|cascader)$/.test(step.context?.before.target?.controlType || '');
+      const preferred = isComboboxFill ? undefined : fieldLocator(step);
+      if (preferred)
+        return `await ${preferred}.fill(${value});`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
     }
     case 'press':
@@ -408,6 +427,8 @@ function antdSelectOptionLocator(step: FlowStep) {
 }
 
 function isAntdSelectOptionStep(step: FlowStep) {
+  if (isOrdinaryFormLabelClick(step))
+    return false;
   const contextTarget = step.context?.before.target;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   const framework = contextTarget?.framework;
@@ -425,6 +446,25 @@ function isAntdSelectOptionStep(step: FlowStep) {
     hasAntdSelector ||
     isFormScopedDropdownOption ||
     (hasRawTitle && controlType === 'select-option' && (framework === 'antd' || framework === 'procomponents'));
+}
+
+function isOrdinaryFormLabelClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const contextTarget = step.context?.before.target;
+  const tag = contextTarget?.tag || String((step.target?.raw as { tag?: unknown } | undefined)?.tag || '');
+  if (tag !== 'label')
+    return false;
+  const targetText = normalizeComparableText(step.target?.text || step.target?.name || step.target?.displayName || contextTarget?.text || contextTarget?.normalizedText);
+  const formLabel = normalizeComparableText(step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label);
+  if (!targetText || !formLabel || targetText !== formLabel)
+    return false;
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  return !/ant-select|ant-cascader|ant-tree|role=option|role=menuitem/.test(selector);
+}
+
+function normalizeComparableText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim();
 }
 
 function antdTreeSelectOptionLocator(step: FlowStep) {
@@ -450,7 +490,7 @@ function antdCascaderOptionLocator(step: FlowStep) {
 }
 
 function activeDropdownOptionLocator(step: FlowStep) {
-  if (step.action !== 'click')
+  if (step.action !== 'click' || isOrdinaryFormLabelClick(step))
     return undefined;
   const optionName = popupOptionName(step);
   if (!optionName)
@@ -585,6 +625,13 @@ function rawSelectOptionTitle(step: FlowStep) {
 function globalTestIdLocator(step: FlowStep) {
   if (step.target?.testId)
     return `page.getByTestId(${stringLiteral(step.target.testId)})`;
+  const contextControlType = step.context?.before.target?.controlType || '';
+  const contextDialogType = step.context?.before.dialog?.type;
+  if (/(select|tree-select|cascader)-option/.test(contextControlType) || contextDialogType === 'dropdown')
+    return undefined;
+  const testId = step.context?.before.target?.testId;
+  if (testId)
+    return `page.getByTestId(${stringLiteral(testId)})`;
   return undefined;
 }
 
@@ -650,8 +697,8 @@ function choiceControlLocator(step: FlowStep) {
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   if (!/^(checkbox|radio|switch)$/.test(controlType) && !/^(checkbox|radio|switch)$/.test(step.target?.role || ''))
     return undefined;
-  const text = step.target?.text || step.target?.name || step.target?.displayName;
-  if (!text || text === step.target?.label)
+  const text = step.target?.text || step.target?.name || step.target?.displayName || step.target?.label;
+  if (!text)
     return undefined;
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
   const base = dialog?.title ? `page.getByRole('dialog', { name: ${stringLiteral(dialog.title)} })` : 'page';

@@ -16,7 +16,7 @@
 
 import { test, expect } from './crxRecorderTest';
 import type { CrxApplication } from '../../test';
-import { editCode, editorLine, getCode, moveCursorToLine } from './utils';
+import { editCode, editorLine, getCode, moveCursorToLine, sourceLines, sourceMarkedLine } from './utils';
 
 test('should edit @smoke', async ({ page, attachRecorder, baseURL }) => {
   const recorderPage = await attachRecorder(page);
@@ -43,7 +43,7 @@ test('test', async ({ page }) => {
   await page.locator('textarea').wrongAction('test');
 });`);
 
-  await expect(recorderPage.locator('.source-line-error .CodeMirror-line')).toHaveText(`  await page.locator('textarea').wrongAction('test');`);
+  await expect(sourceMarkedLine(recorderPage, 'error')).toHaveText(`  await page.locator('textarea').wrongAction('test');`);
   await expect(recorderPage.locator('.source-line-error-widget')).toHaveText('Invalid action wrongAction (5:8)');
 });
 
@@ -58,7 +58,7 @@ test('test', async ({ page }) => {
   await expect(page.locator('textarea')).toHaveWrongAssertion('foo');
 });`);
 
-  await expect(recorderPage.locator('.source-line-error .CodeMirror-line')).toHaveText(`  await expect(page.locator('textarea')).toHaveWrongAssertion('foo');`);
+  await expect(sourceMarkedLine(recorderPage, 'error')).toHaveText(`  await expect(page.locator('textarea')).toHaveWrongAssertion('foo');`);
   await expect(recorderPage.locator('.source-line-error-widget')).toHaveText('Invalid assertion toHaveWrongAssertion (5:8)');
 });
 
@@ -79,7 +79,7 @@ test('test', async ({ page }) => {
   await expect(recorderPage.locator('.source-line-error-widget')).toBeHidden();
 
   // eventually it should show the error
-  await expect(recorderPage.locator('.source-line-error .CodeMirror-line')).toHaveText(`  await page.locator('textarea').wrongAction('te`);
+  await expect(sourceMarkedLine(recorderPage, 'error')).toHaveText(`  await page.locator('textarea').wrongAction('te`);
   await expect(recorderPage.locator('.source-line-error-widget')).toHaveText('Unterminated string constant (5:45)');
 });
 
@@ -204,10 +204,10 @@ def test_example(page: Page) -> None:
   expect(await getCode(recorderPage)).toBe(reformattedCode);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(`    await  page.goto(`);
+  await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`    await  page.goto(`);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect(recorderPage.locator('.source-line-paused .CodeMirror-line')).toHaveText(`    await page.locator('textarea')`);
+  await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`    await page.locator('textarea')`);
 });
 
 test('should load script using api', async ({ page, attachRecorder, extensionServiceWorker, baseURL }) => {
@@ -259,7 +259,7 @@ test('test', async ({ page }) => {
 
   await moveCursorToLine(recorderPage, 6);
 
-  await expect(recorderPage.getByRole('tabpanel', { name: 'Locator' }).locator('.CodeMirror-code')).toHaveText(`getByRole('textbox')`);
+  await expect.poll(() => sourceLines(recorderPage.getByRole('tabpanel', { name: 'Locator' }))).toEqual([`getByRole('textbox')`]);
   expect(await page.evaluate(() => [
     ...document.querySelector('x-pw-glass')!.shadowRoot!.querySelectorAll('x-pw-tooltip-line')].map(e => e.textContent)
   )).toEqual([
@@ -269,7 +269,7 @@ test('test', async ({ page }) => {
 
   await moveCursorToLine(recorderPage, 5);
 
-  await expect(recorderPage.getByRole('tabpanel', { name: 'Locator' }).locator('.CodeMirror-code')).toHaveText(`locator('textarea')`);
+  await expect.poll(() => sourceLines(recorderPage.getByRole('tabpanel', { name: 'Locator' }))).toEqual([`locator('textarea')`]);
   expect(await page.evaluate(() => [
     ...document.querySelector('x-pw-glass')!.shadowRoot!.querySelectorAll('x-pw-tooltip-line')].map(e => e.textContent)
   )).toEqual([`locator('textarea')`]);

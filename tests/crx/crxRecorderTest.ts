@@ -17,6 +17,7 @@
 import path from 'path';
 import type { Page, Locator } from 'playwright-core';
 import { test as crxTest, expect } from './crxTest';
+import { sourceLines } from './utils';
 import type { AssertAction } from '../../playwright/packages/recorder/src/actions';
 
 export { expect } from './crxTest';
@@ -24,11 +25,18 @@ export { expect } from './crxTest';
 declare function attach(tab: chrome.tabs.Tab): Promise<void>;
 declare function _setUnderTest(): void;
 
+type RecorderMode = 'legacy' | 'business-flow';
+
+type AttachRecorderOptions = {
+  mode?: RecorderMode;
+};
+
 type SettingOptions = {
   testIdAttributeName?: string,
   targetLanguage?: string,
   playInIncognito?: boolean,
-  experimental?: boolean
+  experimental?: boolean,
+  businessFlowEnabled?: boolean
 };
 
 export function dumpLogHeaders(recorderPage: Page) {
@@ -78,7 +86,7 @@ export function dumpLogHeaders(recorderPage: Page) {
 }
 
 export const test = crxTest.extend<{
-  attachRecorder: (page: Page) => Promise<Page>;
+  attachRecorder: (page: Page, options?: AttachRecorderOptions) => Promise<Page>;
   recorderPage: Page;
   recordAction<T = void>(action: () => Promise<T>): Promise<T>;
   recordAssertion(locator: Locator, type: AssertAction['name']): Promise<void>;
@@ -87,7 +95,12 @@ export const test = crxTest.extend<{
         extensionPath: path.join(__dirname, '../../examples/recorder-crx/dist'),
 
         attachRecorder: async ({ extensionServiceWorker, extensionId, context }, run) => {
-          await run(async (page: Page) => {
+          await run(async (page: Page, options: AttachRecorderOptions = {}) => {
+            const mode = options.mode ?? 'legacy';
+            await extensionServiceWorker.evaluate(async mode => {
+              await chrome.storage.sync.set({ businessFlowEnabled: mode === 'business-flow' });
+            }, mode);
+
             let recorderPage = context.pages().find(p => p.url().startsWith(`chrome-extension://${extensionId}`));
             const recorderPagePromise = recorderPage ? undefined : context.waitForEvent('page');
 
@@ -101,6 +114,11 @@ export const test = crxTest.extend<{
             });
 
             recorderPage = recorderPage ?? (await recorderPagePromise)!;
+
+            if (mode === 'legacy')
+              await recorderPage.locator('.recorder-editor').waitFor({ state: 'attached', timeout: 5000 });
+            else
+              await recorderPage.locator('.business-flow-panel').waitFor({ state: 'attached', timeout: 5000 });
 
             const locator = page.locator('x-pw-glass').first();
             try {
@@ -136,9 +154,9 @@ export const test = crxTest.extend<{
           await run(async action => {
             // just to make sure code is up-to-date
             await recorderPage.waitForTimeout(100);
-            const count = await recorderPage.locator('.CodeMirror-line').count();
+            const count = (await sourceLines(recorderPage)).length;
             const result = await action();
-            await expect(recorderPage.locator('.CodeMirror-line')).not.toHaveCount(count);
+            await expect.poll(async () => (await sourceLines(recorderPage)).length).toBeGreaterThan(count);
             return result;
           });
         },
@@ -173,7 +191,7 @@ export const test = crxTest.extend<{
         },
 
         configureRecorder: async ({ context, extensionId }, run) => {
-          await run(async ({ testIdAttributeName, targetLanguage, playInIncognito, experimental }: SettingOptions) => {
+          await run(async ({ testIdAttributeName, targetLanguage, playInIncognito, experimental, businessFlowEnabled }: SettingOptions) => {
             const configPage = await context.newPage();
             try {
               await configPage.goto(`chrome-extension://${extensionId}/preferences.html`);
@@ -185,6 +203,8 @@ export const test = crxTest.extend<{
                 await configPage.locator('#playInIncognito').setChecked(playInIncognito);
               if (experimental !== undefined)
                 await configPage.locator('#experimental').setChecked(experimental);
+              if (businessFlowEnabled !== undefined)
+                await configPage.locator('#businessFlowEnabled').setChecked(businessFlowEnabled);
               await configPage.locator('#submit').click();
             } finally {
               await configPage.close();
