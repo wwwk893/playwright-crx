@@ -29,9 +29,9 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
     const event = matchPageContextEvent(normalizedStep, events.filter(event => !usedEventIds.has(event.id)));
     if (!event)
       return normalizedStep;
-    usedEventIds.add(event.id);
     if (shouldIgnoreMismatchedDropdownOptionContext(normalizedStep, event) || shouldIgnoreMismatchedChoiceControlContext(normalizedStep, event))
       return normalizedStep;
+    usedEventIds.add(event.id);
 
     const actionIndex = actionIndexForStep(flow, normalizedStep.id);
     const context = stepContextFromEvent(event, actionIndex);
@@ -242,7 +242,7 @@ function stepLooksLikeDropdownOption(step: FlowStep) {
   if (step.target?.role === 'option')
     return true;
   const recorderSelector = recorderSelectorForStep(step) || '';
-  return /internal:attr=\[title=|\.ant-select-item-option|\.ant-select-dropdown|\[role=["']option["']\]/.test(recorderSelector);
+  return /internal:role=option|internal:attr=\[title=|\.ant-select-item-option|\.ant-select-dropdown|\[role=["']option["']\]/.test(recorderSelector);
 }
 
 function isDropdownOptionContext(target: ElementContext) {

@@ -2407,6 +2407,84 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'mismatched dropdown context is not consumed before the matching option step',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'combobox',
+            label: '角色',
+            displayName: '角色',
+          },
+          rawAction: {
+            wallTime: 1000,
+            action: {
+              name: 'click',
+              selector: '#role-select',
+            },
+          },
+          sourceCode: `await page.locator('#role-select').click();`,
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: {
+            selector: 'internal:role=option[name="审计员"i]',
+            locator: 'internal:role=option[name="审计员"i]',
+          },
+          rawAction: {
+            wallTime: 1010,
+            action: {
+              name: 'click',
+              selector: 'internal:role=option[name="审计员"i]',
+            },
+          },
+          sourceCode: `await page.getByRole('option', { name: '审计员' }).click();`,
+          assertions: [],
+        }],
+      };
+      const merged = mergePageContextIntoFlow(flow, [{
+        id: 'ctx-role-option',
+        kind: 'click',
+        time: 1010,
+        wallTime: 1010,
+        before: {
+          dialog: {
+            type: 'dropdown',
+            visible: true,
+          },
+          form: {
+            label: '角色',
+            name: 'role',
+          },
+          target: {
+            tag: 'div',
+            role: 'option',
+            title: '审计员',
+            text: '审计员',
+            normalizedText: '审计员',
+            framework: 'antd',
+            controlType: 'select-option',
+          },
+        },
+      }]);
+      const segment = createRepeatSegment(merged, ['s001', 's002']);
+
+      assertEqual(merged.steps[0].context, undefined);
+      assertEqual(merged.steps[1].context?.eventId, 'ctx-role-option');
+      assertEqual(segment.parameters.map(parameter => parameter.variableName), ['role']);
+    },
+  },
+  {
     name: 'AntD select option workaround opens ProFormSelect by scoped selector not combobox role',
     run: () => {
       const flow: BusinessFlow = {
