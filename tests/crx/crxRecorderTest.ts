@@ -156,7 +156,14 @@ export const test = crxTest.extend<{
             await recorderPage.waitForTimeout(100);
             const count = (await sourceLines(recorderPage)).length;
             const result = await action();
-            await expect.poll(async () => (await sourceLines(recorderPage)).length).toBeGreaterThan(count);
+            await expect.poll(async () => {
+              const first = await sourceLines(recorderPage);
+              if (first.length <= count)
+                return -1;
+              await recorderPage.waitForTimeout(250);
+              const second = await sourceLines(recorderPage);
+              return first.join('\n') === second.join('\n') ? second.length : -1;
+            }).toBeGreaterThan(count);
             return result;
           });
         },
@@ -167,15 +174,18 @@ export const test = crxTest.extend<{
               switch (name) {
                 case 'assertText':
                   await recorderPage.getByTitle('Assert text').click();
+                  await expect(recorderPage.getByTitle('Assert text')).toHaveClass(/toggled/);
                   await locator.click();
                   await page.locator('x-pw-glass').getByTitle('Accept').click();
                   break;
                 case 'assertValue':
                   await recorderPage.getByTitle('Assert value').click();
+                  await expect(recorderPage.getByTitle('Assert value')).toHaveClass(/toggled/);
                   await locator.click();
                   break;
                 case 'assertVisible':
                   await recorderPage.getByTitle('Assert visibility').click();
+                  await expect(recorderPage.getByTitle('Assert visibility')).toHaveClass(/toggled/);
                   await locator.click();
                   break;
                 case 'assertSnapshot':

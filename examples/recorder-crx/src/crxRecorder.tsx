@@ -494,10 +494,14 @@ export const CrxRecorder: React.FC = ({
 
     const queuedEvents = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
+    // pageContextSidecar intentionally delays click context by 160ms so it can include
+    // post-click overlay/toast state. Stop/export must drain that product pipeline,
+    // otherwise table rowKey / AntD option context can miss the final flow export.
+    await new Promise(resolve => window.setTimeout(resolve, 220));
     const requestedEvents = await requestPageContextEvents();
     const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
     const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
-    const newRequestedEvents = lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : [];
+    const newRequestedEvents = lastKnownContextEventId ? (lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : requestedEvents) : requestedEvents;
     const eventsById = new Map<string, PageContextEvent>();
     for (const event of [...queuedEvents, ...newRequestedEvents]) {
       eventsById.set(event.id, event);
@@ -586,8 +590,13 @@ export const CrxRecorder: React.FC = ({
           if (actions.length) {
             window.setTimeout(() => {
               requestPageContextEvents().then(contextEvents => {
-                if (contextEvents.length)
-                  setFlowDraft(flow => mergePageContextIntoFlow(flow, contextEvents));
+                if (contextEvents.length) {
+                  setFlowDraft(flow => {
+                    const nextFlow = mergePageContextIntoFlow(flow, contextEvents);
+                    flowDraftRef.current = nextFlow;
+                    return nextFlow;
+                  });
+                }
               }).catch(() => {});
             }, 250);
           }
