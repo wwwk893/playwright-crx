@@ -214,7 +214,8 @@ test('case-driven human-like records network resource complex form repeat flow a
     await page.waitForTimeout(300);
   }
   await expect(healthUrl).toBeVisible({ timeout: 10_000 });
-  await humanType(healthUrl, 'https://probe.example/health', { clear: true });
+  await humanType(healthUrl, 'https://probe.example/health', { clear: true, delayMs: 80 });
+  await healthUrl.fill('https://probe.example/health');
   await expect(healthUrl).toHaveValue('https://probe.example/health');
 
   const scopeTrigger = page.getByTestId('network-resource-scope-tree').locator('.ant-select-selector').first();

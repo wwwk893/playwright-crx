@@ -1619,6 +1619,36 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'code preview keeps real clickable panel/root test id clicks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'settings-panel',
+            text: '打开高级设置',
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:testid=[data-testid="settings-panel"s]',
+            },
+          },
+          sourceCode: `await page.getByTestId('settings-panel').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes("page.getByTestId('settings-panel').click") || code.includes('page.getByTestId("settings-panel").click'), 'real clickable panel/root test ids should still be replayed');
+    },
+  },
+  {
     name: 'code preview suppresses stale modal container source lines',
     run: () => {
       const flow: BusinessFlow = {

@@ -312,7 +312,14 @@ function isNonInteractiveContainerClick(step: FlowStep) {
   if (step.action !== 'click')
     return false;
   const testId = step.target?.testId || step.context?.before.target?.testId;
-  if (!testId || !/(modal|drawer|dialog|container|panel|root)$/i.test(testId))
+  if (!testId)
+    return false;
+  const hasTargetText = !!(step.target?.text || step.target?.name || step.target?.label || step.target?.displayName || step.context?.before.target?.text || step.context?.before.target?.normalizedText);
+  if (hasTargetText)
+    return false;
+  const dialogType = step.target?.scope?.dialog?.type || step.context?.before.dialog?.type;
+  const looksLikeOverlayRoot = /(modal|drawer|dialog)$/i.test(testId) || (/(container|root)$/i.test(testId) && /^(modal|drawer|dialog)$/i.test(dialogType || ''));
+  if (!looksLikeOverlayRoot)
     return false;
   const role = step.target?.role || step.context?.before.target?.role;
   if (/^(button|link|checkbox|radio|switch|combobox|option|menuitem|tab)$/i.test(role || ''))
