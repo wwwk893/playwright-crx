@@ -354,8 +354,10 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     }
     case 'fill': {
       const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
-      if (step.target?.label)
-        return `await page.getByLabel(${stringLiteral(step.target.label)}).fill(${value});`;
+      const isComboboxFill = step.target?.role === 'combobox' || /^(select|tree-select|cascader)$/.test(step.context?.before.target?.controlType || '');
+      const preferred = isComboboxFill ? undefined : fieldLocator(step);
+      if (preferred)
+        return `await ${preferred}.fill(${value});`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
     }
     case 'press':
@@ -623,6 +625,13 @@ function rawSelectOptionTitle(step: FlowStep) {
 function globalTestIdLocator(step: FlowStep) {
   if (step.target?.testId)
     return `page.getByTestId(${stringLiteral(step.target.testId)})`;
+  const contextControlType = step.context?.before.target?.controlType || '';
+  const contextDialogType = step.context?.before.dialog?.type;
+  if (/(select|tree-select|cascader)-option/.test(contextControlType) || contextDialogType === 'dropdown')
+    return undefined;
+  const testId = step.context?.before.target?.testId;
+  if (testId)
+    return `page.getByTestId(${stringLiteral(testId)})`;
   return undefined;
 }
 
@@ -688,8 +697,8 @@ function choiceControlLocator(step: FlowStep) {
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   if (!/^(checkbox|radio|switch)$/.test(controlType) && !/^(checkbox|radio|switch)$/.test(step.target?.role || ''))
     return undefined;
-  const text = step.target?.text || step.target?.name || step.target?.displayName;
-  if (!text || text === step.target?.label)
+  const text = step.target?.text || step.target?.name || step.target?.displayName || step.target?.label;
+  if (!text)
     return undefined;
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
   const base = dialog?.title ? `page.getByRole('dialog', { name: ${stringLiteral(dialog.title)} })` : 'page';

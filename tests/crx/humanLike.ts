@@ -154,6 +154,8 @@ export async function humanType(locator: Locator, text: string, options?: { clea
   }
 
   await page.keyboard.type(text, { delay: options?.delayMs ?? 35 });
+  if (options?.clear === true && await locator.inputValue().catch(() => undefined) !== text)
+    await locator.fill(text);
 
   if (options?.blur !== false)
     await page.keyboard.press('Tab');
@@ -297,9 +299,12 @@ export async function visibleStepTexts(recorderPage: Page) {
   return (await recorderPage.locator('.flow-step, .review-step-row').allInnerTexts()).join('\n');
 }
 
-export async function createRepeatSegmentLikeUser(recorderPage: Page, options: { fromStepText: string, toStepText: string, segmentName: string, minSteps?: number, expectedDataText?: string | RegExp }) {
+export async function createRepeatSegmentLikeUser(recorderPage: Page, options: { fromStepText: string, toStepText: string, segmentName: string, minSteps?: number, expectedDataText?: string | RegExp, requiredSelectedTexts?: string[] }) {
   await expect(recorderPage.locator('.review-step-list, .flow-step-list').first()).toBeVisible({ timeout: 10_000 });
-  const selected = await selectVisibleRepeatRange(recorderPage, options.fromStepText, options.toStepText);
+  await selectVisibleRepeatRange(recorderPage, options.fromStepText, options.toStepText);
+  for (const text of options.requiredSelectedTexts ?? [])
+    await ensureRepeatRowSelectedContainingText(recorderPage, text);
+  const selected = await selectedRepeatRowCount(recorderPage.locator('.review-step-row, .flow-step'));
   expect(selected).toBeGreaterThanOrEqual(options.minSteps ?? 5);
 
   const createButton = recorderPage.locator('.repeat-create-actions .primary');
@@ -384,6 +389,21 @@ async function dragSelectRepeatRange(recorderPage: Page, fromRow: Locator, toRow
 
 async function selectedRepeatRowCount(rows: Locator) {
   return await rows.evaluateAll(elements => elements.filter(element => element.classList.contains('selected-for-repeat') || !!element.querySelector('.repeat-step-selector.selected')).length);
+}
+
+async function ensureRepeatRowSelectedContainingText(recorderPage: Page, text: string) {
+  const rows = recorderPage.locator('.review-step-row, .flow-step');
+  const row = rows.filter({ hasText: text }).last();
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  if (await isRepeatRowSelected(row))
+    return;
+  const selectButton = row.locator('button[aria-label^="选择 "][aria-label$="作为循环步骤"]').first();
+  await expect(selectButton).toBeVisible({ timeout: 5_000 });
+  for (let attempt = 0; attempt < 3 && !await isRepeatRowSelected(row); attempt++) {
+    await humanClick(selectButton);
+    await recorderPage.waitForTimeout(120);
+  }
+  await expect.poll(() => isRepeatRowSelected(row), { timeout: 3_000 }).toBe(true);
 }
 
 async function isRepeatRowSelected(row: Locator) {

@@ -585,6 +585,20 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat segment maps Chinese remark fields to remark variable',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          { id: 'n001', order: 1, action: 'fill', target: { label: '备注', placeholder: '填写策略备注' }, value: '生产访问策略', assertions: [] },
+        ],
+      };
+      const segment = createRepeatSegment(flow);
+
+      assertEqual(segment.parameters.map(parameter => parameter.variableName), ['remark']);
+    },
+  },
+  {
     name: 'playback action count expands repeat segments for continue-recording boundaries',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [

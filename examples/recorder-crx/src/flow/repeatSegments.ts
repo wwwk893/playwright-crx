@@ -130,7 +130,9 @@ function contextLightSelectOptionValue(step: FlowStep) {
   if (step.action !== 'click')
     return undefined;
   const role = step.target?.role || '';
-  if (/button|link/i.test(role))
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  if (/button|link|checkbox|radio|switch/i.test(role) || /checkbox|radio|switch/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
     return undefined;
   return step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim() || undefined;
 }
@@ -146,6 +148,11 @@ function repeatParameterValue(step: FlowStep) {
   if (step.action !== 'click')
     return undefined;
   const optionText = step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim();
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  if (/checkbox|radio|switch/i.test(role) || /checkbox|radio|switch/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
+    return undefined;
   if (!optionText)
     return undefined;
   const before = step.context?.before;
@@ -252,7 +259,9 @@ function variableNameFor(label: string, value?: string) {
     return 'username';
   if (/角色|权限|role/i.test(source))
     return 'role';
-  if (/描述|备注|comment|description/i.test(source))
+  if (/备注|remark/i.test(source))
+    return 'remark';
+  if (/描述|comment|description/i.test(source))
     return 'description';
   if (/wan/i.test(source))
     return 'wanPort';
