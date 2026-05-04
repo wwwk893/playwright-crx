@@ -936,6 +936,42 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'late cascader option does not inherit the previous tree-select insertion cursor',
+    run: () => {
+      const wallTime = Date.now() - 2000;
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: { name: 'click', selector: 'internal:role=combobox[name="* 发布范围"i]' },
+      }, {
+        action: { name: 'click', selector: 'internal:role=combobox[name="* 出口路径"i]' },
+      }], [], {});
+      const treeOption = pageClickEventWithTarget('ctx-tree-option', wallTime + 100, {
+        tag: 'span',
+        role: 'treeitem',
+        text: '华东生产区',
+        normalizedText: '华东生产区',
+        framework: 'antd',
+        controlType: 'tree-select-option',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      treeOption.before.form = { label: '发布范围', name: 'scope' };
+      treeOption.before.dialog = { type: 'dropdown', visible: true };
+      const cascaderOption = pageClickEventWithTarget('ctx-cascader-option', wallTime + 200, {
+        tag: 'li',
+        role: 'menuitemcheckbox',
+        text: '上海',
+        normalizedText: '上海',
+        framework: 'antd',
+        controlType: 'cascader-option',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      cascaderOption.before.dialog = { type: 'dropdown', visible: true };
+
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [treeOption, cascaderOption]);
+
+      assertEqual(withSynthetic.steps.map(step => step.target?.text || step.target?.name || step.value), ['* 发布范围', '华东生产区', '* 出口路径', '上海']);
+    },
+  },
+  {
     name: 'synthetic page context click prefers a captured test id selector',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -2900,6 +2936,72 @@ test('demo', async ({ page }) => {
       assert(code.includes('.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)'), 'cascader option should use the cascader popup');
       assert(code.includes('.ant-cascader-menu-item'), 'cascader option should use cascader menu items');
       assert(!code.includes('.ant-select-tree-node-content-wrapper'), 'cascader option must not inherit the previous tree-select context');
+    },
+  },
+  {
+    name: 'contextless select option getByTitle inner click inherits select field context for replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: { role: 'combobox', name: '共享WAN' },
+          sourceCode: `await page.getByRole("combobox", { name: "共享WAN" }).click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="共享WAN"i]' } },
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: { displayName: 'internal:attr=[title="WAN1"s] >> div' },
+          sourceCode: `await page.getByTitle('WAN1', { exact: true }).locator('div').click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:attr=[title="WAN1"s] >> div' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's002');
+      assert(code.includes('AntD Select virtual dropdown replay workaround'), 'getByTitle inner option clicks should replay through the AntD option workaround');
+      assert(!code.includes("getByTitle('WAN1'"), 'raw title inner click should not be replayed directly');
+    },
+  },
+  {
+    name: 'table row clicks prefer row-scoped locators over ambiguous table test ids',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'row',
+            testId: 'users-table',
+            text: 'Alice 管理员 编辑',
+            scope: {
+              table: {
+                testId: 'users-table',
+                rowKey: 'user-42',
+                rowText: 'Alice 管理员 编辑',
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="users-table"s]' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(code.includes('tr[data-row-key="\\"user-42\\""]') || code.includes('tr[data-row-key=\\"user-42\\"]'), 'row click should use the stable row key selector');
+      assert(!code.includes('await page.getByTestId("users-table").click();'), 'row click must not replay as an ambiguous table container click');
     },
   },
   {

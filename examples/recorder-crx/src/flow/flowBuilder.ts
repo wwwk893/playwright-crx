@@ -246,7 +246,9 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       continue;
     }
     const step = buildSyntheticClickStep(recorder, event);
-    const insertAt = cursorStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === cursorStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
+    const insertAt = isDropdownOptionContext(event.before.target)
+      ? syntheticInsertionIndexForEvent(steps, event)
+      : cursorStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === cursorStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
     steps.splice(insertAt, 0, step);
     addedStepIds.push(step.id);
     cursorStepId = step.id;
@@ -385,7 +387,7 @@ function dropdownOptionTriggerInsertionIndex(steps: FlowStep[], event: PageConte
     return undefined;
   const fieldLabel = normalizedComparableText(event.before.form?.label || '');
   if (!fieldLabel)
-    return undefined;
+    return dropdownOptionTriggerInsertionIndexForControlType(steps, event.before.target?.controlType || '');
 
   for (let index = steps.length - 1; index >= 0; index--) {
     const step = steps[index];
@@ -399,13 +401,56 @@ function dropdownOptionTriggerInsertionIndex(steps: FlowStep[], event: PageConte
   return undefined;
 }
 
+function dropdownOptionTriggerInsertionIndexForControlType(steps: FlowStep[], controlType: string) {
+  if (!controlType)
+    return undefined;
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (!isDropdownTriggerStepForControlType(step, controlType))
+      continue;
+    let insertAt = index + 1;
+    while (insertAt < steps.length && isDropdownOptionStepForControlType(steps[insertAt], controlType))
+      insertAt++;
+    return insertAt;
+  }
+  return undefined;
+}
+
 function isDropdownTriggerStepForLabel(step: FlowStep, normalizedLabel: string) {
   if (step.action !== 'click')
     return false;
   const target = step.target;
   const role = target?.role || '';
   const raw = recorderSelectorForStep(step);
-  const labels = [
+  const labels = dropdownTriggerLabels(step);
+  if (!/combobox|select/i.test(role) && !/combobox|select|ant-select|ant-cascader/i.test(raw) && !labels.some(label => /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(String(label || ''))))
+    return false;
+  return labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+}
+
+function isDropdownTriggerStepForControlType(step: FlowStep, controlType: string) {
+  if (step.action !== 'click')
+    return false;
+  const target = step.target;
+  const role = target?.role || '';
+  const raw = recorderSelectorForStep(step);
+  const labels = dropdownTriggerLabels(step).join(' ');
+  const isTrigger = /combobox|select/i.test(role) || /combobox|select|ant-select|ant-cascader/i.test(raw) || /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(labels);
+  if (!isTrigger)
+    return false;
+  if (controlType === 'cascader-option')
+    return /cascader|出口路径|地域路径|路径/.test(raw) || /出口路径|地域路径|路径/.test(labels);
+  if (controlType === 'tree-select-option')
+    return /tree|发布范围/.test(raw) || /发布范围/.test(labels);
+  if (controlType === 'select-option')
+    return !/cascader|tree|出口路径|发布范围/.test(raw) && !/出口路径|发布范围/.test(labels);
+  return false;
+}
+
+function dropdownTriggerLabels(step: FlowStep) {
+  const target = step.target;
+  const raw = recorderSelectorForStep(step);
+  return [
     target?.label,
     target?.name,
     target?.text,
@@ -413,10 +458,7 @@ function isDropdownTriggerStepForLabel(step: FlowStep, normalizedLabel: string) 
     target?.scope?.form?.label,
     step.context?.before.form?.label,
     raw,
-  ];
-  if (!/combobox|select/i.test(role) && !/combobox|select|ant-select/i.test(raw) && !labels.some(label => /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(String(label || ''))))
-    return false;
-  return labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+  ].filter(Boolean).map(String);
 }
 
 function isDropdownOptionStepForLabel(step: FlowStep, normalizedLabel: string) {
@@ -428,6 +470,22 @@ function isDropdownOptionStepForLabel(step: FlowStep, normalizedLabel: string) {
     return false;
   const labels = [target?.label, target?.scope?.form?.label, step.context?.before.form?.label];
   return !labels.some(Boolean) || labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+}
+
+function isDropdownOptionStepForControlType(step: FlowStep, controlType: string) {
+  if (step.action !== 'click')
+    return false;
+  const stepControlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (stepControlType)
+    return stepControlType === controlType;
+  const role = step.target?.role || '';
+  if (!/option|menuitem/.test(role))
+    return false;
+  if (controlType === 'cascader-option')
+    return /menuitem/.test(role);
+  if (controlType === 'tree-select-option')
+    return /tree/.test(role);
+  return controlType === 'select-option' && /option/.test(role);
 }
 
 function normalizedComparableText(value: string) {

@@ -87,7 +87,11 @@ async function changeAction(tabId: number, mode?: CrxMode | 'detached') {
 
 // action state per tab is reset every time a navigation occurs
 // https://bugs.chromium.org/p/chromium/issues/detail?id=1450904
-chrome.tabs.onUpdated.addListener(tabId => changeAction(tabId));
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  void changeAction(tabId);
+  if (attachedTabIds.has(tabId) && (changeInfo.status === 'complete' || changeInfo.url))
+    void ensurePageContextSidecar(tabId).catch(() => {});
+});
 chrome.tabs.onRemoved.addListener(tabId => {
   contextEventsByTabId.delete(tabId);
   if (currentPageContextTabId === tabId)
@@ -131,8 +135,13 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
   if (!tab?.id)
     return;
   if (attachedTabIds.has(tab.id) && !mode) {
-    currentPageContextTabId = tab.id;
-    return;
+    const crxApp = await crxAppPromise?.catch(() => undefined);
+    if (crxApp && !crxApp.recorder.isHidden()) {
+      currentPageContextTabId = tab.id;
+      await ensurePageContextSidecar(tab.id).catch(() => {});
+      await crxApp.attach(tab.id).catch(() => {});
+      return;
+    }
   }
 
   // if the tab is incognito, chek if can be started in incognito mode.

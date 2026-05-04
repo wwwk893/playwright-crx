@@ -125,15 +125,24 @@ export const test = crxTest.extend<{
             recorderPage = recorderPage ?? (await recorderPagePromise)!;
 
             await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
-            const recorderSurface = mode === 'legacy'
+            let recorderSurface = mode === 'legacy'
               ? recorderPage.locator('.recorder-editor')
               : recorderPage.locator('.business-flow-panel');
             try {
               await expect(recorderSurface).toBeAttached({ timeout: 15000 });
             } catch {
-              await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+              await recorderPage.close().catch(() => {});
+              const freshRecorderPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => undefined);
               await page.bringToFront();
               await attachCurrentTab();
+              const freshRecorderPage = await freshRecorderPagePromise;
+              if (!freshRecorderPage)
+                throw new Error(`Recorder surface ${mode} did not recover after closing stale extension page`);
+              recorderPage = freshRecorderPage;
+              await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
+              recorderSurface = mode === 'legacy'
+                ? recorderPage.locator('.recorder-editor')
+                : recorderPage.locator('.business-flow-panel');
               await expect(recorderSurface).toBeAttached({ timeout: 15000 });
             }
 

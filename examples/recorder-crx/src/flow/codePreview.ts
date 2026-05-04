@@ -265,7 +265,7 @@ function selectStepFormContext(step: FlowStep) {
   const form = step.context?.before.form || step.target?.scope?.form;
   if (form?.label)
     return form;
-  const label = step.target?.label || popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
+  const label = step.target?.label || popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName) || comboboxNameFromSource(step.sourceCode || '');
   return label ? { ...form, label } : form;
 }
 
@@ -276,6 +276,11 @@ function popupFieldLabelFromName(value?: string) {
   if (/发布范围|出口路径|关联VRF|WAN口/.test(text))
     return text;
   return undefined;
+}
+
+function comboboxNameFromSource(source: string) {
+  const match = source.match(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']([^"']+)["']/);
+  return match?.[1];
 }
 
 function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: FlowStep, inheritedQuery = '') {
@@ -290,7 +295,7 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
   if (!optionText)
     return false;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
-  if (selector && !selector.includes('internal:text') && !/getByText|text=/.test(step.sourceCode || '') && !/internal:attr=\[title=.*>>/.test(selector))
+  if (selector && !selector.includes('internal:text') && !/getByText|text=|getByTitle/.test(step.sourceCode || '') && !/internal:attr=\[title=.*>>/.test(selector))
     return false;
   const query = inheritedQuery || selectQueryForStep(selectStep);
   return !query || optionText.includes(query) || !!completeOptionTextFromSelectQuery(optionText, query);
@@ -769,15 +774,23 @@ function rawSelectOptionTitle(step: FlowStep) {
 }
 
 function globalTestIdLocator(step: FlowStep) {
-  if (step.target?.testId)
+  const table = step.target?.scope?.table || step.context?.before.table;
+  const tableHasStableRow = !!(table?.rowKey || table?.rowIdentity?.stable);
+  if (step.target?.testId) {
+    if (tableHasStableRow && step.target.testId === table?.testId)
+      return undefined;
     return `page.getByTestId(${stringLiteral(step.target.testId)})`;
+  }
   const contextControlType = step.context?.before.target?.controlType || '';
   const contextDialogType = step.context?.before.dialog?.type;
   if (/(select|tree-select|cascader)-option/.test(contextControlType) || contextDialogType === 'dropdown')
     return undefined;
   const testId = step.context?.before.target?.testId;
-  if (testId)
+  if (testId) {
+    if (tableHasStableRow && testId === table?.testId)
+      return undefined;
     return `page.getByTestId(${stringLiteral(testId)})`;
+  }
   return undefined;
 }
 
