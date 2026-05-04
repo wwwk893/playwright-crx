@@ -102,7 +102,7 @@ function withInheritedDialogContext(flow: BusinessFlow): BusinessFlow {
     const beforeDialog = step.context?.before.dialog;
     const stepDialog = isPersistentDialog(beforeDialog) ? beforeDialog : activeDialog;
     const scopedDialog = step.target?.scope?.dialog;
-    const needsDialog = !!stepDialog && !isPersistentDialog(beforeDialog) && !isPersistentDialog(scopedDialog);
+    const needsDialog = !!stepDialog && canInheritDialogContext(step) && !isPersistentDialog(beforeDialog) && !isPersistentDialog(scopedDialog);
     const nextStep = needsDialog ? {
       ...step,
       target: {
@@ -125,7 +125,7 @@ function withInheritedDialogContext(flow: BusinessFlow): BusinessFlow {
     const afterDialog = nextStep.context?.after?.dialog;
     if (isPersistentDialog(afterDialog))
       activeDialog = afterDialog;
-    else if (isDialogClosingClick(nextStep))
+    else if (isDialogClosingClick(nextStep) || isDialogButtonClickWithoutRemainingDialog(nextStep))
       activeDialog = undefined;
     else if (isPersistentDialog(nextStep.context?.before.dialog))
       activeDialog = nextStep.context?.before.dialog;
@@ -139,12 +139,46 @@ function isPersistentDialog(dialog?: FlowDialogScope) {
   return !!(dialog && dialog.type !== 'dropdown' && (dialog.title || dialog.testId));
 }
 
+function hasOwnPageContext(step: FlowStep) {
+  const raw = step.target?.raw as { pageContext?: unknown } | undefined;
+  return !!(step.context?.before.target || step.context?.before.form || step.target?.scope?.form || raw?.pageContext);
+}
+
+function canInheritDialogContext(step: FlowStep) {
+  const label = normalizeGeneratedText(step.target?.label || step.target?.name || step.target?.displayName || step.context?.before.form?.label || step.target?.scope?.form?.label);
+  if (/^下方/.test(label || ''))
+    return false;
+  if (step.context?.before.section || step.target?.scope?.section)
+    return false;
+  return hasOwnPageContext(step);
+}
+
 function isDialogClosingClick(step: FlowStep) {
   if (step.action !== 'click')
     return false;
-  const text = step.target?.name || step.target?.text || step.target?.displayName || step.target?.label;
+  const text = normalizeGeneratedText(step.target?.name || step.target?.text || step.target?.displayName || step.target?.label);
   const testId = step.target?.testId || step.context?.before.target?.testId || '';
-  return /^(确定|确认|取消|关闭|保存)$/.test(text || '') || /(confirm|cancel|close|ok)$/i.test(testId);
+  return /^(确定|确认|取消|关闭|保存)$/.test(text || '') || /(confirm|cancel|close|ok|save)$/i.test(testId);
+}
+
+function isDialogButtonClickWithoutRemainingDialog(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  if (!isPersistentDialog(step.context?.before.dialog))
+    return false;
+  if (isPersistentDialog(step.context?.after?.dialog))
+    return false;
+  const role = step.target?.role || step.context?.before.target?.role;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const source = step.sourceCode || JSON.stringify(rawAction(step.rawAction));
+  return role === 'button' ||
+    controlType === 'button' ||
+    /getByRole\(["']button["']|role=button|button/i.test(source) ||
+    !!(step.target?.testId || step.context?.before.target?.testId);
+}
+
+function normalizeGeneratedText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim().replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, '$1$2');
 }
 
 function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow {
