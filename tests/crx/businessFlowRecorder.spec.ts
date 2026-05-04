@@ -50,7 +50,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await page.getByTestId('modal-confirm').locator('span').click();
   await expect(page.getByTestId('create-user-modal')).not.toBeVisible();
   await page.waitForTimeout(2200);
-  await page.getByTestId('users-table').locator('tr[data-row-key="user-42"] button span').click();
+  await page.getByTestId('users-table').locator('tr[data-row-key="user-42"]').getByRole('button', { name: '编辑' }).click();
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(5);
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('create-user-btn');
