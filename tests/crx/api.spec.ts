@@ -66,6 +66,9 @@ test('should create new page in window', async ({ runCrxTest }) => {
     // wait for the default tab of the window to be created
     await windowTabPromise;
 
+    const initialTabs = await chrome.tabs.query({ windowId: window.id });
+    const initialTabIds = new Set(initialTabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number'));
+
     const page = await crxApp.newPage({
       windowId: window.id,
       url: server.EMPTY_PAGE,
@@ -75,8 +78,12 @@ test('should create new page in window', async ({ runCrxTest }) => {
 
     await expect.poll(async () => {
       const tabs = await chrome.tabs.query({ windowId: window.id });
-      return tabs.some(tab => tab.url === server.EMPTY_PAGE && tab.windowId === window.id);
-    }).toBeTruthy();
+      return tabs.filter(tab => typeof tab.id === 'number' && !initialTabIds.has(tab.id) && tab.url === server.EMPTY_PAGE).length;
+    }).toBe(1);
+    const [tab] = (await chrome.tabs.query({ windowId: window.id }))
+        .filter(tab => typeof tab.id === 'number' && !initialTabIds.has(tab.id) && tab.url === server.EMPTY_PAGE);
+    expect(tab.url).toBe(server.EMPTY_PAGE);
+    expect(tab.windowId).toBe(window.id);
   });
 });
 

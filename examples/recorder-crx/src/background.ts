@@ -30,6 +30,7 @@ const recordingModes: CrxMode[] = ['recording', 'assertingText', 'assertingVisib
 let crxAppPromise: Promise<CrxApplication> | undefined;
 
 const attachedTabIds = new Set<number>();
+let currentPageContextTabId: number | undefined;
 let currentMode: CrxMode | 'detached' | undefined;
 let settings: CrxSettings = defaultSettings;
 const maxContextEventsPerTab = 200;
@@ -81,7 +82,11 @@ async function changeAction(tabId: number, mode?: CrxMode | 'detached') {
 // action state per tab is reset every time a navigation occurs
 // https://bugs.chromium.org/p/chromium/issues/detail?id=1450904
 chrome.tabs.onUpdated.addListener(tabId => changeAction(tabId));
-chrome.tabs.onRemoved.addListener(tabId => contextEventsByTabId.delete(tabId));
+chrome.tabs.onRemoved.addListener(tabId => {
+  contextEventsByTabId.delete(tabId);
+  if (currentPageContextTabId === tabId)
+    currentPageContextTabId = Array.from(attachedTabIds).filter(attachedTabId => attachedTabId !== tabId).pop();
+});
 
 async function getCrxApp(incognito: boolean) {
   if (!crxAppPromise) {
@@ -97,10 +102,14 @@ async function getCrxApp(incognito: boolean) {
       });
       crxApp.addListener('attached', async ({ tabId }) => {
         attachedTabIds.add(tabId);
+        currentPageContextTabId = tabId;
         await changeAction(tabId, crxApp.recorder.mode());
       });
       crxApp.addListener('detached', async tabId => {
         attachedTabIds.delete(tabId);
+        contextEventsByTabId.delete(tabId);
+        if (currentPageContextTabId === tabId)
+          currentPageContextTabId = Array.from(attachedTabIds).pop();
         await changeAction(tabId, 'detached');
       });
       setTestIdAttributeName(settings.testIdAttributeName);
@@ -226,16 +235,6 @@ function getRecentPageContextEvents(tabId: number) {
   return events;
 }
 
-function getRecentPageContextEventsForAllTabs() {
-  const events: PageContextEvent[] = [];
-  for (const [tabId, tabEvents] of contextEventsByTabId) {
-    const prunedEvents = prunePageContextEvents(tabEvents);
-    contextEventsByTabId.set(tabId, prunedEvents);
-    events.push(...prunedEvents);
-  }
-  return events.sort((a, b) => (a.wallTime ?? 0) - (b.wallTime ?? 0));
-}
-
 function prunePageContextEvents(events: PageContextEvent[]) {
   const minWallTime = Date.now() - maxContextEventAgeMs;
   return events
@@ -252,8 +251,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.event === 'pageContextEventsRequested') {
-    const requestedTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
-    (requestedTabId ? Promise.resolve(getRecentPageContextEvents(requestedTabId)) : Promise.resolve(getRecentPageContextEventsForAllTabs()))
+    const requestedTabId = typeof message.tabId === 'number' ? message.tabId : currentPageContextTabId;
+    Promise.resolve(typeof requestedTabId === 'number' ? getRecentPageContextEvents(requestedTabId) : [])
         .then(events => sendResponse(events))
         .catch(() => sendResponse([]));
     return true;
