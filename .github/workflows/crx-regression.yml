@@ -34,10 +34,14 @@ jobs:
       - name: Install Chromium dependencies
         run: npm run test:install
 
-      - name: Build recorder example and tests
+      - name: Build CRX package, recorder example, and tests
         run: |
+          npm run ci:pw:bundles
+          npm run build:crx
           npm run build:examples:recorder
           npm run build:tests
+        env:
+          NODE_OPTIONS: "--max_old_space_size=4096"
 
       - name: Run CRX full regression matrix
         run: npm run test:crx:all -- --reporter=line --global-timeout=1800000
