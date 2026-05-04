@@ -121,22 +121,28 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
 
   const time = performance.now();
   const before = collectPageContext(target);
-  const emit = () => chrome.runtime.sendMessage({
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const baseEvent = {
+    id,
+    kind,
+    time,
+    wallTime: Date.now(),
+    before,
+  };
+  const emit = (contextEvent: typeof baseEvent & { after?: ReturnType<typeof collectAfterContext> }) => chrome.runtime.sendMessage({
     event: 'pageContextEvent',
-    contextEvent: {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      kind,
-      time,
-      wallTime: Date.now(),
-      before,
-      after: kind === 'click' ? collectAfterContext() : undefined,
-    },
+    contextEvent,
   }).catch(() => {});
 
-  if (kind === 'click')
-    window.setTimeout(emit, 160);
-  else
-    emit();
+  if (kind === 'click') {
+    emit(baseEvent);
+    window.setTimeout(() => emit({
+      ...baseEvent,
+      after: collectAfterContext(),
+    }), 160);
+  } else {
+    emit(baseEvent);
+  }
 }
 
 function collectPageContext(target: Element) {

@@ -18,7 +18,7 @@ import { actionLabel, summarizeStepSubject } from './display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 
 export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
-  const effectiveFlow = withInheritedAntdSelectOptionContext(flow);
+  const effectiveFlow = withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow));
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
@@ -44,7 +44,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
 }
 
 export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
-  const effectiveFlow = withInheritedAntdSelectOptionContext(flow);
+  const effectiveFlow = withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow));
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
@@ -70,7 +70,7 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
 }
 
 export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
-  const effectiveFlow = withInheritedAntdSelectOptionContext(flow);
+  const effectiveFlow = withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow));
   let count = 0;
   const emittedRepeatStepIds = new Set<string>();
   for (const step of effectiveFlow.steps) {
@@ -88,6 +88,63 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     count += countStepActions(step, { parserSafe: true });
   }
   return count;
+}
+
+type FlowDialogScope = NonNullable<NonNullable<FlowStep['target']>['scope']>['dialog'];
+
+function withInheritedDialogContext(flow: BusinessFlow): BusinessFlow {
+  let activeDialog: FlowDialogScope | undefined;
+  let changed = false;
+  const steps = flow.steps.map(step => {
+    if (step.action === 'navigate')
+      activeDialog = undefined;
+
+    const beforeDialog = step.context?.before.dialog;
+    const stepDialog = isPersistentDialog(beforeDialog) ? beforeDialog : activeDialog;
+    const scopedDialog = step.target?.scope?.dialog;
+    const needsDialog = !!stepDialog && !isPersistentDialog(beforeDialog) && !isPersistentDialog(scopedDialog);
+    const nextStep = needsDialog ? {
+      ...step,
+      target: {
+        ...step.target,
+        scope: {
+          ...step.target?.scope,
+          dialog: stepDialog,
+        },
+      },
+      context: {
+        ...step.context,
+        before: {
+          ...step.context?.before,
+          dialog: stepDialog,
+        },
+      },
+    } as FlowStep : step;
+    changed = changed || needsDialog;
+
+    const afterDialog = nextStep.context?.after?.dialog;
+    if (isPersistentDialog(afterDialog))
+      activeDialog = afterDialog;
+    else if (isDialogClosingClick(nextStep))
+      activeDialog = undefined;
+    else if (isPersistentDialog(nextStep.context?.before.dialog))
+      activeDialog = nextStep.context?.before.dialog;
+
+    return nextStep;
+  });
+  return changed ? { ...flow, steps } : flow;
+}
+
+function isPersistentDialog(dialog?: FlowDialogScope) {
+  return !!(dialog && dialog.type !== 'dropdown' && (dialog.title || dialog.testId));
+}
+
+function isDialogClosingClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const text = step.target?.name || step.target?.text || step.target?.displayName || step.target?.label;
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  return /^(确定|确认|取消|关闭|保存)$/.test(text || '') || /(confirm|cancel|close|ok)$/i.test(testId);
 }
 
 function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow {
@@ -571,7 +628,10 @@ function antdSelectFieldLocator(step: FlowStep) {
     step.context?.before.target?.testId;
   if (testId)
     return `page.getByTestId(${stringLiteral(testId)})`;
-  const label = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label;
+  const label = step.context?.before.form?.label ||
+    step.target?.scope?.form?.label ||
+    step.target?.label ||
+    popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
   if (!label)
     return undefined;
   const dialog = selectTriggerDialog(step);
@@ -730,7 +790,10 @@ function choiceControlLocator(step: FlowStep) {
 function fieldLocator(step: FlowStep) {
   if (step.target?.role === 'button' || step.context?.before.target?.controlType === 'button')
     return undefined;
-  const label = step.target?.label || step.target?.scope?.form?.label || step.context?.before.form?.label;
+  const label = step.target?.label ||
+    step.target?.scope?.form?.label ||
+    step.context?.before.form?.label ||
+    popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
   const controlType = step.context?.before.target?.controlType;
   if (label && (controlType === 'select' || controlType === 'tree-select' || step.target?.role === 'combobox'))
     return antdSelectFieldLocator(step) || `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;

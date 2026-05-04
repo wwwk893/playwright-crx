@@ -54,8 +54,10 @@ export const assertionSubjectLabel: Record<FlowAssertionSubject, string> = {
 export function summarizeTarget(target?: FlowTarget) {
   if (!target)
     return '无目标';
-  if (target.testId)
-    return `testId ${target.testId}`;
+  if (target.testId) {
+    const readable = normalizeReadableTargetText(target.name || target.text || target.displayName || target.label);
+    return readable ? `${readable} (testId ${target.testId})` : `testId ${target.testId}`;
+  }
   if (target.role && target.name)
     return `${target.role} ${target.name}`;
   return target.label ||
@@ -75,6 +77,10 @@ export function summarizeStepSubject(step: FlowStep) {
   if (step.value)
     return `${target}（值：${step.value}）`;
   return target;
+}
+
+function normalizeReadableTargetText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim().replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, '$1$2');
 }
 
 function formatWaitSeconds(value?: string) {

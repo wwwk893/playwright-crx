@@ -208,10 +208,15 @@ async function getStorageState() {
 
 function addPageContextEvent(tabId: number, event: PageContextEvent) {
   const events = contextEventsByTabId.get(tabId) ?? [];
-  events.push({
+  const eventWithTab = {
     ...event,
     tabId,
-  });
+  };
+  const existingIndex = events.findIndex(existing => existing.id === event.id);
+  if (existingIndex >= 0)
+    events[existingIndex] = eventWithTab;
+  else
+    events.push(eventWithTab);
   contextEventsByTabId.set(tabId, prunePageContextEvents(events));
 }
 

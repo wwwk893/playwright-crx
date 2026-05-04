@@ -490,7 +490,11 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog]);
 
   const queueSyntheticClickEvent = React.useCallback((event: PageContextEvent) => {
-    pendingSyntheticClickEventsRef.current.push(event);
+    const existingIndex = pendingSyntheticClickEventsRef.current.findIndex(existing => existing.id === event.id);
+    if (existingIndex >= 0)
+      pendingSyntheticClickEventsRef.current[existingIndex] = event;
+    else
+      pendingSyntheticClickEventsRef.current.push(event);
     if (syntheticFlushTimerRef.current)
       return;
 
@@ -517,13 +521,20 @@ export const CrxRecorder: React.FC = ({
     // post-click overlay/toast state. Stop/export must drain that product pipeline,
     // otherwise table rowKey / AntD option context can miss the final flow export.
     const requestedEvents = await requestSettledPageContextEvents();
+    const requestedEventsById = new Map(requestedEvents.map(event => [event.id, event]));
     const queuedEventsAfterSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
     const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
     const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
     const newRequestedEvents = lastKnownContextEventId ? (lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : requestedEvents) : requestedEvents;
     const eventsById = new Map<string, PageContextEvent>();
-    for (const event of [...queuedEventsBeforeSettle, ...queuedEventsAfterSettle, ...newRequestedEvents]) {
+    for (const event of [...queuedEventsBeforeSettle, ...queuedEventsAfterSettle]) {
+      const latestEvent = requestedEventsById.get(event.id) || event;
+      eventsById.set(latestEvent.id, latestEvent);
+      if (latestEvent.kind === 'click' && latestEvent.wallTime)
+        scheduledSyntheticContextEventIdsRef.current.add(latestEvent.id);
+    }
+    for (const event of newRequestedEvents) {
       eventsById.set(event.id, event);
       if (event.kind === 'click' && event.wallTime)
         scheduledSyntheticContextEventIdsRef.current.add(event.id);
