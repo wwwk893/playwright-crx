@@ -111,13 +111,16 @@ export const test = crxTest.extend<{
             }
 
             await page.bringToFront();
-            await extensionServiceWorker.evaluate(async () => {
-              // ensure we're in test mode
-              _setUnderTest();
+            const attachCurrentTab = async () => {
+              await extensionServiceWorker.evaluate(async () => {
+                // ensure we're in test mode
+                _setUnderTest();
 
-              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-              await attach(tab);
-            });
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                await attach(tab);
+              });
+            };
+            await attachCurrentTab();
 
             recorderPage = recorderPage ?? (await recorderPagePromise)!;
 
@@ -125,7 +128,14 @@ export const test = crxTest.extend<{
             const recorderSurface = mode === 'legacy'
               ? recorderPage.locator('.recorder-editor')
               : recorderPage.locator('.business-flow-panel');
-            await expect(recorderSurface).toBeAttached({ timeout: 15000 });
+            try {
+              await expect(recorderSurface).toBeAttached({ timeout: 15000 });
+            } catch {
+              await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+              await page.bringToFront();
+              await attachCurrentTab();
+              await expect(recorderSurface).toBeAttached({ timeout: 15000 });
+            }
 
             const locator = page.locator('x-pw-glass').first();
             try {
