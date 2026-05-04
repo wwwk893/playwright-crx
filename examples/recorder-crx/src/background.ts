@@ -37,6 +37,12 @@ const maxContextEventsPerTab = 200;
 const maxContextEventAgeMs = 5 * 60 * 1000;
 const contextEventsByTabId = new Map<number, PageContextEvent[]>();
 
+function resetRecordedTabContext() {
+  attachedTabIds.clear();
+  currentPageContextTabId = undefined;
+  contextEventsByTabId.clear();
+}
+
 // if it's in sidepanel mode, we need to open it synchronously on action click,
 // so we need to fetch its value asap
 const settingsInitializing = loadSettings().then(s => settings = s).catch(() => {});
@@ -90,10 +96,12 @@ chrome.tabs.onRemoved.addListener(tabId => {
 
 async function getCrxApp(incognito: boolean) {
   if (!crxAppPromise) {
+    resetRecordedTabContext();
     await settingsInitializing;
 
     crxAppPromise = crx.start({ incognito }).then(crxApp => {
       crxApp.recorder.addListener('hide', async () => {
+        resetRecordedTabContext();
         await crxApp.close();
         crxAppPromise = undefined;
       });
