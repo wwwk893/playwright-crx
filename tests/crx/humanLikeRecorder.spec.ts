@@ -130,7 +130,9 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   const userDialog = page.locator('.ant-modal, [role="dialog"]').filter({ hasText: '新建用户' });
   await expect(userDialog).toBeVisible({ timeout: 10_000 });
 
-  await humanType(page.getByPlaceholder('请输入用户名'), 'alice.qa');
+  const usernameInput = page.getByPlaceholder('请输入用户名');
+  await humanType(usernameInput, 'alice.qa', { clear: true });
+  await expect(usernameInput).toHaveValue('alice.qa');
   const roleTrigger = userDialog.locator('.ant-form-item').filter({ hasText: '角色' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, roleTrigger, '审计员');
   await expect(userDialog.locator('.ant-form-item').filter({ hasText: '角色' })).toContainText('审计员');
@@ -233,9 +235,10 @@ test('case-driven human-like records network resource complex form repeat flow a
   await humanType(listenPortInput, '443', { clear: true, delayMs: 120 });
   await expect(listenPortInput).toHaveValue('443');
   const remarkInput = page.getByPlaceholder('填写策略备注');
-  await humanType(remarkInput, '生产访问策略', { clear: true, delayMs: 80 });
+  await humanType(remarkInput, '生产访问策略', { clear: true, delayMs: 160 });
   await remarkInput.fill('生产访问策略');
   await expect(remarkInput).toHaveValue('生产访问策略');
+  await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 15_000 }).toContain('生产访问策略');
 
   const networkTable = page.getByTestId('network-resource-table');
   const networkSaveButton = networkDialog.locator('[data-testid="network-resource-save"]');

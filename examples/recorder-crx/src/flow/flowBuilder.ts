@@ -225,6 +225,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   const recorder = cloneRecorderState(base);
   const steps = [...base.steps];
   const addedStepIds: string[] = [];
+  const upgradedStepIds: string[] = [];
   const skippedEventIds: string[] = [];
   const requestedInsertAfterStepId = options.insertAfterStepId;
   let cursorStepId = options.insertAfterStepId;
@@ -237,13 +238,22 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       skippedEventIds.push(event.id);
       continue;
     }
+    const recordedOptionIndex = dropdownRecordedOptionStepIndexForEvent(steps, event);
+    if (recordedOptionIndex >= 0) {
+      steps[recordedOptionIndex] = upgradeRecordedDropdownOptionStep(steps[recordedOptionIndex], event);
+      upgradedStepIds.push(steps[recordedOptionIndex].id);
+      cursorStepId = steps[recordedOptionIndex].id;
+      continue;
+    }
     const step = buildSyntheticClickStep(recorder, event);
-    const insertAt = cursorStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === cursorStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
+    const insertAt = isDropdownOptionContext(event.before.target)
+      ? syntheticInsertionIndexForEvent(steps, event)
+      : cursorStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === cursorStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
     steps.splice(insertAt, 0, step);
     addedStepIds.push(step.id);
     cursorStepId = step.id;
   }
-  if (!addedStepIds.length) {
+  if (!addedStepIds.length && !upgradedStepIds.length) {
     return {
       flow,
       insertedStepIds: [],
@@ -259,6 +269,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   };
   emitDiagnostic({ diagnostics: options.diagnostics }, 'merge.synthetic-page-click', '页面侧 click 已根据上下文合成业务步骤', {
     addedStepIds,
+    upgradedStepIds,
     skippedEventIds,
     eventIds: events.map(event => event.id),
     insertAfterStepId: requestedInsertAfterStepId,
@@ -267,7 +278,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   return {
     flow: withRecorderState(base, recorder),
     insertedStepIds: addedStepIds,
-    upgradedStepIds: [],
+    upgradedStepIds,
     skippedEventIds,
   };
 }
@@ -283,7 +294,72 @@ export function createAssertion(type: FlowAssertionType, id: string, step?: Flow
   };
 }
 
+function dropdownRecordedOptionStepIndexForEvent(steps: FlowStep[], event: PageContextEvent) {
+  if (!isDropdownOptionContext(event.before.target))
+    return -1;
+  const eventText = dropdownOptionComparableText(event.before.target);
+  if (!eventText)
+    return -1;
+  const eventWallTime = event.wallTime;
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    if (step.action !== 'click' || step.context?.before.target)
+      continue;
+    if (typeof eventWallTime === 'number') {
+      const wallTime = stepWallTime(step);
+      if (typeof wallTime !== 'number' || Math.abs(wallTime - eventWallTime) > 1500)
+        continue;
+    }
+    const candidateText = recordedOptionComparableText(step);
+    if (!candidateText)
+      continue;
+    if (eventText.includes(candidateText) || candidateText.includes(eventText))
+      return index;
+  }
+  return -1;
+}
+
+function upgradeRecordedDropdownOptionStep(step: FlowStep, event: PageContextEvent): FlowStep {
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label);
+  const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
+  return {
+    ...step,
+    target,
+    context: {
+      ...step.context,
+      eventId: event.id,
+      capturedAt: event.wallTime ?? Date.now(),
+      before: event.before,
+      after: event.after,
+    },
+    rawAction: {
+      ...asRecord(step.rawAction),
+      syntheticContextEventId: event.id,
+      syntheticContextEventSignature: pageContextTargetSignature(event.before.target),
+      syntheticContextEventWallTime: event.wallTime,
+    },
+    sourceCode: syntheticClickSourceCode(target, subject),
+  };
+}
+
+function dropdownOptionComparableText(target?: ElementContext) {
+  return normalizedComparableText(target?.title || target?.selectedOption || target?.ariaLabel || target?.text || target?.normalizedText || '');
+}
+
+function recordedOptionComparableText(step: FlowStep) {
+  return normalizedComparableText(step.target?.text || step.target?.name || step.target?.displayName || rawTextFromSelector(recorderSelectorForStep(step)) || '');
+}
+
+function rawTextFromSelector(selector: string) {
+  const match = selector.match(/internal:(?:text|attr=\[title)=\[?\"([^\"]+)/) || selector.match(/internal:text=\"([^\"]+)/) || selector.match(/name=\"([^\"]+)/);
+  return match?.[1];
+}
+
 function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEvent) {
+  const dropdownTriggerIndex = dropdownOptionTriggerInsertionIndex(steps, event);
+  if (dropdownTriggerIndex !== undefined)
+    return dropdownTriggerIndex;
+
   const eventWallTime = event.wallTime;
   if (typeof eventWallTime !== 'number')
     return steps.length;
@@ -304,6 +380,122 @@ function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEv
     insertAt = index + 1;
   }
   return sawComparableWallTime ? insertAt : steps.length;
+}
+
+function dropdownOptionTriggerInsertionIndex(steps: FlowStep[], event: PageContextEvent) {
+  if (!isDropdownOptionContext(event.before.target))
+    return undefined;
+  const fieldLabel = normalizedComparableText(event.before.form?.label || '');
+  if (!fieldLabel)
+    return dropdownOptionTriggerInsertionIndexForControlType(steps, event.before.target?.controlType || '');
+
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (!isDropdownTriggerStepForLabel(step, fieldLabel))
+      continue;
+    let insertAt = index + 1;
+    while (insertAt < steps.length && isDropdownOptionStepForLabel(steps[insertAt], fieldLabel))
+      insertAt++;
+    return insertAt;
+  }
+  return undefined;
+}
+
+function dropdownOptionTriggerInsertionIndexForControlType(steps: FlowStep[], controlType: string) {
+  if (!controlType)
+    return undefined;
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (!isDropdownTriggerStepForControlType(step, controlType))
+      continue;
+    let insertAt = index + 1;
+    while (insertAt < steps.length && isDropdownOptionStepForControlType(steps[insertAt], controlType))
+      insertAt++;
+    return insertAt;
+  }
+  return undefined;
+}
+
+function isDropdownTriggerStepForLabel(step: FlowStep, normalizedLabel: string) {
+  if (step.action !== 'click')
+    return false;
+  const target = step.target;
+  const role = target?.role || '';
+  const raw = recorderSelectorForStep(step);
+  const labels = dropdownTriggerLabels(step);
+  if (!/combobox|select/i.test(role) && !/combobox|select|ant-select|ant-cascader/i.test(raw) && !labels.some(label => /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(String(label || ''))))
+    return false;
+  return labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+}
+
+function isDropdownTriggerStepForControlType(step: FlowStep, controlType: string) {
+  if (step.action !== 'click')
+    return false;
+  const target = step.target;
+  const role = target?.role || '';
+  const raw = recorderSelectorForStep(step);
+  const labels = dropdownTriggerLabels(step).join(' ');
+  const isTrigger = /combobox|select/i.test(role) || /combobox|select|ant-select|ant-cascader/i.test(raw) || /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(labels);
+  if (!isTrigger)
+    return false;
+  if (controlType === 'cascader-option')
+    return /cascader|出口路径|地域路径|路径/.test(raw) || /出口路径|地域路径|路径/.test(labels);
+  if (controlType === 'tree-select-option')
+    return /tree|发布范围/.test(raw) || /发布范围/.test(labels);
+  if (controlType === 'select-option')
+    return !/cascader|tree|出口路径|发布范围/.test(raw) && !/出口路径|发布范围/.test(labels);
+  return false;
+}
+
+function dropdownTriggerLabels(step: FlowStep) {
+  const target = step.target;
+  const raw = recorderSelectorForStep(step);
+  return [
+    target?.label,
+    target?.name,
+    target?.text,
+    target?.displayName,
+    target?.scope?.form?.label,
+    step.context?.before.form?.label,
+    raw,
+  ].filter(Boolean).map(String);
+}
+
+function isDropdownOptionStepForLabel(step: FlowStep, normalizedLabel: string) {
+  if (step.action !== 'click')
+    return false;
+  const target = step.target;
+  const contextTarget = step.context?.before.target;
+  if (!isDropdownOptionContext(contextTarget) && !/option|menuitem/.test(target?.role || '') && !/option/.test(String((target?.raw as { controlType?: unknown } | undefined)?.controlType || '')))
+    return false;
+  const labels = [target?.label, target?.scope?.form?.label, step.context?.before.form?.label];
+  return !labels.some(Boolean) || labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+}
+
+function isDropdownOptionStepForControlType(step: FlowStep, controlType: string) {
+  if (step.action !== 'click')
+    return false;
+  const stepControlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (stepControlType)
+    return stepControlType === controlType;
+  const role = step.target?.role || '';
+  if (!/option|menuitem/.test(role))
+    return false;
+  if (controlType === 'cascader-option')
+    return /menuitem/.test(role);
+  if (controlType === 'tree-select-option')
+    return /tree/.test(role);
+  return controlType === 'select-option' && /option/.test(role);
+}
+
+function normalizedComparableText(value: string) {
+  return value.replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function recorderSelectorForStep(step: FlowStep) {
+  const raw = asRecord(step.rawAction);
+  const action = asRecord(raw.action);
+  return typeof action.selector === 'string' ? action.selector : '';
 }
 
 function stepWallTime(step: FlowStep) {
@@ -632,16 +824,27 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
 function flowTargetFromPageContext(target?: ElementContext, formLabel?: string): FlowTarget | undefined {
   if (!target)
     return undefined;
+  const contextText = stableElementText(target);
   return {
     testId: target.testId,
     role: target.role,
-    name: target.ariaLabel || target.text || target.title,
-    displayName: target.text || target.ariaLabel || target.placeholder || target.testId || formLabel,
+    name: target.ariaLabel || contextText || target.title,
+    displayName: contextText || target.ariaLabel || target.placeholder || target.testId || formLabel,
     label: formLabel,
     placeholder: target.placeholder,
-    text: target.text,
+    text: contextText,
     raw: target,
   };
+}
+
+function stableElementText(target: ElementContext) {
+  const text = target.text?.trim();
+  const title = target.title?.trim();
+  if (/^(select-option|tree-select-option|cascader-option|menu-item)$/.test(target.controlType || '') || /^(option|treeitem|menuitem)$/.test(target.role || '')) {
+    if (title && (!text || title.includes(text) || title.length > text.length))
+      return title;
+  }
+  return text || title;
 }
 
 function syntheticClickSourceCode(target: FlowTarget | undefined, fallback: string) {

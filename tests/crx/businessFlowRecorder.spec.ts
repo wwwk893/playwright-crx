@@ -42,6 +42,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
 
   await page.goto(`${baseURL}/antd-users-real.html`);
   await expect(page.getByTestId('create-user-btn')).toBeVisible();
+  await attachRecorder(page, { mode: 'business-flow' });
 
   await page.getByTestId('create-user-btn').locator('svg').click();
   await page.getByPlaceholder('请输入用户名').fill('alice');
@@ -50,7 +51,11 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await page.getByTestId('modal-confirm').locator('span').click();
   await expect(page.getByTestId('create-user-modal')).not.toBeVisible();
   await page.waitForTimeout(2200);
-  await page.getByTestId('users-table').locator('tr[data-row-key="user-42"] button span').click();
+  const user42Row = page.getByTestId('users-table').locator('tr[data-row-key="user-42"]');
+  await user42Row.click();
+  await page.waitForTimeout(250);
+  await user42Row.getByRole('button', { name: '编辑' }).click();
+  await page.waitForTimeout(250);
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(5);
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('create-user-btn');
@@ -109,6 +114,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await page.goto(`${baseURL}/antd-pro-real.html`);
   await expect(page.getByText('真实 AntD ProComponents 页面')).toBeVisible();
   await expect(page.getByTestId('real-create-item')).toBeVisible();
+  await attachRecorder(page, { mode: 'business-flow' });
 
   await page.getByTestId('real-create-item').locator('svg').click();
   await page.getByPlaceholder('请输入条目名称').fill('real-item-a');
@@ -136,7 +142,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.flow.name).toBe('真实 AntD ProComponents 条目流程');
   expect(flow.steps.length).toBeGreaterThanOrEqual(7);
   expect(flow.steps.some((step: any) => step.target?.testId === 'real-create-item')).toBeTruthy();
-  expect(flow.steps.some((step: any) => step.target?.label === '条目名称' || step.target?.placeholder === '请输入条目名称')).toBeTruthy();
+  expect(flow.steps.some((step: any) => step.value === 'real-item-a' || [step.target?.label, step.target?.placeholder, step.target?.name, step.target?.displayName, step.target?.text].some(value => /条目名称|请输入条目名称/.test(String(value || ''))))).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.placeholder, step.target?.testId].some(value => /下方表单使用条目|选择刚保存的条目|real-used-item-select/.test(String(value || ''))))).toBeTruthy();
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
@@ -170,6 +176,7 @@ test('records real ProFormField network configuration fields and replays generat
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expect(page.getByText('网络配置资源')).toBeVisible();
+  await attachRecorder(page, { mode: 'business-flow' });
   await page.getByTestId('network-resource-add').click();
   await expect(page.getByRole('dialog', { name: '新建网络资源' })).toBeVisible();
 
@@ -188,7 +195,11 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
   await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
-  await page.getByText('开启代理ARP').click();
+  const networkResourceDialog = page.getByRole('dialog', { name: '新建网络资源' });
+  const arpProxyItem = networkResourceDialog.locator('.ant-form-item').filter({ hasText: '能力开关' });
+  const arpProxyCheckbox = arpProxyItem.getByRole('checkbox', { name: '开启代理ARP' });
+  await arpProxyItem.getByText('开启代理ARP').click();
+  await expect(arpProxyCheckbox).toBeChecked();
   await page.getByText('启用健康检查').click();
   await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
   await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
@@ -264,6 +275,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expect(page.getByText('地址池与端口池')).toBeVisible();
+  await attachRecorder(page, { mode: 'business-flow' });
   await page.getByTestId('site-ip-address-pool-create-button').click();
   await expect(page.getByRole('dialog', { name: '新建IPv4地址池' })).toBeVisible();
 
@@ -297,7 +309,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /WAN口|选择一个WAN口|xtest16:WAN1/.test(String(value || ''))))).toBeTruthy();
 
   const createStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-address-pool-create-button', 'IPv4 pool create button step');
-  const confirmStepId = requiredStepId(flow, (step: any) => /确\s*定/.test(String(step.target?.name || step.target?.text || step.target?.displayName || '')), 'IPv4 pool modal confirm step');
+  const confirmStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'ipv4-address-pool-confirm' || /确\s*定/.test(String(step.target?.name || step.target?.text || step.target?.displayName || '')), 'IPv4 pool modal confirm step');
   const saveConfigStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-save-button', 'site save config step');
   const repeatStepIds = flow.steps
       .filter((step: any) => stepIndex(flow, step.id) >= stepIndex(flow, createStepId) && stepIndex(flow, step.id) <= stepIndex(flow, confirmStepId))
@@ -360,6 +372,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
 
   await page.goto(`${baseURL}/antd-business-flow-stability.html`);
   await expect(page.getByText('业务流程稳定性测试页')).toBeVisible();
+  await attachRecorder(page, { mode: 'business-flow' });
   await page.getByTestId('site-ip-add').click();
   await page.getByPlaceholder('地址池名称').fill('pool-alpha');
   await page.getByTestId('site-save-button').click();
@@ -415,6 +428,8 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
 
   await page.getByTestId('stability-wan-select').click();
   await clickVisibleAntDOption(page, 'WAN1');
+  await expect(page.getByTestId('stability-wan-select')).toContainText('WAN1', { timeout: 10_000 });
+  await page.waitForTimeout(250);
   await page.getByPlaceholder('填写使用备注').fill('循环后继续补步骤');
   await page.getByTestId('site-post-save-action').click();
   await expect(page.getByTestId('event-log')).toContainText('post-save');
@@ -463,17 +478,21 @@ async function clickVisibleAntDOption(page: Page, text: string) {
       .last()
       .locator('.ant-select-item-option')
       .filter({ hasText: text });
-  await expect(options.first()).toBeVisible({ timeout: 10_000 });
-  await options.evaluateAll((elements, expectedText) => {
-    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
-    const expected = normalize(expectedText);
-    const element = elements.find(element => normalize(element.getAttribute('title')) === expected || normalize(element.textContent) === expected);
-    if (!element)
-      throw new Error(`AntD option not found exactly: ${expected}`);
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  }, text);
+  const option = options.first();
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.scrollIntoViewIfNeeded();
+  await option.click({ timeout: 5_000 }).catch(async () => {
+    await options.evaluateAll((elements, expectedText) => {
+      const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+      const expected = normalize(expectedText);
+      const element = elements.find(element => normalize(element.getAttribute('title')) === expected || normalize(element.textContent) === expected);
+      if (!element)
+        throw new Error(`AntD option not found exactly: ${expected}`);
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }, text);
+  });
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
 }
 

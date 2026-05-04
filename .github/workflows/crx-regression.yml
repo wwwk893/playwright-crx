@@ -1,0 +1,59 @@
+name: CRX regression
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Three times a day in UTC+8: 02:00, 10:00, 18:00.
+    - cron: '0 18,2,10 * * *'
+
+concurrency:
+  group: crx-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  crx-regression:
+    name: CRX full regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium dependencies
+        run: npm run test:install
+
+      - name: Build CRX package, recorder example, and tests
+        run: |
+          npm run ci:pw:bundles
+          npm run build:crx
+          npm run build:examples:recorder
+          npm run build:tests
+        env:
+          NODE_OPTIONS: "--max_old_space_size=4096"
+
+      - name: Run CRX full regression matrix
+        run: npm run test:crx:all -- --reporter=line --global-timeout=1800000
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-crx-artifacts
+          path: |
+            tests/playwright-report
+            tests/test-results
+            tests/.raw-generated-replay
+          if-no-files-found: ignore
+          retention-days: 7

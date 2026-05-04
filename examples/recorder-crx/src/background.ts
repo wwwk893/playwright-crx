@@ -30,11 +30,18 @@ const recordingModes: CrxMode[] = ['recording', 'assertingText', 'assertingVisib
 let crxAppPromise: Promise<CrxApplication> | undefined;
 
 const attachedTabIds = new Set<number>();
+let currentPageContextTabId: number | undefined;
 let currentMode: CrxMode | 'detached' | undefined;
 let settings: CrxSettings = defaultSettings;
 const maxContextEventsPerTab = 200;
 const maxContextEventAgeMs = 5 * 60 * 1000;
 const contextEventsByTabId = new Map<number, PageContextEvent[]>();
+
+function resetRecordedTabContext() {
+  attachedTabIds.clear();
+  currentPageContextTabId = undefined;
+  contextEventsByTabId.clear();
+}
 
 // if it's in sidepanel mode, we need to open it synchronously on action click,
 // so we need to fetch its value asap
@@ -80,15 +87,25 @@ async function changeAction(tabId: number, mode?: CrxMode | 'detached') {
 
 // action state per tab is reset every time a navigation occurs
 // https://bugs.chromium.org/p/chromium/issues/detail?id=1450904
-chrome.tabs.onUpdated.addListener(tabId => changeAction(tabId));
-chrome.tabs.onRemoved.addListener(tabId => contextEventsByTabId.delete(tabId));
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  void changeAction(tabId);
+  if (attachedTabIds.has(tabId) && (changeInfo.status === 'complete' || changeInfo.url))
+    void ensurePageContextSidecar(tabId).catch(() => {});
+});
+chrome.tabs.onRemoved.addListener(tabId => {
+  contextEventsByTabId.delete(tabId);
+  if (currentPageContextTabId === tabId)
+    currentPageContextTabId = Array.from(attachedTabIds).filter(attachedTabId => attachedTabId !== tabId).pop();
+});
 
 async function getCrxApp(incognito: boolean) {
   if (!crxAppPromise) {
+    resetRecordedTabContext();
     await settingsInitializing;
 
     crxAppPromise = crx.start({ incognito }).then(crxApp => {
       crxApp.recorder.addListener('hide', async () => {
+        resetRecordedTabContext();
         await crxApp.close();
         crxAppPromise = undefined;
       });
@@ -97,10 +114,14 @@ async function getCrxApp(incognito: boolean) {
       });
       crxApp.addListener('attached', async ({ tabId }) => {
         attachedTabIds.add(tabId);
+        currentPageContextTabId = tabId;
         await changeAction(tabId, crxApp.recorder.mode());
       });
       crxApp.addListener('detached', async tabId => {
         attachedTabIds.delete(tabId);
+        contextEventsByTabId.delete(tabId);
+        if (currentPageContextTabId === tabId)
+          currentPageContextTabId = Array.from(attachedTabIds).pop();
         await changeAction(tabId, 'detached');
       });
       setTestIdAttributeName(settings.testIdAttributeName);
@@ -111,8 +132,17 @@ async function getCrxApp(incognito: boolean) {
 }
 
 async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
-  if (!tab?.id || (attachedTabIds.has(tab.id) && !mode))
+  if (!tab?.id)
     return;
+  if (attachedTabIds.has(tab.id) && !mode) {
+    const crxApp = await crxAppPromise?.catch(() => undefined);
+    if (crxApp && !crxApp.recorder.isHidden() && await hasRecorderWindow()) {
+      currentPageContextTabId = tab.id;
+      await ensurePageContextSidecar(tab.id).catch(() => {});
+      await crxApp.attach(tab.id).catch(() => {});
+      return;
+    }
+  }
 
   // if the tab is incognito, chek if can be started in incognito mode.
   if (tab.incognito && !allowsIncognitoAccess)
@@ -141,11 +171,12 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
   await ensurePageContextSidecar(tab.id!).catch(() => {});
 
   const crxApp = await getCrxApp(tab.incognito);
+  currentPageContextTabId = tab.id!;
   const initialMode = mode ?? (!isUnderTest() && settings.businessFlowEnabled !== false ? 'standby' : 'recording');
 
   try {
 
-    if (crxApp.recorder.isHidden()) {
+    if (crxApp.recorder.isHidden() || !await hasRecorderWindow()) {
       await crxApp.recorder.show({
         mode: initialMode,
         language: settings.targetLanguage,
@@ -161,6 +192,12 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
   } finally {
     chrome.action.enable();
   }
+}
+
+async function hasRecorderWindow() {
+  const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+  const windows = await chrome.windows.getAll({ populate: true }).catch(() => [] as chrome.windows.Window[]);
+  return windows.some(window => window.tabs?.some(tab => tab.url?.startsWith(extensionOrigin)));
 }
 
 async function ensurePageContextSidecar(tabId: number) {
@@ -208,10 +245,15 @@ async function getStorageState() {
 
 function addPageContextEvent(tabId: number, event: PageContextEvent) {
   const events = contextEventsByTabId.get(tabId) ?? [];
-  events.push({
+  const eventWithTab = {
     ...event,
     tabId,
-  });
+  };
+  const existingIndex = events.findIndex(existing => existing.id === event.id);
+  if (existingIndex >= 0)
+    events[existingIndex] = eventWithTab;
+  else
+    events.push(eventWithTab);
   contextEventsByTabId.set(tabId, prunePageContextEvents(events));
 }
 
@@ -221,16 +263,27 @@ function getRecentPageContextEvents(tabId: number) {
   return events;
 }
 
+function getRecentPageContextEventsForRecordedTab(requestedTabId?: number) {
+  if (typeof requestedTabId === 'number')
+    return getRecentPageContextEvents(requestedTabId);
+  if (typeof currentPageContextTabId === 'number') {
+    const events = getRecentPageContextEvents(currentPageContextTabId);
+    if (events.length)
+      return events;
+  }
+  if (attachedTabIds.size === 1) {
+    const [tabId] = Array.from(attachedTabIds);
+    currentPageContextTabId = tabId;
+    return getRecentPageContextEvents(tabId);
+  }
+  return [];
+}
+
 function prunePageContextEvents(events: PageContextEvent[]) {
   const minWallTime = Date.now() - maxContextEventAgeMs;
   return events
       .filter(event => (event.wallTime ?? Date.now()) >= minWallTime)
       .slice(-maxContextEventsPerTab);
-}
-
-async function activeTabId() {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  return tab?.id;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -243,8 +296,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.event === 'pageContextEventsRequested') {
     const requestedTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
-    (requestedTabId ? Promise.resolve(requestedTabId) : activeTabId())
-        .then(tabId => sendResponse(typeof tabId === 'number' ? getRecentPageContextEvents(tabId) : []))
+    Promise.resolve(getRecentPageContextEventsForRecordedTab(requestedTabId))
+        .then(events => sendResponse(events))
         .catch(() => sendResponse([]));
     return true;
   }

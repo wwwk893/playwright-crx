@@ -123,6 +123,32 @@ function requestPageContextEvents(): Promise<PageContextEvent[]> {
       .catch(() => []);
 }
 
+async function requestSettledPageContextEvents(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageContextEvent[]> {
+  const settleMs = options.settleMs ?? 220;
+  const timeoutMs = options.timeoutMs ?? 1500;
+  const deadline = Date.now() + timeoutMs;
+  let previous = await requestPageContextEvents();
+  while (Date.now() < deadline) {
+    await new Promise(resolve => window.setTimeout(resolve, settleMs));
+    const next = await requestPageContextEvents();
+    if (pageContextEventSignature(next) === pageContextEventSignature(previous))
+      return next;
+    previous = next;
+  }
+  return previous;
+}
+
+function pageContextEventSignature(events: PageContextEvent[]) {
+  return JSON.stringify(events.map(event => ({
+    id: event.id,
+    kind: event.kind,
+    wallTime: event.wallTime,
+    before: event.before,
+    after: event.after,
+    tabId: event.tabId,
+  })));
+}
+
 function cloneFlowRecord(flow: BusinessFlow): BusinessFlow {
   const now = new Date().toISOString();
   return {
@@ -471,7 +497,11 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog]);
 
   const queueSyntheticClickEvent = React.useCallback((event: PageContextEvent) => {
-    pendingSyntheticClickEventsRef.current.push(event);
+    const existingIndex = pendingSyntheticClickEventsRef.current.findIndex(existing => existing.id === event.id);
+    if (existingIndex >= 0)
+      pendingSyntheticClickEventsRef.current[existingIndex] = event;
+    else
+      pendingSyntheticClickEventsRef.current.push(event);
     if (syntheticFlushTimerRef.current)
       return;
 
@@ -492,14 +522,26 @@ export const CrxRecorder: React.FC = ({
       syntheticFlushTimerRef.current = undefined;
     }
 
-    const queuedEvents = pendingSyntheticClickEventsRef.current;
+    const queuedEventsBeforeSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
-    const requestedEvents = await requestPageContextEvents();
+    // pageContextSidecar intentionally delays click context by 160ms so it can include
+    // post-click overlay/toast state. Stop/export must drain that product pipeline,
+    // otherwise table rowKey / AntD option context can miss the final flow export.
+    const requestedEvents = await requestSettledPageContextEvents();
+    const requestedEventsById = new Map(requestedEvents.map(event => [event.id, event]));
+    const queuedEventsAfterSettle = pendingSyntheticClickEventsRef.current;
+    pendingSyntheticClickEventsRef.current = [];
     const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
     const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
-    const newRequestedEvents = lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : [];
+    const newRequestedEvents = lastKnownContextEventId ? (lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : requestedEvents) : requestedEvents;
     const eventsById = new Map<string, PageContextEvent>();
-    for (const event of [...queuedEvents, ...newRequestedEvents]) {
+    for (const event of [...queuedEventsBeforeSettle, ...queuedEventsAfterSettle]) {
+      const latestEvent = requestedEventsById.get(event.id) || event;
+      eventsById.set(latestEvent.id, latestEvent);
+      if (latestEvent.kind === 'click' && latestEvent.wallTime)
+        scheduledSyntheticContextEventIdsRef.current.add(latestEvent.id);
+    }
+    for (const event of newRequestedEvents) {
       eventsById.set(event.id, event);
       if (event.kind === 'click' && event.wallTime)
         scheduledSyntheticContextEventIdsRef.current.add(event.id);
@@ -586,8 +628,13 @@ export const CrxRecorder: React.FC = ({
           if (actions.length) {
             window.setTimeout(() => {
               requestPageContextEvents().then(contextEvents => {
-                if (contextEvents.length)
-                  setFlowDraft(flow => mergePageContextIntoFlow(flow, contextEvents));
+                if (contextEvents.length) {
+                  setFlowDraft(flow => {
+                    const nextFlow = mergePageContextIntoFlow(flow, contextEvents);
+                    flowDraftRef.current = nextFlow;
+                    return nextFlow;
+                  });
+                }
               }).catch(() => {});
             }, 250);
           }

@@ -66,8 +66,9 @@ test('should create new page in window', async ({ runCrxTest }) => {
     // wait for the default tab of the window to be created
     await windowTabPromise;
 
-    // this will catch the tab created via crx
-    const tabPromise = new Promise<Tab>(x => chrome.tabs.onCreated.addListener(x));
+    const initialTabs = await chrome.tabs.query({ windowId: window.id });
+    const initialTabIds = new Set(initialTabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number'));
+
     const page = await crxApp.newPage({
       windowId: window.id,
       url: server.EMPTY_PAGE,
@@ -75,8 +76,12 @@ test('should create new page in window', async ({ runCrxTest }) => {
     expect(crxApp.pages()).toContain(page);
     expect(page.url()).toBe(server.EMPTY_PAGE);
 
-    const { id: tabId } = await tabPromise;
-    const tab = await chrome.tabs.get(tabId!);
+    await expect.poll(async () => {
+      const tabs = await chrome.tabs.query({ windowId: window.id });
+      return tabs.filter(tab => typeof tab.id === 'number' && !initialTabIds.has(tab.id) && tab.url === server.EMPTY_PAGE).length;
+    }).toBe(1);
+    const [tab] = (await chrome.tabs.query({ windowId: window.id }))
+        .filter(tab => typeof tab.id === 'number' && !initialTabIds.has(tab.id) && tab.url === server.EMPTY_PAGE);
     expect(tab.url).toBe(server.EMPTY_PAGE);
     expect(tab.windowId).toBe(window.id);
   });
@@ -147,9 +152,10 @@ test('should attach matching pages', async ({ runCrxTest }) => {
 test('should attach popup pages', async ({ runCrxTest }) => {
   await runCrxTest(async ({ expect, page, server }) => {
     await page.goto(server.EMPTY_PAGE);
+    await page.setContent(`<button onclick="window.open('${server.EMPTY_PAGE}')">Open popup</button>`);
     const [popup] = await Promise.all([
       page.waitForEvent('popup'),
-      page.evaluate(url => { window.open(url); }, server.EMPTY_PAGE),
+      page.getByRole('button', { name: 'Open popup' }).click(),
     ]);
     expect(popup.url()).toBe(server.EMPTY_PAGE);
   });

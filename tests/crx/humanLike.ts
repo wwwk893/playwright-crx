@@ -187,6 +187,7 @@ async function exactTextOption(candidates: Locator, expectedText: string) {
 }
 
 export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, optionText: string, options?: { searchText?: string }) {
+  await closeAntdPopups(page);
   await humanClick(trigger);
 
   const dropdown = page.locator('.ant-select-dropdown:visible').last();
@@ -203,10 +204,15 @@ export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, opt
   await option.scrollIntoViewIfNeeded();
   await humanClick(option, { delayMs: 80 });
 
-  await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+  await expect(trigger).toContainText(optionText, { timeout: 5_000 }).catch(() => {});
+  await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(async () => {
+    await page.keyboard.press('Escape').catch(() => {});
+    await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+  });
 }
 
 export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, nodeText: string, options?: { searchText?: string }) {
+  await closeAntdPopups(page);
   for (let attempt = 0; attempt < 3; attempt++) {
     const dropdown = page.locator('.ant-select-dropdown:visible').last();
     await openPopupLikeUser(trigger, dropdown);
@@ -232,6 +238,7 @@ export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, n
 }
 
 export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locator, path: string[]) {
+  await closeAntdPopups(page);
   const dropdown = page.locator('.ant-cascader-dropdown:visible').last();
   await openPopupLikeUser(trigger, dropdown);
   await expect(dropdown).toBeVisible({ timeout: 10_000 });
@@ -272,6 +279,16 @@ export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locato
   }
 
   await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+}
+
+async function closeAntdPopups(page: Page) {
+  const popup = page.locator('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!await popup.first().isVisible().catch(() => false))
+      return;
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(120);
+  }
 }
 
 export async function beginNewFlowFromLibraryLikeUser(recorderPage: Page) {

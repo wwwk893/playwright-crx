@@ -103,22 +103,48 @@ export const test = crxTest.extend<{
 
             let recorderPage = context.pages().find(p => p.url().startsWith(`chrome-extension://${extensionId}`));
             const recorderPagePromise = recorderPage ? undefined : context.waitForEvent('page');
+            if (recorderPage) {
+              const expectedSurface = mode === 'legacy' ? '.recorder-editor' : '.business-flow-panel';
+              const hasExpectedSurface = await recorderPage.locator(expectedSurface).count().then(count => count > 0).catch(() => false);
+              if (!hasExpectedSurface)
+                await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+            }
 
             await page.bringToFront();
-            await extensionServiceWorker.evaluate(async () => {
-              // ensure we're in test mode
-              _setUnderTest();
+            const attachCurrentTab = async () => {
+              await extensionServiceWorker.evaluate(async () => {
+                // ensure we're in test mode
+                _setUnderTest();
 
-              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-              await attach(tab);
-            });
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                await attach(tab);
+              });
+            };
+            await attachCurrentTab();
 
             recorderPage = recorderPage ?? (await recorderPagePromise)!;
 
-            if (mode === 'legacy')
-              await recorderPage.locator('.recorder-editor').waitFor({ state: 'attached', timeout: 5000 });
-            else
-              await recorderPage.locator('.business-flow-panel').waitFor({ state: 'attached', timeout: 5000 });
+            await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
+            let recorderSurface = mode === 'legacy'
+              ? recorderPage.locator('.recorder-editor')
+              : recorderPage.locator('.business-flow-panel');
+            try {
+              await expect(recorderSurface).toBeAttached({ timeout: 15000 });
+            } catch {
+              await recorderPage.close().catch(() => {});
+              const freshRecorderPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => undefined);
+              await page.bringToFront();
+              await attachCurrentTab();
+              const freshRecorderPage = await freshRecorderPagePromise;
+              if (!freshRecorderPage)
+                throw new Error(`Recorder surface ${mode} did not recover after closing stale extension page`);
+              recorderPage = freshRecorderPage;
+              await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
+              recorderSurface = mode === 'legacy'
+                ? recorderPage.locator('.recorder-editor')
+                : recorderPage.locator('.business-flow-panel');
+              await expect(recorderSurface).toBeAttached({ timeout: 15000 });
+            }
 
             const locator = page.locator('x-pw-glass').first();
             try {
@@ -156,7 +182,14 @@ export const test = crxTest.extend<{
             await recorderPage.waitForTimeout(100);
             const count = (await sourceLines(recorderPage)).length;
             const result = await action();
-            await expect.poll(async () => (await sourceLines(recorderPage)).length).toBeGreaterThan(count);
+            await expect.poll(async () => {
+              const first = await sourceLines(recorderPage);
+              if (first.length <= count)
+                return -1;
+              await recorderPage.waitForTimeout(250);
+              const second = await sourceLines(recorderPage);
+              return first.join('\n') === second.join('\n') ? second.length : -1;
+            }).toBeGreaterThan(count);
             return result;
           });
         },
@@ -167,15 +200,18 @@ export const test = crxTest.extend<{
               switch (name) {
                 case 'assertText':
                   await recorderPage.getByTitle('Assert text').click();
+                  await expect(recorderPage.getByTitle('Assert text')).toHaveClass(/toggled/);
                   await locator.click();
                   await page.locator('x-pw-glass').getByTitle('Accept').click();
                   break;
                 case 'assertValue':
                   await recorderPage.getByTitle('Assert value').click();
+                  await expect(recorderPage.getByTitle('Assert value')).toHaveClass(/toggled/);
                   await locator.click();
                   break;
                 case 'assertVisible':
                   await recorderPage.getByTitle('Assert visibility').click();
+                  await expect(recorderPage.getByTitle('Assert visibility')).toHaveClass(/toggled/);
                   await locator.click();
                   break;
                 case 'assertSnapshot':
