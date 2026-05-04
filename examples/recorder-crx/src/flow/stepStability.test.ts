@@ -2550,6 +2550,63 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'raw cascader options are not inherited as the previous tree select field',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'combobox',
+            name: '* 发布范围',
+            label: '发布范围',
+          },
+          context: {
+            eventId: 'ctx-scope-trigger',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: '发布范围', name: 'scope' },
+              target: { tag: 'div', framework: 'procomponents', controlType: 'tree-select' },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="* 发布范围"i]' } },
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: {
+            role: 'menuitemcheckbox',
+            name: '上海',
+            text: '上海',
+            displayName: '上海',
+            raw: {
+              tag: 'li',
+              role: 'menuitemcheckbox',
+              text: '上海',
+              framework: 'antd',
+              controlType: 'cascader-option',
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:text="上海"i' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's002');
+      assert(code.includes('.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)'), 'cascader option should use the cascader popup');
+      assert(code.includes('.ant-cascader-menu-item'), 'cascader option should use cascader menu items');
+      assert(!code.includes('.ant-select-tree-node-content-wrapper'), 'cascader option must not inherit the previous tree-select context');
+    },
+  },
+  {
     name: 'redaction preserves full generated playwright code while still masking secrets',
     run: () => {
       const longCode = `await page.goto("/start");\n${'await page.getByRole("button", { name: "保存" }).click();\n'.repeat(80)}await page.getByRole("button", { name: "完成" }).click();`;
