@@ -120,8 +120,12 @@ async function getCrxApp(incognito: boolean) {
 }
 
 async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
-  if (!tab?.id || (attachedTabIds.has(tab.id) && !mode))
+  if (!tab?.id)
     return;
+  if (attachedTabIds.has(tab.id) && !mode) {
+    currentPageContextTabId = tab.id;
+    return;
+  }
 
   // if the tab is incognito, chek if can be started in incognito mode.
   if (tab.incognito && !allowsIncognitoAccess)
@@ -235,6 +239,22 @@ function getRecentPageContextEvents(tabId: number) {
   return events;
 }
 
+function getRecentPageContextEventsForRecordedTab(requestedTabId?: number) {
+  if (typeof requestedTabId === 'number')
+    return getRecentPageContextEvents(requestedTabId);
+  if (typeof currentPageContextTabId === 'number') {
+    const events = getRecentPageContextEvents(currentPageContextTabId);
+    if (events.length)
+      return events;
+  }
+  if (attachedTabIds.size === 1) {
+    const [tabId] = Array.from(attachedTabIds);
+    currentPageContextTabId = tabId;
+    return getRecentPageContextEvents(tabId);
+  }
+  return [];
+}
+
 function prunePageContextEvents(events: PageContextEvent[]) {
   const minWallTime = Date.now() - maxContextEventAgeMs;
   return events
@@ -251,8 +271,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.event === 'pageContextEventsRequested') {
-    const requestedTabId = typeof message.tabId === 'number' ? message.tabId : currentPageContextTabId;
-    Promise.resolve(typeof requestedTabId === 'number' ? getRecentPageContextEvents(requestedTabId) : [])
+    const requestedTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
+    Promise.resolve(getRecentPageContextEventsForRecordedTab(requestedTabId))
         .then(events => sendResponse(events))
         .catch(() => sendResponse([]));
     return true;
