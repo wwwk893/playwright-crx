@@ -2149,6 +2149,29 @@ test('demo', async ({ page }) => {
             sourceActionIds: ['a002'],
             action: 'click',
             target: {
+              role: 'combobox',
+              name: '* WAN口',
+              label: 'WAN口',
+              scope: {
+                dialog: { title: '新建网络资源', type: 'modal', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+              },
+            },
+            rawAction: {
+              action: {
+                name: 'click',
+                selector: 'internal:role=combobox[name="* WAN口"i]',
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            kind: 'recorded',
+            sourceActionIds: ['a003'],
+            action: 'click',
+            target: {
               text: 'edge-lab:WAN-extra-',
               locator: 'internal:text="edge-lab:WAN-extra-"s',
             },
@@ -2164,7 +2187,7 @@ test('demo', async ({ page }) => {
         ],
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
-      const optionStep = stepCodeBlock(code, 's002');
+      const optionStep = stepCodeBlock(code, 's003');
       assert(optionStep.includes('AntD Select virtual dropdown replay workaround'), 'truncated option should still use AntD select replay workaround');
       assert(optionStep.includes('edge-lab:WAN-extra-18'), 'truncated option text should be completed from the select search query');
       assert(!optionStep.includes(`getByText('edge-lab:WAN-extra-')`), 'truncated global text source should not be reused');

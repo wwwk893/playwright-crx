@@ -183,17 +183,22 @@ function normalizeGeneratedText(value?: string) {
 
 function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow {
   let activeSelectStep: FlowStep | undefined;
+  let activeSelectQuery = '';
   let changed = false;
   const steps = flow.steps.map(step => {
     if (isAntdSelectFieldStep(step)) {
+      const query = selectQueryForStep(step);
+      if (query)
+        activeSelectQuery = query;
       activeSelectStep = step;
       return step;
     }
 
-    if (activeSelectStep && isContextlessOptionTextClickAfterSelect(step, activeSelectStep)) {
+    if (activeSelectStep && isContextlessOptionTextClickAfterSelect(step, activeSelectStep, activeSelectQuery)) {
       changed = true;
       const rawOptionTitle = rawSelectOptionTitle(step);
-      const optionText = completeOptionTextFromSelectQuery(step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle || '', selectQueryForStep(activeSelectStep)) || step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle;
+      const query = activeSelectQuery || selectQueryForStep(activeSelectStep);
+      const optionText = completeOptionTextFromSelectQuery(step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle || '', query) || step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle;
       const activeForm = selectStepFormContext(activeSelectStep);
       return {
         ...step,
@@ -227,8 +232,10 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
       } as FlowStep;
     }
 
-    if (step.action !== 'fill' && step.action !== 'press')
+    if (step.action !== 'fill' && step.action !== 'press') {
       activeSelectStep = undefined;
+      activeSelectQuery = '';
+    }
     return step;
   });
   return changed ? { ...flow, steps } : flow;
@@ -271,7 +278,7 @@ function popupFieldLabelFromName(value?: string) {
   return undefined;
 }
 
-function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: FlowStep) {
+function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: FlowStep, inheritedQuery = '') {
   if (step.action !== 'click' || isAntdSelectOptionStep(step))
     return false;
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
@@ -285,7 +292,7 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   if (selector && !selector.includes('internal:text') && !/getByText|text=/.test(step.sourceCode || '') && !/internal:attr=\[title=.*>>/.test(selector))
     return false;
-  const query = selectQueryForStep(selectStep);
+  const query = inheritedQuery || selectQueryForStep(selectStep);
   return !query || optionText.includes(query) || !!completeOptionTextFromSelectQuery(optionText, query);
 }
 
