@@ -162,6 +162,7 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
   await ensurePageContextSidecar(tab.id!).catch(() => {});
 
   const crxApp = await getCrxApp(tab.incognito);
+  currentPageContextTabId = tab.id!;
   const initialMode = mode ?? (!isUnderTest() && settings.businessFlowEnabled !== false ? 'standby' : 'recording');
 
   try {
