@@ -203,7 +203,11 @@ export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, opt
   await option.scrollIntoViewIfNeeded();
   await humanClick(option, { delayMs: 80 });
 
-  await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+  await expect(trigger).toContainText(optionText, { timeout: 5_000 }).catch(() => {});
+  await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(async () => {
+    await page.keyboard.press('Escape').catch(() => {});
+    await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+  });
 }
 
 export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, nodeText: string, options?: { searchText?: string }) {
