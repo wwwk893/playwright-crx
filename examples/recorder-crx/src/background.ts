@@ -136,7 +136,7 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
     return;
   if (attachedTabIds.has(tab.id) && !mode) {
     const crxApp = await crxAppPromise?.catch(() => undefined);
-    if (crxApp && !crxApp.recorder.isHidden()) {
+    if (crxApp && !crxApp.recorder.isHidden() && await hasRecorderWindow()) {
       currentPageContextTabId = tab.id;
       await ensurePageContextSidecar(tab.id).catch(() => {});
       await crxApp.attach(tab.id).catch(() => {});
@@ -176,7 +176,7 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
 
   try {
 
-    if (crxApp.recorder.isHidden()) {
+    if (crxApp.recorder.isHidden() || !await hasRecorderWindow()) {
       await crxApp.recorder.show({
         mode: initialMode,
         language: settings.targetLanguage,
@@ -192,6 +192,12 @@ async function attach(tab: chrome.tabs.Tab, mode?: Mode) {
   } finally {
     chrome.action.enable();
   }
+}
+
+async function hasRecorderWindow() {
+  const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+  const windows = await chrome.windows.getAll({ populate: true }).catch(() => [] as chrome.windows.Window[]);
+  return windows.some(window => window.tabs?.some(tab => tab.url?.startsWith(extensionOrigin)));
 }
 
 async function ensurePageContextSidecar(tabId: number) {
