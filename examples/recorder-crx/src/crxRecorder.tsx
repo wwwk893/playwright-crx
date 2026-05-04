@@ -123,6 +123,25 @@ function requestPageContextEvents(): Promise<PageContextEvent[]> {
       .catch(() => []);
 }
 
+async function requestSettledPageContextEvents(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageContextEvent[]> {
+  const settleMs = options.settleMs ?? 180;
+  const timeoutMs = options.timeoutMs ?? 900;
+  const deadline = Date.now() + timeoutMs;
+  let previous = await requestPageContextEvents();
+  while (Date.now() < deadline) {
+    await new Promise(resolve => window.setTimeout(resolve, settleMs));
+    const next = await requestPageContextEvents();
+    if (pageContextEventIds(next) === pageContextEventIds(previous))
+      return next;
+    previous = next;
+  }
+  return previous;
+}
+
+function pageContextEventIds(events: PageContextEvent[]) {
+  return events.map(event => event.id).join('|');
+}
+
 function cloneFlowRecord(flow: BusinessFlow): BusinessFlow {
   const now = new Date().toISOString();
   return {
@@ -497,8 +516,7 @@ export const CrxRecorder: React.FC = ({
     // pageContextSidecar intentionally delays click context by 160ms so it can include
     // post-click overlay/toast state. Stop/export must drain that product pipeline,
     // otherwise table rowKey / AntD option context can miss the final flow export.
-    await new Promise(resolve => window.setTimeout(resolve, 220));
-    const requestedEvents = await requestPageContextEvents();
+    const requestedEvents = await requestSettledPageContextEvents();
     const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
     const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
     const newRequestedEvents = lastKnownContextEventId ? (lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : requestedEvents) : requestedEvents;
