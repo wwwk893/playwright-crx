@@ -124,18 +124,29 @@ function requestPageContextEvents(): Promise<PageContextEvent[]> {
 }
 
 async function requestSettledPageContextEvents(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageContextEvent[]> {
-  const settleMs = options.settleMs ?? 180;
-  const timeoutMs = options.timeoutMs ?? 900;
+  const settleMs = options.settleMs ?? 220;
+  const timeoutMs = options.timeoutMs ?? 1500;
   const deadline = Date.now() + timeoutMs;
   let previous = await requestPageContextEvents();
   while (Date.now() < deadline) {
     await new Promise(resolve => window.setTimeout(resolve, settleMs));
     const next = await requestPageContextEvents();
-    if (pageContextEventIds(next) === pageContextEventIds(previous))
+    if (pageContextEventSignature(next) === pageContextEventSignature(previous))
       return next;
     previous = next;
   }
   return previous;
+}
+
+function pageContextEventSignature(events: PageContextEvent[]) {
+  return JSON.stringify(events.map(event => ({
+    id: event.id,
+    kind: event.kind,
+    wallTime: event.wallTime,
+    before: event.before,
+    after: event.after,
+    tabId: event.tabId,
+  })));
 }
 
 function pageContextEventIds(events: PageContextEvent[]) {
