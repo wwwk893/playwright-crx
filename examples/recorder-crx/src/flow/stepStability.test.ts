@@ -515,6 +515,46 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat segment extracts AntD option text from raw title selector when page context is late',
+    run: () => {
+      const flow = createNamedFlow();
+      const withSteps: BusinessFlow = {
+        ...flow,
+        steps: [
+          { id: 'u001', order: 1, action: 'click', target: { testId: 'create-user-btn', text: '新建用户' }, assertions: [] },
+          { id: 'u002', order: 2, action: 'fill', target: { placeholder: '请输入用户名', label: '用户名' }, value: 'alice.qa', assertions: [] },
+          {
+            id: 'u003',
+            order: 3,
+            action: 'click',
+            target: {},
+            rawAction: { action: { name: 'click', selector: 'internal:attr=[title="管理员"i]' } },
+            sourceCode: `await page.getByTitle('管理员').click();`,
+            assertions: [],
+          },
+          {
+            id: 'u004',
+            order: 4,
+            action: 'click',
+            target: {},
+            rawAction: { action: { name: 'click', selector: 'internal:attr=[title="审计员"i] >> div' } },
+            sourceCode: `await page.getByTitle('审计员').locator('div').click();`,
+            assertions: [],
+          },
+          { id: 'u005', order: 5, action: 'click', target: { testId: 'modal-confirm', text: '确定' }, assertions: [] },
+        ],
+      };
+
+      const segment = createRepeatSegment(withSteps, withSteps.steps.map(step => step.id));
+      const roleParameters = segment.parameters.filter(parameter => parameter.variableName.startsWith('role'));
+      const code = generateBusinessFlowPlaywrightCode({ ...withSteps, repeatSegments: [segment] });
+
+      assertEqual(roleParameters.map(parameter => parameter.currentValue), ['审计员']);
+      assert(code.includes('String(row.role)'), 'raw title option should be parameterized as row.role');
+      assert(!code.includes('row.role2'), 'selected trigger title should not become a second role parameter');
+    },
+  },
+  {
     name: 'repeat segment infers context-light tree select option values as parameters',
     run: () => {
       const flow: BusinessFlow = {
@@ -759,6 +799,39 @@ test('demo', async ({ page }) => {
       assertEqual(withSynthetic.steps.map(step => step.action), ['click', 'click', 'fill']);
       assertEqual(withSynthetic.steps[1].target?.text, 'real-item-a');
       assert(code.includes('ant-select-item-option'), 'select option synthetic step should use visible AntD option content in replay code');
+    },
+  },
+  {
+    name: 'late dropdown option page context is inserted immediately after its trigger',
+    run: () => {
+      const wallTime = Date.now() - 2000;
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: { name: 'click', selector: 'internal:role=combobox[name="共享WAN"i]' },
+        wallTime,
+      }, {
+        action: { name: 'fill', selector: 'internal:role=textbox[name="使用备注"i]', text: '循环后继续补步骤' },
+        wallTime: wallTime + 120,
+      }, {
+        action: { name: 'click', selector: 'internal:testid=[data-testid="site-post-save-action"s]' },
+        wallTime: wallTime + 240,
+      }], [], {});
+      const optionEvent = pageClickEventWithTarget('ctx-wan-option', wallTime + 1000, {
+        tag: 'div',
+        role: 'option',
+        title: 'WAN1',
+        text: 'WAN1',
+        normalizedText: 'WAN1',
+        framework: 'antd',
+        controlType: 'select-option',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      optionEvent.before.form = { label: '共享WAN', name: 'wanPort' };
+      optionEvent.before.dialog = { type: 'dropdown', visible: true };
+
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [optionEvent]);
+
+      assertEqual(withSynthetic.steps.map(step => step.target?.text || step.target?.name || step.value || step.target?.testId), ['共享WAN', 'WAN1', '使用备注', 'site-post-save-action']);
+      assertEqual(withSynthetic.steps[2]?.value, '循环后继续补步骤');
     },
   },
   {

@@ -284,6 +284,10 @@ export function createAssertion(type: FlowAssertionType, id: string, step?: Flow
 }
 
 function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEvent) {
+  const dropdownTriggerIndex = dropdownOptionTriggerInsertionIndex(steps, event);
+  if (dropdownTriggerIndex !== undefined)
+    return dropdownTriggerIndex;
+
   const eventWallTime = event.wallTime;
   if (typeof eventWallTime !== 'number')
     return steps.length;
@@ -304,6 +308,66 @@ function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEv
     insertAt = index + 1;
   }
   return sawComparableWallTime ? insertAt : steps.length;
+}
+
+function dropdownOptionTriggerInsertionIndex(steps: FlowStep[], event: PageContextEvent) {
+  if (!isDropdownOptionContext(event.before.target))
+    return undefined;
+  const fieldLabel = normalizedComparableText(event.before.form?.label || '');
+  if (!fieldLabel)
+    return undefined;
+
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (!isDropdownTriggerStepForLabel(step, fieldLabel))
+      continue;
+    let insertAt = index + 1;
+    while (insertAt < steps.length && isDropdownOptionStepForLabel(steps[insertAt], fieldLabel))
+      insertAt++;
+    return insertAt;
+  }
+  return undefined;
+}
+
+function isDropdownTriggerStepForLabel(step: FlowStep, normalizedLabel: string) {
+  if (step.action !== 'click')
+    return false;
+  const target = step.target;
+  const role = target?.role || '';
+  const raw = recorderSelectorForStep(step);
+  const labels = [
+    target?.label,
+    target?.name,
+    target?.text,
+    target?.displayName,
+    target?.scope?.form?.label,
+    step.context?.before.form?.label,
+    raw,
+  ];
+  if (!/combobox|select/i.test(role) && !/combobox|select|ant-select/i.test(raw) && !labels.some(label => /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(String(label || ''))))
+    return false;
+  return labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+}
+
+function isDropdownOptionStepForLabel(step: FlowStep, normalizedLabel: string) {
+  if (step.action !== 'click')
+    return false;
+  const target = step.target;
+  const contextTarget = step.context?.before.target;
+  if (!isDropdownOptionContext(contextTarget) && !/option|menuitem/.test(target?.role || '') && !/option/.test(String((target?.raw as { controlType?: unknown } | undefined)?.controlType || '')))
+    return false;
+  const labels = [target?.label, target?.scope?.form?.label, step.context?.before.form?.label];
+  return !labels.some(Boolean) || labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
+}
+
+function normalizedComparableText(value: string) {
+  return value.replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function recorderSelectorForStep(step: FlowStep) {
+  const raw = asRecord(step.rawAction);
+  const action = asRecord(raw.action);
+  return typeof action.selector === 'string' ? action.selector : '';
 }
 
 function stepWallTime(step: FlowStep) {

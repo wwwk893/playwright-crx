@@ -134,7 +134,7 @@ function contextLightSelectOptionValue(step: FlowStep) {
   const testId = step.target?.testId || step.context?.before.target?.testId || '';
   if (/button|link|checkbox|radio|switch/i.test(role) || /checkbox|radio|switch/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
     return undefined;
-  return step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim() || undefined;
+  return optionTextFromStep(step);
 }
 
 function repeatParameterValue(step: FlowStep) {
@@ -147,7 +147,7 @@ function repeatParameterValue(step: FlowStep) {
   // a form field, treat the clicked option text as a loop parameter value.
   if (step.action !== 'click')
     return undefined;
-  const optionText = step.target?.text?.trim() || step.target?.name?.trim() || step.target?.displayName?.trim();
+  const optionText = optionTextFromStep(step);
   const role = step.target?.role || step.context?.before.target?.role || '';
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const testId = step.target?.testId || step.context?.before.target?.testId || '';
@@ -157,7 +157,7 @@ function repeatParameterValue(step: FlowStep) {
     return undefined;
   const before = step.context?.before;
   const fieldLabel = before?.form?.label || step.target?.scope?.form?.label || step.target?.label;
-  const inDropdown = before?.dialog?.type === 'dropdown' || /dropdown|select/i.test(step.target?.role || '');
+  const inDropdown = before?.dialog?.type === 'dropdown' || /dropdown|select/i.test(step.target?.role || '') || isPopupOptionClick(step);
   if (fieldLabel && inDropdown && !isOrdinaryFormLabelClick(step, fieldLabel, optionText))
     return optionText;
   if (!fieldLabel && inDropdown && isPopupOptionClick(step))
@@ -180,7 +180,27 @@ function isPopupOptionClick(step: FlowStep) {
   const controlType = beforeTarget?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const role = step.target?.role || beforeTarget?.role || '';
   const selector = rawActionSelector(step) || step.target?.selector || step.target?.locator || '';
-  return /option/.test(controlType) || /^(option|menuitem)$/i.test(role) || /ant-select-tree|ant-select-item-option|ant-cascader-menu-item/.test(selector);
+  return /option/.test(controlType) || /^(option|menuitem)$/i.test(role) || /ant-select-tree|ant-select-item-option|ant-cascader-menu-item|internal:attr=\[title=.*>>|internal:role=option\[name=/.test(selector);
+}
+
+function optionTextFromStep(step: FlowStep) {
+  return step.target?.text?.trim() ||
+    step.target?.name?.trim() ||
+    step.target?.displayName?.trim() ||
+    step.context?.before.target?.text?.trim() ||
+    step.context?.before.target?.title?.trim() ||
+    rawTitleFromSelector(rawActionSelector(step)) ||
+    undefined;
+}
+
+function rawTitleFromSelector(selector: string) {
+  const attrTitle = selector.match(/internal:attr=\[title=(['"])(.*?)\1i?\]/);
+  if (attrTitle?.[2])
+    return attrTitle[2].trim();
+  const roleName = selector.match(/internal:role=option\[name=(['"])(.*?)\1i?\]/);
+  if (roleName?.[2])
+    return roleName[2].trim();
+  return undefined;
 }
 
 function normalizedText(value: string) {
@@ -232,6 +252,7 @@ function parameterLabel(step: FlowStep) {
     step.target?.name ||
     step.target?.placeholder ||
     step.target?.text ||
+    rawTitleFromSelector(rawActionSelector(step)) ||
     summarizeTarget(step.target);
 }
 
@@ -257,7 +278,7 @@ function variableNameFor(label: string, value?: string) {
     return 'poolName';
   if (/用户名|账号|account|user/i.test(source))
     return 'username';
-  if (/角色|权限|role/i.test(source))
+  if (/角色|权限|role|管理员|审计员|访客|超级管理员/i.test(source))
     return 'role';
   if (/备注|remark/i.test(source))
     return 'remark';

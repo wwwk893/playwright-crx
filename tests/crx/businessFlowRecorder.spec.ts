@@ -415,6 +415,8 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
 
   await page.getByTestId('stability-wan-select').click();
   await clickVisibleAntDOption(page, 'WAN1');
+  await expect(page.getByTestId('stability-wan-select')).toContainText('WAN1', { timeout: 10_000 });
+  await page.waitForTimeout(250);
   await page.getByPlaceholder('填写使用备注').fill('循环后继续补步骤');
   await page.getByTestId('site-post-save-action').click();
   await expect(page.getByTestId('event-log')).toContainText('post-save');
@@ -463,17 +465,21 @@ async function clickVisibleAntDOption(page: Page, text: string) {
       .last()
       .locator('.ant-select-item-option')
       .filter({ hasText: text });
-  await expect(options.first()).toBeVisible({ timeout: 10_000 });
-  await options.evaluateAll((elements, expectedText) => {
-    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
-    const expected = normalize(expectedText);
-    const element = elements.find(element => normalize(element.getAttribute('title')) === expected || normalize(element.textContent) === expected);
-    if (!element)
-      throw new Error(`AntD option not found exactly: ${expected}`);
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  }, text);
+  const option = options.first();
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.scrollIntoViewIfNeeded();
+  await option.click({ timeout: 5_000 }).catch(async () => {
+    await options.evaluateAll((elements, expectedText) => {
+      const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+      const expected = normalize(expectedText);
+      const element = elements.find(element => normalize(element.getAttribute('title')) === expected || normalize(element.textContent) === expected);
+      if (!element)
+        throw new Error(`AntD option not found exactly: ${expected}`);
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }, text);
+  });
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
 }
 
