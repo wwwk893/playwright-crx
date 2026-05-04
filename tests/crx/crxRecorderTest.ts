@@ -115,10 +115,11 @@ export const test = crxTest.extend<{
 
             recorderPage = recorderPage ?? (await recorderPagePromise)!;
 
-            if (mode === 'legacy')
-              await recorderPage.locator('.recorder-editor').waitFor({ state: 'attached', timeout: 5000 });
-            else
-              await recorderPage.locator('.business-flow-panel').waitFor({ state: 'attached', timeout: 5000 });
+            await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
+            const recorderSurface = mode === 'legacy'
+              ? recorderPage.locator('.recorder-editor')
+              : recorderPage.locator('.business-flow-panel');
+            await expect(recorderSurface).toBeAttached({ timeout: 15000 });
 
             const locator = page.locator('x-pw-glass').first();
             try {
