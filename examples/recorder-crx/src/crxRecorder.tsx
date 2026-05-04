@@ -149,10 +149,6 @@ function pageContextEventSignature(events: PageContextEvent[]) {
   })));
 }
 
-function pageContextEventIds(events: PageContextEvent[]) {
-  return events.map(event => event.id).join('|');
-}
-
 function cloneFlowRecord(flow: BusinessFlow): BusinessFlow {
   const now = new Date().toISOString();
   return {
