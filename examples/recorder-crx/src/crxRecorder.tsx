@@ -511,17 +511,19 @@ export const CrxRecorder: React.FC = ({
       syntheticFlushTimerRef.current = undefined;
     }
 
-    const queuedEvents = pendingSyntheticClickEventsRef.current;
+    const queuedEventsBeforeSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
     // pageContextSidecar intentionally delays click context by 160ms so it can include
     // post-click overlay/toast state. Stop/export must drain that product pipeline,
     // otherwise table rowKey / AntD option context can miss the final flow export.
     const requestedEvents = await requestSettledPageContextEvents();
+    const queuedEventsAfterSettle = pendingSyntheticClickEventsRef.current;
+    pendingSyntheticClickEventsRef.current = [];
     const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
     const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
     const newRequestedEvents = lastKnownContextEventId ? (lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : requestedEvents) : requestedEvents;
     const eventsById = new Map<string, PageContextEvent>();
-    for (const event of [...queuedEvents, ...newRequestedEvents]) {
+    for (const event of [...queuedEventsBeforeSettle, ...queuedEventsAfterSettle, ...newRequestedEvents]) {
       eventsById.set(event.id, event);
       if (event.kind === 'click' && event.wallTime)
         scheduledSyntheticContextEventIdsRef.current.add(event.id);

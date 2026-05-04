@@ -348,9 +348,12 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const selectOption = antdSelectOptionLocator(step);
       if (selectOption)
         return options.parserSafe ? `await ${selectOption}.last().click();` : selectOptionClickSource(selectOption);
-      const popupOption = antdTreeSelectOptionLocator(step) || antdCascaderOptionLocator(step);
-      if (popupOption)
-        return antdSelectOptionDispatchSource(popupOption, popupOptionName(step));
+      const treeOption = antdTreeSelectOptionLocator(step);
+      if (treeOption)
+        return antdPopupOptionDispatchSource(treeOption, popupOptionName(step));
+      const cascaderOption = antdCascaderOptionLocator(step);
+      if (cascaderOption)
+        return antdPopupOptionDispatchSource(cascaderOption, popupOptionName(step), { stabilizeAfterClickMs: 120 });
       const activePopupOption = activeDropdownOptionLocator(step);
       if (activePopupOption)
         return `await ${activePopupOption}.last().click();`;
@@ -593,10 +596,21 @@ function selectTriggerDialog(step: FlowStep) {
   return undefined;
 }
 
-function antdSelectOptionDispatchSource(locator: string, optionName?: string) {
+function antdPopupOptionDispatchSource(locator: string, optionName?: string, options: { stabilizeAfterClickMs?: number } = {}) {
+  const source = antdSelectOptionDispatchSource(locator, optionName, { includeHoverEvents: true });
+  return options.stabilizeAfterClickMs ? `${source}\nawait page.waitForTimeout(${options.stabilizeAfterClickMs});` : source;
+}
+
+function antdSelectOptionDispatchSource(locator: string, optionName?: string, options: { includeHoverEvents?: boolean } = {}) {
+  const hoverLines = options.includeHoverEvents ? [
+    `  element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));`,
+  ] : [];
   if (!optionName) {
     return [
       `await ${locator}.last().evaluate(element => {`,
+      ...hoverLines,
       `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
       `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
       `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
@@ -616,6 +630,7 @@ function antdSelectOptionDispatchSource(locator: string, optionName?: string) {
     `    throw new Error(\`AntD option text mismatch: expected \${expected}, got \${text}\`);`,
     `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled"))`,
     `    throw new Error(\`AntD option is disabled: \${expected}\`);`,
+    ...hoverLines,
     `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
     `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
     `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
