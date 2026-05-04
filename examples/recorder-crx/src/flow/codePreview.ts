@@ -192,7 +192,8 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
 
     if (activeSelectStep && isContextlessOptionTextClickAfterSelect(step, activeSelectStep)) {
       changed = true;
-      const optionText = step.target?.text || step.target?.name || step.target?.displayName;
+      const rawOptionTitle = rawSelectOptionTitle(step);
+      const optionText = completeOptionTextFromSelectQuery(step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle || '', selectQueryForStep(activeSelectStep)) || step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle;
       const activeForm = selectStepFormContext(activeSelectStep);
       return {
         ...step,
@@ -278,14 +279,29 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
     return false;
   if (/^(tree-select-option|cascader-option|menu-item)$/.test(controlType))
     return false;
-  const optionText = step.target?.text || step.target?.name || step.target?.displayName;
+  const optionText = step.target?.text || step.target?.name || step.target?.displayName || rawSelectOptionTitle(step);
   if (!optionText)
     return false;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
-  if (selector && !selector.includes('internal:text') && !/getByText|text=/.test(step.sourceCode || ''))
+  if (selector && !selector.includes('internal:text') && !/getByText|text=/.test(step.sourceCode || '') && !/internal:attr=\[title=.*>>/.test(selector))
     return false;
-  const query = String(selectStep.value || rawAction(selectStep.rawAction).text || rawAction(selectStep.rawAction).value || '').trim();
-  return !query || optionText.includes(query);
+  const query = selectQueryForStep(selectStep);
+  return !query || optionText.includes(query) || !!completeOptionTextFromSelectQuery(optionText, query);
+}
+
+function selectQueryForStep(selectStep: FlowStep) {
+  return String(selectStep.value || rawAction(selectStep.rawAction).text || rawAction(selectStep.rawAction).value || '').trim();
+}
+
+function completeOptionTextFromSelectQuery(optionText: string, query: string) {
+  if (!optionText || !query || optionText.includes(query))
+    return undefined;
+  for (let length = Math.min(optionText.length, query.length); length >= 2; length--) {
+    const queryPrefix = query.slice(0, length);
+    if (optionText.endsWith(queryPrefix))
+      return `${optionText}${query.slice(length)}`;
+  }
+  return undefined;
 }
 
 function emitRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment) {
@@ -435,12 +451,12 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const testIdLocator = globalTestIdLocator(step);
       if (testIdLocator)
         return `await ${testIdLocator}.click();`;
+      const selectOption = hasPageContextAntdOption(step) ? antdSelectOptionLocator(step) : undefined;
+      if (selectOption)
+        return options.parserSafe ? `await ${selectOption}.last().click();` : antdSelectOptionClickSource(step, selectOption);
       const rawSelectOption = rawSelectOptionClickSource(step);
       if (rawSelectOption)
         return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;
-      const selectOption = antdSelectOptionLocator(step);
-      if (selectOption)
-        return options.parserSafe ? `await ${selectOption}.last().click();` : selectOptionClickSource(selectOption);
       const treeOption = antdTreeSelectOptionLocator(step);
       if (treeOption)
         return antdPopupOptionDispatchSource(treeOption, popupOptionName(step));
@@ -527,6 +543,11 @@ function antdSelectOptionLocator(step: FlowStep) {
   if (!optionName)
     return undefined;
   return `page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option").filter({ hasText: ${stringLiteral(optionName)} })`;
+}
+
+function hasPageContextAntdOption(step: FlowStep) {
+  const target = step.context?.before.target;
+  return !!target && (target.framework === 'antd' || target.framework === 'procomponents') && /^(select-option|tree-select-option|cascader-option)$/.test(target.controlType || '');
 }
 
 function isAntdSelectOptionStep(step: FlowStep) {
@@ -644,9 +665,9 @@ function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: 
 function antdSelectOptionName(step: FlowStep) {
   const contextTarget = step.context?.before.target;
   const rawTitle = rawSelectOptionTitle(step);
-  return contextTarget?.text ||
+  return contextTarget?.title ||
+    contextTarget?.text ||
     contextTarget?.normalizedText ||
-    contextTarget?.title ||
     contextTarget?.ariaLabel ||
     step.target?.text ||
     step.target?.name ||
@@ -671,12 +692,16 @@ function antdSelectFieldLocator(step: FlowStep) {
   if (!label)
     return undefined;
   const dialog = selectTriggerDialog(step);
-  const root = dialog?.testId ?
-    `page.getByTestId(${stringLiteral(dialog.testId)})` :
-    dialog?.title ?
-      `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).filter({ hasText: ${stringLiteral(dialog.title)} })` :
-      'page';
+  const root = dialogRootLocator(dialog);
   return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(label)} }).locator(${stringLiteral('.ant-select-selector')}).first()`;
+}
+
+function dialogRootLocator(dialog?: FlowDialogScope) {
+  if (dialog?.testId)
+    return `page.getByTestId(${stringLiteral(dialog.testId)})`;
+  if (dialog?.title)
+    return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).filter({ hasText: ${stringLiteral(dialog.title)} })`;
+  return 'page';
 }
 
 function selectTriggerDialog(step: FlowStep) {
@@ -833,10 +858,14 @@ function fieldLocator(step: FlowStep) {
   const controlType = step.context?.before.target?.controlType;
   if (label && (controlType === 'select' || controlType === 'tree-select' || step.target?.role === 'combobox'))
     return antdSelectFieldLocator(step) || `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;
-  if (label)
-    return `page.getByLabel(${stringLiteral(label)})`;
-  if (step.target?.placeholder)
-    return `page.getByPlaceholder(${stringLiteral(step.target.placeholder)})`;
+  if (label) {
+    const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);
+    return `${root}.getByLabel(${stringLiteral(label)})`;
+  }
+  if (step.target?.placeholder) {
+    const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);
+    return `${root}.getByPlaceholder(${stringLiteral(step.target.placeholder)})`;
+  }
   return undefined;
 }
 

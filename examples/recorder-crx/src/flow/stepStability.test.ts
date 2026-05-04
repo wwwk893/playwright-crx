@@ -802,6 +802,107 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat steps inherit dialog opened by the preceding create action',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'site-ip-address-pool-create-button', text: '新 建' },
+            context: { eventId: 'ctx-open', capturedAt: 1000, before: { target: { tag: 'button', testId: 'site-ip-address-pool-create-button', text: '新 建' } }, after: { dialog: { type: 'modal', title: '新建IPv4地址池', visible: true } } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { role: 'textbox', label: '地址池名称', placeholder: '地址池名称' },
+            context: { eventId: 'ctx-name', capturedAt: 1200, before: { form: { label: '地址池名称', name: 'name' }, target: { tag: 'input', role: 'textbox', placeholder: '地址池名称', controlType: 'input' } } },
+            value: 'test1',
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { role: 'combobox', name: '* WAN口', label: 'WAN口' },
+            rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="* WAN口"i]' } },
+            assertions: [],
+          },
+        ],
+        repeatSegments: [{ id: 'r001', name: '批量创建IPv4地址池', stepIds: ['s001', 's002', 's003'], parameters: [], rows: [{ id: 'row-1', values: {} }], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      assert(code.includes('新建IPv4地址池'), 'repeat field locators should stay scoped to the modal opened by the create step');
+      assert(code.includes('filter({ hasText: "新建IPv4地址池" })'), 'repeat select trigger should use modal-scoped locator');
+    },
+  },
+  {
+    name: 'late synthetic AntD option upgrades matching truncated raw recorder click instead of duplicating it',
+    run: () => {
+      const wallTime = Date.now() - 2000;
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              role: 'combobox',
+              name: '* WAN口',
+              label: 'WAN口',
+              scope: {
+                dialog: { title: '新建网络资源', type: 'modal', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+              },
+            },
+            rawAction: { wallTime, action: { name: 'click', selector: 'internal:role=combobox[name="* WAN口"i]' } },
+            sourceCode: `await page.getByRole('combobox', { name: '* WAN口' }).click();`,
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: {
+              text: 'edge-lab:WAN-extra-',
+              locator: 'internal:text="edge-lab:WAN-extra-"i',
+            },
+            rawAction: { wallTime: wallTime + 660, action: { name: 'click', selector: 'internal:text="edge-lab:WAN-extra-"i' } },
+            sourceCode: `await page.getByText('edge-lab:WAN-extra-').click();`,
+            assertions: [],
+          },
+        ],
+      };
+      const event = pageClickEventWithTarget('ctx-late-wan-option', wallTime + 700, {
+        tag: 'div',
+        role: 'option',
+        title: 'edge-lab:WAN-extra-18',
+        text: 'edge-lab:WAN-extra-18',
+        normalizedText: 'edge-lab:WAN-extra-18',
+        framework: 'procomponents',
+        controlType: 'select-option',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      event.before.form = { label: 'WAN口', name: 'wan' };
+      event.before.dialog = { type: 'dropdown', visible: true };
+      const merged = appendSyntheticPageContextSteps(flow, [event]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+      assertEqual(merged.steps.length, 2);
+      assertEqual(merged.steps[1].target?.text, 'edge-lab:WAN-extra-18');
+      assert(code.includes('AntD Select virtual dropdown replay workaround'), 'upgraded option should use stable AntD replay');
+      assert(!code.includes(`getByText('edge-lab:WAN-extra-')`) && !code.includes(`getByText("edge-lab:WAN-extra-")`), 'truncated raw text click should be upgraded, not replayed');
+    },
+  },
+  {
     name: 'late dropdown option page context is inserted immediately after its trigger',
     run: () => {
       const wallTime = Date.now() - 2000;
@@ -2001,6 +2102,75 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'contextless AntD option text truncated by highlight inherits select field and completes from query',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'fill',
+            target: {
+              role: 'combobox',
+              name: '* WAN口',
+              label: 'WAN口',
+              text: '选择一个WAN口',
+              scope: {
+                dialog: { title: '新建网络资源', type: 'modal', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+              },
+            },
+            value: 'WAN-extra-18',
+            context: {
+              eventId: 'ctx-select-fill-truncated',
+              capturedAt: 1000,
+              before: {
+                dialog: { title: '新建网络资源', type: 'modal', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+                target: {
+                  tag: 'div',
+                  text: '选择一个WAN口',
+                  normalizedText: '选择一个WAN口',
+                  framework: 'procomponents',
+                  controlType: 'select',
+                },
+              },
+            },
+            sourceCode: `await page.getByRole('combobox', { name: '* WAN口' }).fill('WAN-extra-18');`,
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: {
+              text: 'edge-lab:WAN-extra-',
+              locator: 'internal:text="edge-lab:WAN-extra-"s',
+            },
+            rawAction: {
+              action: {
+                name: 'click',
+                selector: 'internal:text="edge-lab:WAN-extra-"s',
+              },
+            },
+            sourceCode: `await page.getByText('edge-lab:WAN-extra-').click();`,
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+      assert(optionStep.includes('AntD Select virtual dropdown replay workaround'), 'truncated option should still use AntD select replay workaround');
+      assert(optionStep.includes('edge-lab:WAN-extra-18'), 'truncated option text should be completed from the select search query');
+      assert(!optionStep.includes(`getByText('edge-lab:WAN-extra-')`), 'truncated global text source should not be reused');
+    },
+  },
+  {
     name: 'generic ARIA option does not use AntD select replay',
     run: () => {
       const flow: BusinessFlow = {
@@ -2403,6 +2573,36 @@ test('demo', async ({ page }) => {
       const exportedCode = generateBusinessFlowPlaywrightCode(flow);
       assert(exportedCode.includes('evaluateAll'), 'exported Playwright code should keep the AntD dispatch workaround');
       assertEqual(countBusinessFlowPlaybackActions(flow), 1);
+    },
+  },
+  {
+    name: 'dropdown option context prefers complete title over truncated highlighted text',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: { selector: 'internal:role=option[name="edge-lab:WAN-extra-18"i]' },
+          rawAction: { wallTime: 1000, action: { name: 'click', selector: 'internal:role=option[name="edge-lab:WAN-extra-18"i]' } },
+          assertions: [],
+        }],
+      };
+      const merged = mergePageContextIntoFlow(flow, [pageClickEventWithTarget('ctx-wan-extra', 1000, {
+        tag: 'div',
+        role: 'option',
+        title: 'edge-lab:WAN-extra-18',
+        text: 'edge-lab:WAN-extra-',
+        normalizedText: 'edge-lab:WAN-extra-',
+        framework: 'antd',
+        controlType: 'select-option',
+      } as ElementContext)]);
+
+      assertEqual(merged.steps[0].target?.text, 'edge-lab:WAN-extra-18');
+      assertEqual(merged.steps[0].target?.displayName, 'edge-lab:WAN-extra-18');
     },
   },
   {

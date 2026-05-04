@@ -225,6 +225,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   const recorder = cloneRecorderState(base);
   const steps = [...base.steps];
   const addedStepIds: string[] = [];
+  const upgradedStepIds: string[] = [];
   const skippedEventIds: string[] = [];
   const requestedInsertAfterStepId = options.insertAfterStepId;
   let cursorStepId = options.insertAfterStepId;
@@ -237,13 +238,20 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       skippedEventIds.push(event.id);
       continue;
     }
+    const recordedOptionIndex = dropdownRecordedOptionStepIndexForEvent(steps, event);
+    if (recordedOptionIndex >= 0) {
+      steps[recordedOptionIndex] = upgradeRecordedDropdownOptionStep(steps[recordedOptionIndex], event);
+      upgradedStepIds.push(steps[recordedOptionIndex].id);
+      cursorStepId = steps[recordedOptionIndex].id;
+      continue;
+    }
     const step = buildSyntheticClickStep(recorder, event);
     const insertAt = cursorStepId ? Math.max(0, steps.findIndex(candidate => candidate.id === cursorStepId) + 1) : syntheticInsertionIndexForEvent(steps, event);
     steps.splice(insertAt, 0, step);
     addedStepIds.push(step.id);
     cursorStepId = step.id;
   }
-  if (!addedStepIds.length) {
+  if (!addedStepIds.length && !upgradedStepIds.length) {
     return {
       flow,
       insertedStepIds: [],
@@ -259,6 +267,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   };
   emitDiagnostic({ diagnostics: options.diagnostics }, 'merge.synthetic-page-click', '页面侧 click 已根据上下文合成业务步骤', {
     addedStepIds,
+    upgradedStepIds,
     skippedEventIds,
     eventIds: events.map(event => event.id),
     insertAfterStepId: requestedInsertAfterStepId,
@@ -267,7 +276,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   return {
     flow: withRecorderState(base, recorder),
     insertedStepIds: addedStepIds,
-    upgradedStepIds: [],
+    upgradedStepIds,
     skippedEventIds,
   };
 }
@@ -281,6 +290,67 @@ export function createAssertion(type: FlowAssertionType, id: string, step?: Flow
     expected: defaultExpected(type, step),
     enabled: true,
   };
+}
+
+function dropdownRecordedOptionStepIndexForEvent(steps: FlowStep[], event: PageContextEvent) {
+  if (!isDropdownOptionContext(event.before.target))
+    return -1;
+  const eventText = dropdownOptionComparableText(event.before.target);
+  if (!eventText)
+    return -1;
+  const eventWallTime = event.wallTime;
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    if (step.action !== 'click' || step.context?.before.target)
+      continue;
+    if (typeof eventWallTime === 'number') {
+      const wallTime = stepWallTime(step);
+      if (typeof wallTime !== 'number' || Math.abs(wallTime - eventWallTime) > 1500)
+        continue;
+    }
+    const candidateText = recordedOptionComparableText(step);
+    if (!candidateText)
+      continue;
+    if (eventText.includes(candidateText) || candidateText.includes(eventText))
+      return index;
+  }
+  return -1;
+}
+
+function upgradeRecordedDropdownOptionStep(step: FlowStep, event: PageContextEvent): FlowStep {
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label);
+  const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
+  return {
+    ...step,
+    target,
+    context: {
+      ...step.context,
+      eventId: event.id,
+      capturedAt: event.wallTime ?? Date.now(),
+      before: event.before,
+      after: event.after,
+    },
+    rawAction: {
+      ...asRecord(step.rawAction),
+      syntheticContextEventId: event.id,
+      syntheticContextEventSignature: pageContextTargetSignature(event.before.target),
+      syntheticContextEventWallTime: event.wallTime,
+    },
+    sourceCode: syntheticClickSourceCode(target, subject),
+  };
+}
+
+function dropdownOptionComparableText(target?: ElementContext) {
+  return normalizedComparableText(target?.title || target?.selectedOption || target?.ariaLabel || target?.text || target?.normalizedText || '');
+}
+
+function recordedOptionComparableText(step: FlowStep) {
+  return normalizedComparableText(step.target?.text || step.target?.name || step.target?.displayName || rawTextFromSelector(recorderSelectorForStep(step)) || '');
+}
+
+function rawTextFromSelector(selector: string) {
+  const match = selector.match(/internal:(?:text|attr=\[title)=\[?\"([^\"]+)/) || selector.match(/internal:text=\"([^\"]+)/) || selector.match(/name=\"([^\"]+)/);
+  return match?.[1];
 }
 
 function syntheticInsertionIndexForEvent(steps: FlowStep[], event: PageContextEvent) {
@@ -696,16 +766,27 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
 function flowTargetFromPageContext(target?: ElementContext, formLabel?: string): FlowTarget | undefined {
   if (!target)
     return undefined;
+  const contextText = stableElementText(target);
   return {
     testId: target.testId,
     role: target.role,
-    name: target.ariaLabel || target.text || target.title,
-    displayName: target.text || target.ariaLabel || target.placeholder || target.testId || formLabel,
+    name: target.ariaLabel || contextText || target.title,
+    displayName: contextText || target.ariaLabel || target.placeholder || target.testId || formLabel,
     label: formLabel,
     placeholder: target.placeholder,
-    text: target.text,
+    text: contextText,
     raw: target,
   };
+}
+
+function stableElementText(target: ElementContext) {
+  const text = target.text?.trim();
+  const title = target.title?.trim();
+  if (/^(select-option|tree-select-option|cascader-option|menu-item)$/.test(target.controlType || '') || /^(option|treeitem|menuitem)$/.test(target.role || '')) {
+    if (title && (!text || title.includes(text) || title.length > text.length))
+      return title;
+  }
+  return text || title;
 }
 
 function syntheticClickSourceCode(target: FlowTarget | undefined, fallback: string) {

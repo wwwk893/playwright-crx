@@ -103,6 +103,8 @@ export const test = crxTest.extend<{
 
             let recorderPage = context.pages().find(p => p.url().startsWith(`chrome-extension://${extensionId}`));
             const recorderPagePromise = recorderPage ? undefined : context.waitForEvent('page');
+            if (recorderPage)
+              await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
 
             await page.bringToFront();
             await extensionServiceWorker.evaluate(async () => {

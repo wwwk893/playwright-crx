@@ -104,11 +104,12 @@ function upgradeStepTargetFromContext(step: FlowStep, context: StepContextSnapsh
 function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: ElementContext, context: StepContextSnapshot): FlowTarget | undefined {
   const contextScope = scopeFromContext(context);
   const locatorHint = locatorHintFromContext(contextTarget, contextScope);
+  const contextText = stableElementText(contextTarget);
   if (!target)
     return flowTargetFromElementContext(contextTarget, contextScope, locatorHint);
 
   const hasBetterTestId = !target.testId && contextTarget.testId;
-  const hasBetterDisplayName = !target.displayName && (contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId);
+  const hasBetterDisplayName = !target.displayName && (contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId);
   const hasBetterRole = !target.role && contextTarget.role;
   const hasBetterText = !target.text && contextTarget.text;
   const hasBetterPlaceholder = !target.placeholder && contextTarget.placeholder;
@@ -116,18 +117,21 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
   const hasBetterScope = !!contextScope && !target.scope;
   const hasBetterLocatorHint = !!locatorHint && !target.locatorHint;
 
-  if (!hasBetterTestId && !hasBetterDisplayName && !hasBetterRole && !hasBetterText && !hasBetterPlaceholder && !hasBetterLabel && !hasBetterScope && !hasBetterLocatorHint)
+  const preferredContextText = preferContextOptionText(contextTarget, target.text || target.name || target.displayName);
+  const hasBetterOptionText = !!preferredContextText;
+
+  if (!hasBetterTestId && !hasBetterDisplayName && !hasBetterRole && !hasBetterText && !hasBetterPlaceholder && !hasBetterLabel && !hasBetterScope && !hasBetterLocatorHint && !hasBetterOptionText)
     return target;
 
   return {
     ...target,
     testId: target.testId || contextTarget.testId,
     role: target.role || contextTarget.role,
-    name: target.name || contextTarget.ariaLabel || contextTarget.text || contextTarget.title,
-    displayName: target.displayName || contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId,
-    text: target.text || contextTarget.text,
+    name: target.name && !preferredContextText ? target.name : contextTarget.ariaLabel || preferredContextText || contextText || contextTarget.title,
+    displayName: target.displayName && !preferredContextText ? target.displayName : preferredContextText || contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || target.displayName,
     label: target.label || contextScope?.form?.label,
     placeholder: target.placeholder || contextTarget.placeholder,
+    text: target.text && !preferredContextText ? target.text : preferredContextText || contextText,
     scope: target.scope || contextScope,
     locatorHint: target.locatorHint || locatorHint,
     raw: {
@@ -138,18 +142,43 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
 }
 
 function flowTargetFromElementContext(contextTarget: ElementContext, scope?: FlowTargetScope, locatorHint?: LocatorHint): FlowTarget {
+  const contextText = stableElementText(contextTarget);
   return {
     testId: contextTarget.testId,
     role: contextTarget.role,
-    name: contextTarget.ariaLabel || contextTarget.text || contextTarget.title,
-    displayName: contextTarget.text || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || scope?.form?.label,
+    name: contextTarget.ariaLabel || contextText || contextTarget.title,
+    displayName: contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || scope?.form?.label,
     label: scope?.form?.label,
     placeholder: contextTarget.placeholder,
-    text: contextTarget.text,
+    text: contextText,
     scope,
     locatorHint,
     raw: contextTarget,
   };
+}
+
+function stableElementText(target: ElementContext) {
+  const text = target.text?.trim();
+  const title = target.title?.trim();
+  if (isOptionLikeElement(target)) {
+    if (title && (!text || title.includes(text) || title.length > text.length))
+      return title;
+  }
+  return text || title;
+}
+
+function preferContextOptionText(target: ElementContext, current?: string) {
+  if (!isOptionLikeElement(target))
+    return undefined;
+  const title = target.title?.trim();
+  const trimmedCurrent = current?.trim();
+  if (title && trimmedCurrent && title !== trimmedCurrent && (title.includes(trimmedCurrent) || title.length > trimmedCurrent.length))
+    return title;
+  return undefined;
+}
+
+function isOptionLikeElement(target: ElementContext) {
+  return /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(target.controlType || '') || /^(option|treeitem|menuitem)$/.test(target.role || '');
 }
 
 function scopeFromContext(context: StepContextSnapshot): FlowTargetScope | undefined {

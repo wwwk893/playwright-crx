@@ -188,7 +188,11 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
   await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
-  await page.getByText('开启代理ARP').click();
+  const networkResourceDialog = page.getByRole('dialog', { name: '新建网络资源' });
+  const arpProxyItem = networkResourceDialog.locator('.ant-form-item').filter({ hasText: '能力开关' });
+  const arpProxyCheckbox = arpProxyItem.getByRole('checkbox', { name: '开启代理ARP' });
+  await arpProxyItem.getByText('开启代理ARP').click();
+  await expect(arpProxyCheckbox).toBeChecked();
   await page.getByText('启用健康检查').click();
   await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
   await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
