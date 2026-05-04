@@ -276,7 +276,7 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   if (/^(checkbox|radio|switch)$/.test(controlType) || /^(checkbox|radio|switch)$/.test(step.target?.role || ''))
     return false;
-  if (/^(select-option|tree-select-option|cascader-option|menu-item)$/.test(controlType))
+  if (/^(tree-select-option|cascader-option|menu-item)$/.test(controlType))
     return false;
   const optionText = step.target?.text || step.target?.name || step.target?.displayName;
   if (!optionText)
