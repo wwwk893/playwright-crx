@@ -200,6 +200,50 @@ File:
 
 - `tests/crx/crxRecorderTest.ts`
 
+### Second GPT-5.5 Pro review — active popup fallback should also use exact dispatch
+
+Source:
+
+- GPT-5.5 Pro second review, verdict `APPROVE_WITH_NON_BLOCKING_NOTES`.
+
+Problem:
+
+The main parameterized dropdown paths already used exact `evaluateAll((elements, expectedText) => ...)` matching, but `renderRawActionSource()` still had an active-popup fallback that emitted `filter({ hasText: ... }).last().click()`. The selector was scoped to visible AntD popups, so this was not a merge blocker, but it could still choose a longer partial option such as `NAT集群A-备份` when the expected option is `NAT集群A`.
+
+Resolution:
+
+- Changed the active-popup fallback to call `antdPopupOptionDispatchSource(activePopupOption, popupOptionName(step))` instead of `.last().click()`.
+- Strengthened flow regression test:
+  - `dropdown tree and cascader option clicks are scoped to the active popup instead of page text`
+  - now requires `evaluateAll((elements, expectedText) => ...)` and `AntD option text mismatch`, and rejects partial `.last().click()` fallback.
+
+Files:
+
+- `examples/recorder-crx/src/flow/codePreview.ts`
+- `examples/recorder-crx/src/flow/stepStability.test.ts`
+
+### Second GPT-5.5 Pro review — submit relocation should preserve nearby trigger/value adjacency
+
+Source:
+
+- GPT-5.5 Pro second review, verdict `APPROVE_WITH_NON_BLOCKING_NOTES`.
+
+Problem:
+
+The submit/save relocation fix moved timed steps that appear after a later synthetic submit back before that submit. That protects against save-before-fields false greens, but an untimed trigger immediately before an earlier timed dependent value could theoretically remain after the save while only the timed dependent value moved.
+
+Resolution:
+
+- Updated `moveEarlierTimedStepsBeforeLaterSyntheticClicks()` to move contiguous untimed recorded predecessors together with an earlier timed step when relocating around a later synthetic submit/save/confirm click.
+- It still stops at timed steps, synthetic clicks, and non-recorded steps, so it does not become a global wall-time reorder.
+- Added flow regression test:
+  - `synthetic submit relocation keeps popup trigger and option adjacency`.
+
+Files:
+
+- `examples/recorder-crx/src/flow/flowBuilder.ts`
+- `examples/recorder-crx/src/flow/stepStability.test.ts`
+
 ### Accepted limitation — human-like smoke remains pragmatic hybrid
 
 Source:
@@ -216,7 +260,7 @@ Accepted for this PR. The test should be described as `human-like hybrid smoke`,
 
 ## Verification completed in this follow-up
 
-- `npm run test:flow --prefix examples/recorder-crx` → `104 flow stability tests passed`
+- `npm run test:flow --prefix examples/recorder-crx` → `105 flow stability tests passed`
 - `npm run build:examples:recorder` → passed
 - `npm run build:tests` → passed
 - `xvfb-run -a npx playwright test -c tests/playwright.config.ts tests/crx/businessFlowRecorder.spec.ts --project=Chrome --grep '@proform-fields|@ipv4-pool' --workers=1 --repeat-each=5 --reporter=line --global-timeout=700000` → `10 passed`

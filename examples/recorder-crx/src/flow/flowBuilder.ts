@@ -1047,14 +1047,28 @@ function moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps: FlowStep[]) {
       continue;
     const before = ordered.slice(0, index);
     const after = ordered.slice(index + 1);
-    const earlierAfterSynthetic = after.filter(step => {
-      const wallTime = stepWallTime(step);
-      return typeof wallTime === 'number' && wallTime < syntheticWallTime;
-    });
-    if (!earlierAfterSynthetic.length)
+    const earlierIndexes = new Set<number>();
+    for (let afterIndex = 0; afterIndex < after.length; afterIndex++) {
+      const wallTime = stepWallTime(after[afterIndex]);
+      if (typeof wallTime !== 'number' || wallTime >= syntheticWallTime)
+        continue;
+      earlierIndexes.add(afterIndex);
+      for (let cursor = afterIndex - 1; cursor >= 0; cursor--) {
+        if (earlierIndexes.has(cursor))
+          continue;
+        if (typeof stepWallTime(after[cursor]) === 'number')
+          break;
+        if (isSyntheticClickStep(after[cursor]))
+          break;
+        if (after[cursor].kind !== 'recorded')
+          break;
+        earlierIndexes.add(cursor);
+      }
+    }
+    if (!earlierIndexes.size)
       continue;
-    const earlierIds = new Set(earlierAfterSynthetic.map(step => step.id));
-    const laterOrUntimed = after.filter(step => !earlierIds.has(step.id));
+    const earlierAfterSynthetic = after.filter((_, afterIndex) => earlierIndexes.has(afterIndex));
+    const laterOrUntimed = after.filter((_, afterIndex) => !earlierIndexes.has(afterIndex));
     ordered = [...before, ...earlierAfterSynthetic, syntheticStep, ...laterOrUntimed];
     index += earlierAfterSynthetic.length;
   }

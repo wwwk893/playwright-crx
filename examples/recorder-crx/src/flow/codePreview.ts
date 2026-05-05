@@ -491,7 +491,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         return antdPopupOptionDispatchSource(cascaderOption, popupOptionName(step), { stabilizeAfterClickMs: 120 });
       const activePopupOption = activeDropdownOptionLocator(step);
       if (activePopupOption)
-        return `await ${activePopupOption}.last().click();`;
+        return antdPopupOptionDispatchSource(activePopupOption, popupOptionName(step));
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;

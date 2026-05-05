@@ -1661,6 +1661,63 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'synthetic submit relocation keeps popup trigger and option adjacency',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('network-resource-add', 1000),
+      ], [], {});
+      const syntheticSave: BusinessFlow = {
+        ...initial,
+        steps: [
+          ...initial.steps,
+          {
+            id: 's002',
+            order: 2,
+            kind: 'manual',
+            sourceActionIds: [],
+            action: 'click',
+            target: { testId: 'network-resource-save', role: 'button', name: '保存', text: '保存' },
+            rawAction: {
+              syntheticContextEventId: 'ctx-final-save',
+              syntheticContextEventWallTime: 3000,
+            },
+            context: {
+              eventId: 'ctx-final-save',
+              capturedAt: 3000,
+              before: {
+                target: {
+                  tag: 'button',
+                  role: 'button',
+                  testId: 'network-resource-save',
+                  text: '保存',
+                  normalizedText: '保存',
+                },
+              },
+            },
+            sourceCode: 'await page.getByTestId("network-resource-save").click();',
+            assertions: [],
+          },
+        ],
+      };
+      const merged = mergeActionsIntoFlow(syntheticSave, [
+        testIdClickAction('network-resource-add', 1000),
+        clickAction('打开关联VRF'),
+        fillActionWithWallTime('关联VRF', '生产VRF', 2000),
+      ], [], {
+        appendNewActions: true,
+        insertAfterStepId: 's002',
+        insertBaseActionCount: 1,
+      });
+
+      assertEqual(merged.steps.map(step => step.target?.testId || step.target?.name || step.target?.text || step.value), [
+        'network-resource-add',
+        '打开关联VRF',
+        '生产VRF',
+        'network-resource-save',
+      ]);
+    },
+  },
+  {
     name: 'late recorded fields are restored before a later synthetic submit click',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -2737,6 +2794,9 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'popup option should be scoped to the active AntD dropdown');
       assert(firstStep.includes('.ant-select-tree-node-content-wrapper'), 'tree-select option lookup should be available');
       assert(firstStep.includes('.ant-cascader-menu-item'), 'cascader option lookup should be available');
+      assert(firstStep.includes('evaluateAll((elements, expectedText)'), 'active popup option should validate exact visible option text');
+      assert(firstStep.includes('AntD option text mismatch'), 'active popup option should fail on partial or wrong text matches');
+      assert(!firstStep.includes('filter({ hasText: "华东生产区" }).last().click()'), 'active dropdown fallback must not use partial last-match clicks');
       assert(!firstStep.includes('page.getByText("华东生产区")'), 'active dropdown option should not replay through global page text');
     },
   },
