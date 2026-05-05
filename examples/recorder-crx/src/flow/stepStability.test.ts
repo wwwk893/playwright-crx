@@ -1601,6 +1601,192 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'recorded action batch preserves recorder order when wallTime is skewed',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('network-resource-add', 1000),
+        testIdClickAction('network-resource-save', 1100),
+        fillActionWithWallTime('服务名称', 'https-admin', 3000),
+        fillActionWithWallTime('监听端口', '8443', 3100),
+        fillActionWithWallTime('填写策略备注', 'ProFormField 全量组合录制', 3200),
+        testIdClickAction('network-resource-save', 2000),
+      ], [], {});
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assertEqual(flow.steps.map(step => step.target?.testId || step.value), [
+        'network-resource-add',
+        'network-resource-save',
+        'https-admin',
+        '8443',
+        'ProFormField 全量组合录制',
+        'network-resource-save',
+      ]);
+      assertTextInOrder(code, [
+        'network-resource-add',
+        'network-resource-save',
+        'https-admin',
+        '8443',
+        'ProFormField 全量组合录制',
+        'network-resource-save',
+      ]);
+    },
+  },
+  {
+    name: 'recorded action batch with first untimed draft uses first timed draft for synthetic-relative insertion',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickActionWithWallTime('打开新建弹窗', 1000),
+      ], [], {});
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [
+        pageClickEventWithTarget('ctx-cascader-option', 3000, {
+          tag: 'div',
+          role: 'menuitem',
+          controlType: 'cascader-option',
+          text: '上海',
+          normalizedText: '上海',
+        }),
+      ]);
+      const merged = mergeActionsIntoFlow(withSynthetic, [
+        clickActionWithWallTime('打开新建弹窗', 1000),
+        clickAction('无时间戳动作'),
+        fillActionWithWallTime('关联VRF', '生产', 2000),
+      ], [], {});
+
+      assertEqual(merged.steps.map(step => step.target?.name || step.value || step.target?.text), [
+        '打开新建弹窗',
+        '无时间戳动作',
+        '生产',
+        '上海',
+      ]);
+    },
+  },
+  {
+    name: 'synthetic submit relocation keeps popup trigger and option adjacency',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('network-resource-add', 1000),
+      ], [], {});
+      const syntheticSave: BusinessFlow = {
+        ...initial,
+        steps: [
+          ...initial.steps,
+          {
+            id: 's002',
+            order: 2,
+            kind: 'manual',
+            sourceActionIds: [],
+            action: 'click',
+            target: { testId: 'network-resource-save', role: 'button', name: '保存', text: '保存' },
+            rawAction: {
+              syntheticContextEventId: 'ctx-final-save',
+              syntheticContextEventWallTime: 3000,
+            },
+            context: {
+              eventId: 'ctx-final-save',
+              capturedAt: 3000,
+              before: {
+                target: {
+                  tag: 'button',
+                  role: 'button',
+                  testId: 'network-resource-save',
+                  text: '保存',
+                  normalizedText: '保存',
+                },
+              },
+            },
+            sourceCode: 'await page.getByTestId("network-resource-save").click();',
+            assertions: [],
+          },
+        ],
+      };
+      const merged = mergeActionsIntoFlow(syntheticSave, [
+        testIdClickAction('network-resource-add', 1000),
+        clickAction('打开关联VRF'),
+        fillActionWithWallTime('关联VRF', '生产VRF', 2000),
+      ], [], {
+        appendNewActions: true,
+        insertAfterStepId: 's002',
+        insertBaseActionCount: 1,
+      });
+
+      assertEqual(merged.steps.map(step => step.target?.testId || step.target?.name || step.target?.text || step.value), [
+        'network-resource-add',
+        '打开关联VRF',
+        '生产VRF',
+        'network-resource-save',
+      ]);
+    },
+  },
+  {
+    name: 'late recorded fields are restored before a later synthetic submit click',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('network-resource-add', 1000),
+        testIdClickAction('network-resource-save', 1100),
+        fillActionWithWallTime('地址池名称', 'pool-proform-alpha', 1200),
+      ], [], {});
+      const withSyntheticSubmit: BusinessFlow = {
+        ...initial,
+        steps: [
+          ...initial.steps,
+          {
+            ...initial.steps[1],
+            id: 's004',
+            order: 4,
+            kind: 'manual',
+            sourceActionIds: [],
+            rawAction: {
+              syntheticContextEventId: 'ctx-final-save',
+              syntheticContextEventWallTime: 3000,
+            },
+            context: {
+              eventId: 'ctx-final-save',
+              capturedAt: 3000,
+              before: {
+                target: {
+                  tag: 'button',
+                  role: 'button',
+                  testId: 'network-resource-save',
+                  text: '保 存',
+                  normalizedText: '保 存',
+                },
+              },
+            },
+            target: {
+              testId: 'network-resource-save',
+              role: 'button',
+              name: '保 存',
+              text: '保 存',
+            },
+            sourceCode: 'await page.getByTestId("network-resource-save").click();',
+          },
+        ],
+      };
+      const merged = mergeActionsIntoFlow(withSyntheticSubmit, [
+        testIdClickAction('network-resource-add', 1000),
+        testIdClickAction('network-resource-save', 1100),
+        fillActionWithWallTime('地址池名称', 'pool-proform-alpha', 1200),
+        fillActionWithWallTime('探测地址', 'https://probe.example/health', 2000),
+        fillActionWithWallTime('服务名称', 'https-admin', 2100),
+        fillActionWithWallTime('监听端口', '8443', 2200),
+      ], [], {
+        appendNewActions: true,
+        insertBaseActionCount: 3,
+      });
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertTextInOrder(code, [
+        'network-resource-add',
+        'network-resource-save',
+        'pool-proform-alpha',
+        'https://probe.example/health',
+        'https-admin',
+        '8443',
+        'network-resource-save',
+      ]);
+    },
+  },
+  {
     name: 'synthetic page context click orders before recorded fill using end wall time',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -1695,6 +1881,58 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat segment parameterized dropdown option stays scoped to the active popup',
+    run: () => {
+      const flow: BusinessFlow = createEmptyBusinessFlow({
+        flow: { id: 'repeat-popup', name: 'repeat popup option' },
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: { label: '关联VRF', role: 'combobox' },
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "关联VRF" }).locator(".ant-select-selector").first().click();`,
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: { text: '生产VRF' },
+          sourceCode: `await page.getByText("生产VRF").click();`,
+          assertions: [],
+        }],
+        repeatSegments: [{
+          id: 'repeat-1',
+          name: '批量选择VRF',
+          stepIds: ['s001', 's002'],
+          parameters: [{
+            id: 'p-vrf',
+            label: '生产VRF',
+            sourceStepId: 's002',
+            currentValue: '生产VRF',
+            variableName: 'vrf',
+            enabled: true,
+          }],
+          rows: [{ id: 'row-1', values: { 'p-vrf': '生产VRF' } }],
+          createdAt: 'now',
+          updatedAt: 'now',
+        }],
+      });
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      assert(code.includes('for (const row of repeat_1Data)'), 'repeat loop should be emitted');
+      assert(code.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parameterized popup option should stay scoped to active AntD dropdown');
+      assert(code.includes('evaluateAll((elements, expectedText)'), 'parameterized popup option should validate against the active popup options');
+      assert(code.includes('AntD option text mismatch'), 'parameterized popup option should fail on partial or wrong text matches');
+      assert(code.includes('}, String(row.vrf));'), 'popup option should use the row variable as exact expected text');
+      assert(!code.includes('|| elements[elements.length - 1]'), 'popup option must not fall back to the last partial match');
+      assert(!code.includes('filter({ hasText: String(row.vrf) }).first().click()'), 'parameterized dropdown option must not use partial first-match clicks');
+      assert(!code.includes('page.getByText(String(row.vrf)).click()'), 'parameterized dropdown option must not become a global text click');
+    },
+  },
+  {
     name: 'wrong middle step can be deleted and rerecorded between existing neighbors',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -1716,6 +1954,67 @@ test('demo', async ({ page }) => {
       assertEqual(rerecorded.steps.map(step => step.id), ['s001', 's004', 's003']);
       assertEqual(rerecorded.steps.map(step => step.value), [undefined, 'good-value', undefined]);
       assert(!rerecorded.steps.some(step => step.value === 'bad-value'), 'deleted wrong action should not revive when rerecording in the middle');
+    },
+  },
+  {
+    name: 'field after modal close is not scoped to stale dialog without relying on 下方 prefix',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: { name: '新建条目' },
+          context: {
+            eventId: 'ctx-open',
+            capturedAt: 1000,
+            before: { target: { tag: 'button', text: '新建条目', normalizedText: '新建条目' } },
+            after: { dialog: { type: 'modal', title: '新建条目', visible: true } },
+          },
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: { text: '提交配置' },
+          context: {
+            eventId: 'ctx-submit',
+            capturedAt: 1200,
+            before: { dialog: { type: 'modal', title: '新建条目', visible: true }, target: { tag: 'span', text: '提交配置', normalizedText: '提交配置' } },
+            after: {},
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:text="提交配置"i' } },
+          assertions: [],
+        }, {
+          id: 's003',
+          order: 3,
+          kind: 'recorded',
+          sourceActionIds: ['a003'],
+          action: 'fill',
+          target: { label: '使用备注', testId: 'usage-note' },
+          value: 'modal closed note',
+          context: {
+            eventId: 'ctx-note',
+            capturedAt: 1600,
+            before: {
+              target: { tag: 'input', testId: 'usage-note', text: '使用备注', normalizedText: '使用备注' },
+              form: { label: '使用备注', testId: 'usage-note' },
+            },
+          },
+          rawAction: { action: { name: 'fill', selector: 'internal:testid=[data-testid="usage-note"s]', text: 'modal closed note' } },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const noteStep = stepCodeBlock(code, 's003');
+
+      assert(noteStep.includes('modal closed note'), 'page field should still fill its own value');
+      assert(!noteStep.includes('filter({ hasText: "新建条目" })'), 'page field should not inherit a stale modal scope');
     },
   },
   {
@@ -2495,6 +2794,9 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'popup option should be scoped to the active AntD dropdown');
       assert(firstStep.includes('.ant-select-tree-node-content-wrapper'), 'tree-select option lookup should be available');
       assert(firstStep.includes('.ant-cascader-menu-item'), 'cascader option lookup should be available');
+      assert(firstStep.includes('evaluateAll((elements, expectedText)'), 'active popup option should validate exact visible option text');
+      assert(firstStep.includes('AntD option text mismatch'), 'active popup option should fail on partial or wrong text matches');
+      assert(!firstStep.includes('filter({ hasText: "华东生产区" }).last().click()'), 'active dropdown fallback must not use partial last-match clicks');
       assert(!firstStep.includes('page.getByText("华东生产区")'), 'active dropdown option should not replay through global page text');
     },
   },
@@ -2736,6 +3038,115 @@ test('demo', async ({ page }) => {
         assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'trigger should not rely on combobox accessible name for AntD ProFormSelect');
         assert(!firstStep.includes('#rc_select_14'), 'trigger should not replay the dynamic rc_select id');
       }
+    },
+  },
+  {
+    name: 'ProFormSelect search fill uses form-item scoped AntD input instead of combobox role',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            role: 'combobox',
+            name: '* WAN口',
+            label: 'WAN口',
+            text: '选择一个WAN口',
+            scope: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+            },
+          },
+          value: 'WAN-extra-18',
+          context: {
+            eventId: 'ctx-select-fill',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+              target: {
+                tag: 'div',
+                text: '选择一个WAN口',
+                normalizedText: '选择一个WAN口',
+                framework: 'procomponents',
+                controlType: 'select',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:role=combobox[name="* WAN口"i]',
+              text: 'WAN-extra-18',
+            },
+          },
+          sourceCode: `await page.getByRole('combobox', { name: '* WAN口' }).fill('WAN-extra-18');`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input").first().fill("WAN-extra-18");'), 'search fill should target the input inside the scoped ProFormSelect trigger');
+      assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'search fill should not rely on brittle combobox accessible name');
+      assert(!firstStep.includes('internal:role=combobox'), 'search fill should not replay the raw combobox selector');
+    },
+  },
+  {
+    name: 'fill with stable test id ignores polluted ProFormSelect label context',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            testId: 'network-resource-name',
+            name: '选择一个WAN口',
+            displayName: '选择一个WAN口',
+            scope: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+            },
+          },
+          value: 'pool-proform-alpha',
+          context: {
+            eventId: 'ctx-polluted-name-fill',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+              target: {
+                tag: 'input',
+                testId: 'network-resource-name',
+                framework: 'procomponents',
+                controlType: 'input',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="network-resource-name"s]',
+              text: 'pool-proform-alpha',
+            },
+          },
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input").first().fill("pool-proform-alpha");`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('page.getByTestId("network-resource-name").fill("pool-proform-alpha");'), 'stable test id fill should win over polluted select label context');
+      assert(!firstStep.includes('filter({ hasText: "WAN口" })'), 'resource-name fill should not target the WAN ProFormSelect input');
     },
   },
   {
@@ -3213,6 +3624,17 @@ function assertEqual<T>(actual: T, expected: T) {
   const expectedJson = JSON.stringify(expected);
   if (actualJson !== expectedJson)
     throw new Error(`Expected ${expectedJson}, received ${actualJson}`);
+}
+
+function assertTextInOrder(text: string, markers: Array<string | RegExp>) {
+  let offset = 0;
+  for (const marker of markers) {
+    const slice = text.slice(offset);
+    const index = typeof marker === 'string' ? slice.indexOf(marker) : slice.search(marker);
+    if (index < 0)
+      throw new Error(`Missing marker after offset ${offset}: ${String(marker)}\n${text}`);
+    offset += index + 1;
+  }
 }
 
 function writeLine(value: string) {

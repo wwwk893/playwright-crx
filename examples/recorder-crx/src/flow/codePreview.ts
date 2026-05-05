@@ -145,12 +145,26 @@ function hasOwnPageContext(step: FlowStep) {
 }
 
 function canInheritDialogContext(step: FlowStep) {
+  if (!hasOwnPageContext(step))
+    return false;
+  const hasOwnDialog = isPersistentDialog(step.context?.before.dialog) || isPersistentDialog(step.target?.scope?.dialog);
+  if (!hasOwnDialog) {
+    if (step.context?.before.section || step.target?.scope?.section)
+      return false;
+    if (step.context?.before.table || step.target?.scope?.table)
+      return false;
+    const testId = step.target?.testId || step.context?.before.target?.testId || step.context?.before.form?.testId || step.target?.scope?.form?.testId;
+    if (testId && !looksLikeDialogOwnedTestId(testId))
+      return false;
+  }
   const label = normalizeGeneratedText(step.target?.label || step.target?.name || step.target?.displayName || step.context?.before.form?.label || step.target?.scope?.form?.label);
   if (/^下方/.test(label || ''))
     return false;
-  if (step.context?.before.section || step.target?.scope?.section)
-    return false;
-  return hasOwnPageContext(step);
+  return true;
+}
+
+function looksLikeDialogOwnedTestId(testId: string) {
+  return /(modal|drawer|dialog|popup|popover|overlay)/i.test(testId);
 }
 
 function isDialogClosingClick(step: FlowStep) {
@@ -477,7 +491,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         return antdPopupOptionDispatchSource(cascaderOption, popupOptionName(step), { stabilizeAfterClickMs: 120 });
       const activePopupOption = activeDropdownOptionLocator(step);
       if (activePopupOption)
-        return `await ${activePopupOption}.last().click();`;
+        return antdPopupOptionDispatchSource(activePopupOption, popupOptionName(step));
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -486,7 +500,13 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     case 'fill': {
       const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
       const isComboboxFill = step.target?.role === 'combobox' || /^(select|tree-select|cascader)$/.test(step.context?.before.target?.controlType || '');
-      const preferred = isComboboxFill ? undefined : fieldLocator(step);
+      const selectTrigger = isComboboxFill ? antdSelectFieldLocator(step) : undefined;
+      if (selectTrigger)
+        return `await ${selectTrigger}.locator(${stringLiteral('input')}).first().fill(${value});`;
+      const testIdLocator = globalTestIdLocator(step);
+      if (testIdLocator)
+        return `await ${testIdLocator}.fill(${value});`;
+      const preferred = fieldLocator(step);
       if (preferred)
         return `await ${preferred}.fill(${value});`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
@@ -751,7 +771,10 @@ function antdSelectOptionDispatchSource(locator: string, optionName?: string, op
     `await ${locator}.evaluateAll((elements, expectedText) => {`,
     `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
     `  const expected = normalize(expectedText);`,
-    `  const element = elements.find(element => normalize(element.getAttribute("title")) === expected || normalize(element.textContent) === expected) || elements[elements.length - 1];`,
+    `  const element = elements.find(element => {`,
+    `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
+    `    return normalize(element.getAttribute("title")) === expected || optionText === expected || normalize(element.textContent) === expected;`,
+    `  });`,
     `  if (!element)`,
     `    throw new Error(\`AntD option not found: \${expected}\`);`,
     `  const text = normalize(element.textContent);`,
@@ -981,10 +1004,47 @@ function parameterizeLine(line: string, step: FlowStep, segment: FlowRepeatSegme
   if (!parameter?.currentValue)
     return line;
   const replacement = rowValues ? stringLiteral(rowValues[parameter.id] ?? parameter.currentValue) : `String(row.${parameter.variableName})`;
+  const activePopupReplacement = parameterizedActivePopupOptionClick(line, parameter.variableName, replacement);
+  if (activePopupReplacement)
+    return activePopupReplacement;
   return line
       .replaceAll(JSON.stringify(parameter.currentValue), replacement)
       .replaceAll(`'${escapeSingleQuoted(parameter.currentValue)}'`, replacement)
       .replaceAll(`"${parameter.currentValue.replace(/"/g, '\\"')}"`, replacement);
+}
+
+function parameterizedActivePopupOptionClick(line: string, variableName: string, replacement: string) {
+  if (!/\.getByText\([^)]*\)\.click\(\);/.test(line))
+    return undefined;
+  if (!/^(wan|wanPort|vrf|scope|egressPath|role)$/i.test(variableName))
+    return undefined;
+  return activePopupOptionDispatchSource('page.locator(' + stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item') + ')', replacement);
+}
+
+function activePopupOptionDispatchSource(locator: string, expectedExpression: string) {
+  return [
+    `await ${locator}.first().waitFor({ state: "visible", timeout: 10000 });`,
+    `await ${locator}.evaluateAll((elements, expectedText) => {`,
+    `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
+    `  const expected = normalize(expectedText);`,
+    `  const element = elements.find(element => {`,
+    `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
+    `    return normalize(element.getAttribute("title")) === expected || optionText === expected || normalize(element.textContent) === expected;`,
+    `  });`,
+    `  if (!element)`,
+    `    throw new Error(\`AntD popup option not found: \${expected}\`);`,
+    `  const text = normalize(element.textContent);`,
+    `  if (text !== expected && normalize(element.getAttribute("title")) !== expected)`,
+    `    throw new Error(\`AntD popup option text mismatch: expected \${expected}, got \${text}\`);`,
+    `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled") || element.classList.contains("ant-cascader-menu-item-disabled"))`,
+    `    throw new Error(\`AntD popup option is disabled: \${expected}\`);`,
+    `  element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+    `}, ${expectedExpression});`,
+  ].join('\n');
 }
 
 function replaceTemplateValues(value: string, segment: FlowRepeatSegment) {

@@ -135,7 +135,17 @@ export const test = crxTest.extend<{
               const freshRecorderPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => undefined);
               await page.bringToFront();
               await attachCurrentTab();
-              const freshRecorderPage = await freshRecorderPagePromise;
+              let freshRecorderPage = await freshRecorderPagePromise;
+              if (!freshRecorderPage)
+                freshRecorderPage = context.pages().find(p => !p.isClosed() && p.url().startsWith(`chrome-extension://${extensionId}`));
+              if (!freshRecorderPage) {
+                const retryRecorderPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => undefined);
+                await page.bringToFront();
+                await attachCurrentTab();
+                freshRecorderPage = await retryRecorderPagePromise;
+              }
+              if (!freshRecorderPage)
+                freshRecorderPage = context.pages().find(p => !p.isClosed() && p.url().startsWith(`chrome-extension://${extensionId}`));
               if (!freshRecorderPage)
                 throw new Error(`Recorder surface ${mode} did not recover after closing stale extension page`);
               recorderPage = freshRecorderPage;

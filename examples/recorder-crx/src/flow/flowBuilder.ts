@@ -264,7 +264,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
 
   base = {
     ...base,
-    steps: recomputeOrders(steps),
+    steps: recomputeOrders(moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps)),
     updatedAt: new Date().toISOString(),
   };
   emitDiagnostic({ diagnostics: options.diagnostics }, 'merge.synthetic-page-click', '页面侧 click 已根据上下文合成业务步骤', {
@@ -968,16 +968,26 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
       recordedActionIds: reconciled.upgradedActionIds,
     });
   }
-  if (!afterStepId && drafts.some(draft => typeof draftWallTime(draft) === 'number')) {
-    for (const draft of drafts)
-      insertProjectedDraftByWallTime(steps, draft);
-    return {
-      ...flow,
-      steps: recomputeOrders(steps),
-    };
+  if (!afterStepId && shouldPlaceRecordedBatchAroundSyntheticSteps(steps, drafts)) {
+    const insertAt = projectedDraftInsertionIndex(steps, insertionAnchorDraft(drafts));
+    return insertProjectedDraftBatch(flow, steps, drafts, insertAt);
   }
 
   const insertAt = afterStepId ? Math.max(0, steps.findIndex(step => step.id === afterStepId) + 1) : steps.length;
+  return insertProjectedDraftBatch(flow, steps, drafts, insertAt);
+}
+
+function shouldPlaceRecordedBatchAroundSyntheticSteps(steps: FlowStep[], drafts: StepDraft[]) {
+  if (!drafts.length || !drafts.some(draft => typeof draftWallTime(draft) === 'number'))
+    return false;
+  return steps.some(step => isSyntheticClickStep(step) && typeof stepWallTime(step) === 'number');
+}
+
+function insertionAnchorDraft(drafts: StepDraft[]) {
+  return drafts.find(draft => typeof draftWallTime(draft) === 'number') || drafts[0];
+}
+
+function insertProjectedDraftBatch(flow: BusinessFlow, steps: FlowStep[], drafts: StepDraft[], insertAt: number): BusinessFlow {
   while (drafts.length) {
     const previous = steps[insertAt - 1];
     const [firstDraft] = drafts;
@@ -1004,29 +1014,8 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
   steps.splice(insertAt, 0, ...drafts.map(draft => draft.step));
   return {
     ...flow,
-    steps: recomputeOrders(steps),
+    steps: recomputeOrders(moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps)),
   };
-}
-
-function insertProjectedDraftByWallTime(steps: FlowStep[], draft: StepDraft) {
-  const insertAt = projectedDraftInsertionIndex(steps, draft);
-  const previous = steps[insertAt - 1];
-  if (previous && shouldMergeTyping(previous, draft.step)) {
-    steps[insertAt - 1] = mergeFillStep(previous, draft.step);
-    return;
-  }
-  if (previous && draft.step.action === 'press' && isTypingPress(draft.step) && sameEditableTarget(previous, draft.step)) {
-    steps[insertAt - 1] = mergeSourceActions(previous, draft.step);
-    return;
-  }
-  if (previous && draft.step.action === 'assert' && draft.step.assertions.some(assertion => assertion.enabled)) {
-    steps[insertAt - 1] = {
-      ...mergeSourceActions(previous, draft.step),
-      assertions: mergeAssertions(previous.assertions, draft.step.assertions),
-    };
-    return;
-  }
-  steps.splice(insertAt, 0, draft.step);
 }
 
 function projectedDraftInsertionIndex(steps: FlowStep[], draft: StepDraft) {
@@ -1038,6 +1027,52 @@ function projectedDraftInsertionIndex(steps: FlowStep[], draft: StepDraft) {
     return typeof existingWallTime === 'number' && existingWallTime > wallTime;
   });
   return firstLaterStepIndex >= 0 ? firstLaterStepIndex : steps.length;
+}
+
+function isSyntheticSubmitClickStep(step: FlowStep) {
+  if (!isSyntheticClickStep(step))
+    return false;
+  const targetText = [step.target?.testId, step.target?.name, step.target?.text, step.target?.displayName].filter(Boolean).join('|');
+  return /save|submit|confirm|保存|提交|确定|确 定/i.test(targetText);
+}
+
+function moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps: FlowStep[]) {
+  let ordered = [...steps];
+  for (let index = 0; index < ordered.length; index++) {
+    const syntheticStep = ordered[index];
+    if (!isSyntheticSubmitClickStep(syntheticStep))
+      continue;
+    const syntheticWallTime = stepWallTime(syntheticStep);
+    if (typeof syntheticWallTime !== 'number')
+      continue;
+    const before = ordered.slice(0, index);
+    const after = ordered.slice(index + 1);
+    const earlierIndexes = new Set<number>();
+    for (let afterIndex = 0; afterIndex < after.length; afterIndex++) {
+      const wallTime = stepWallTime(after[afterIndex]);
+      if (typeof wallTime !== 'number' || wallTime >= syntheticWallTime)
+        continue;
+      earlierIndexes.add(afterIndex);
+      for (let cursor = afterIndex - 1; cursor >= 0; cursor--) {
+        if (earlierIndexes.has(cursor))
+          continue;
+        if (typeof stepWallTime(after[cursor]) === 'number')
+          break;
+        if (isSyntheticClickStep(after[cursor]))
+          break;
+        if (after[cursor].kind !== 'recorded')
+          break;
+        earlierIndexes.add(cursor);
+      }
+    }
+    if (!earlierIndexes.size)
+      continue;
+    const earlierAfterSynthetic = after.filter((_, afterIndex) => earlierIndexes.has(afterIndex));
+    const laterOrUntimed = after.filter((_, afterIndex) => !earlierIndexes.has(afterIndex));
+    ordered = [...before, ...earlierAfterSynthetic, syntheticStep, ...laterOrUntimed];
+    index += earlierAfterSynthetic.length;
+  }
+  return ordered;
 }
 
 function draftWallTime(draft: StepDraft) {

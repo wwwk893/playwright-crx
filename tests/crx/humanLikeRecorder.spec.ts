@@ -17,7 +17,7 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { BrowserContext } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import type { TestInfo } from '@playwright/test';
 import { test, expect } from './crxRecorderTest';
 import {
@@ -41,6 +41,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   test.setTimeout(180_000);
   const benchmarkCase = loadBenchmarkCase('recorder_intent_repeat.json');
   expect(benchmarkCase.name).toBe('recorder_ipv4_pool_step_intent_repeat_data');
+  const strictHumanOptions = { allowFallback: false as const };
 
   await page.goto(`${baseURL}/empty.html`);
   const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
@@ -64,7 +65,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
 
   await humanType(page.getByPlaceholder('地址池名称'), 'test1');
   const wanTrigger = ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first();
-  await selectAntdOptionLikeUser(page, wanTrigger, 'xtest16:WAN1', { searchText: 'xtest16' });
+  await selectAntdOptionLikeUser(page, wanTrigger, 'xtest16:WAN1', { searchText: 'xtest16', ...strictHumanOptions });
   await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
 
   await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1');
@@ -72,7 +73,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await humanClickUntil(
       ipv4Dialog.getByRole('button', { name: '确 定' }),
       async () => !await ipv4Dialog.isVisible().catch(() => false),
-      { attempts: 5, afterClickDelayMs: 800 },
+      { attempts: 5, afterClickDelayMs: 800, ...strictHumanOptions },
   );
   await expect(page.getByRole('row', { name: /test1.*xtest16:WAN1.*1\.1\.1\.1.*2\.2\.2\.2/ })).toBeVisible({ timeout: 10_000 });
   await humanClick(page.getByTestId('site-save-button'));
@@ -109,6 +110,7 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   test.setTimeout(180_000);
   const benchmarkCase = loadBenchmarkCase('user_admin_repeat.json');
   expect(benchmarkCase.name).toBe('recorder_user_admin_modal_repeat');
+  const strictHumanOptions = { allowFallback: false as const };
 
   await page.goto(`${baseURL}/empty.html`);
   const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
@@ -134,12 +136,13 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   await humanType(usernameInput, 'alice.qa', { clear: true });
   await expect(usernameInput).toHaveValue('alice.qa');
   const roleTrigger = userDialog.locator('.ant-form-item').filter({ hasText: '角色' }).locator('.ant-select-selector').first();
-  await selectAntdOptionLikeUser(page, roleTrigger, '审计员');
+  await selectAntdOptionLikeUser(page, roleTrigger, '审计员', strictHumanOptions);
   await expect(userDialog.locator('.ant-form-item').filter({ hasText: '角色' })).toContainText('审计员');
 
   await humanClickUntil(
       userDialog.getByTestId('modal-confirm'),
       async () => !await userDialog.isVisible().catch(() => false),
+      { ...strictHumanOptions },
   );
   await expect(userDialog).not.toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('row', { name: /alice\.qa.*审计员/ })).toBeVisible({ timeout: 10_000 });
@@ -176,6 +179,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   test.setTimeout(240_000);
   const benchmarkCase = loadBenchmarkCase('network_resource_repeat.json');
   expect(benchmarkCase.name).toBe('recorder_network_resource_complex_repeat');
+  const strictHumanOptions = { allowFallback: false as const };
 
   await page.goto(`${baseURL}/empty.html`);
   const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
@@ -201,11 +205,11 @@ test('case-driven human-like records network resource complex form repeat flow a
   await humanType(resourceNameInput, 'res-web-01', { clear: true });
   await expect(resourceNameInput).toHaveValue('res-web-01');
   const wanTrigger = networkDialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first();
-  await selectAntdOptionLikeUser(page, wanTrigger, 'edge-lab:WAN1', { searchText: 'edge-lab' });
+  await selectAntdOptionLikeUser(page, wanTrigger, 'edge-lab:WAN1', { searchText: 'edge-lab', ...strictHumanOptions });
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('edge-lab:WAN1');
 
   const vrfTrigger = networkDialog.locator('.ant-form-item').filter({ hasText: '关联VRF' }).locator('.ant-select-selector').first();
-  await selectAntdOptionLikeUser(page, vrfTrigger, '生产VRF');
+  await selectAntdOptionLikeUser(page, vrfTrigger, '生产VRF', strictHumanOptions);
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '关联VRF' })).toContainText('生产VRF');
 
   await humanClick(networkDialog.getByText('开启代理ARP'));
@@ -221,11 +225,11 @@ test('case-driven human-like records network resource complex form repeat flow a
   await expect(healthUrl).toHaveValue('https://probe.example/health');
 
   const scopeTrigger = page.getByTestId('network-resource-scope-tree').locator('.ant-select-selector').first();
-  await selectAntdTreeNodeLikeUser(page, scopeTrigger, '华东生产区');
+  await selectAntdTreeNodeLikeUser(page, scopeTrigger, '华东生产区', strictHumanOptions);
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '发布范围' })).toContainText('华东生产区');
 
   const egressTrigger = page.getByTestId('network-resource-egress-cascader').locator('.ant-select-selector, .ant-cascader-picker').first();
-  await selectAntdCascaderPathLikeUser(page, egressTrigger, ['上海', '一号机房', 'NAT集群A']);
+  await selectAntdCascaderPathLikeUser(page, egressTrigger, ['上海', '一号机房', 'NAT集群A'], strictHumanOptions);
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '出口路径' })).toContainText('NAT集群A');
 
   const serviceInput = page.getByPlaceholder('服务名称');
@@ -297,14 +301,33 @@ test('case-driven human-like records network resource complex form repeat flow a
   expect(flow.artifacts.playwrightCode).toContain('生产访问策略');
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo);
+  const networkReplayVerificationLines = [
+    `const table = page.getByTestId("network-resource-table");`,
+    `await expect(table).toContainText("res-web-01", { timeout: 10000 });`,
+    `await expect(table).toContainText("edge-lab:WAN1");`,
+    `await expect(table).toContainText("生产VRF");`,
+    `await expect(table).toContainText("华东生产区");`,
+    `await expect(table).toContainText("NAT集群A");`,
+    `await expect(table).toContainText("web:443");`,
+    `await expect(table).toContainText("生产访问策略");`,
+  ];
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo, async replayPage => {
+    const table = replayPage.getByTestId('network-resource-table');
+    await expect(table).toContainText('res-web-01', { timeout: 10_000 });
+    await expect(table).toContainText('edge-lab:WAN1');
+    await expect(table).toContainText('生产VRF');
+    await expect(table).toContainText('华东生产区');
+    await expect(table).toContainText('NAT集群A');
+    await expect(table).toContainText('web:443');
+    await expect(table).toContainText('生产访问策略');
+  }, networkReplayVerificationLines);
 });
 
 function loadBenchmarkCase(fileName: string) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'benchmarks', 'agent_models', 'cases', fileName), 'utf8'));
 }
 
-async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo: TestInfo) {
+async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo: TestInfo, verify?: (page: Page) => Promise<void>, standaloneVerificationLines: string[] = []) {
   const rawReplayDir = testInfo.outputPath('raw-generated-replay');
   fs.mkdirSync(rawReplayDir, { recursive: true });
   fs.writeFileSync(path.join(rawReplayDir, 'generated-before-inline.spec.ts'), code);
@@ -314,19 +337,31 @@ async function replayGeneratedPlaywrightCode(context: BrowserContext, code: stri
   try {
     const replay = new Function('page', 'expect', `return (async () => {\n${body}\n})();`);
     await replay(replayPage, expect);
+    if (verify)
+      await verify(replayPage);
   } finally {
     await replayPage.close();
   }
-  runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo);
+  runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, standaloneVerificationLines);
 }
 
-function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo) {
+function appendReplayVerification(code: string, verificationLines: string[]) {
+  if (!verificationLines.length)
+    return code;
+  const bodyEnd = code.lastIndexOf('\n});');
+  if (bodyEnd < 0)
+    throw new Error(`Unable to append generated replay verification:\n${code}`);
+  return `${code.slice(0, bodyEnd)}\n\n  // business terminal-state verification added by the E2E harness\n  ${verificationLines.join('\n  ')}\n${code.slice(bodyEnd)}`;
+}
+
+function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo, verificationLines: string[] = []) {
   const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
   fs.mkdirSync(rawReplayRoot, { recursive: true });
   const rawReplayDir = fs.mkdtempSync(path.join(rawReplayRoot, `${testInfo.workerIndex}-`));
   const specPath = path.join(rawReplayDir, 'generated-replay.spec.ts');
   const configPath = path.join(rawReplayDir, 'playwright.raw-replay.config.ts');
-  fs.writeFileSync(specPath, code);
+  const specSource = appendReplayVerification(code, verificationLines);
+  fs.writeFileSync(specPath, specSource);
   fs.writeFileSync(configPath, [
     `import { defineConfig, devices } from '@playwright/test';`,
     `export default defineConfig({`,

@@ -23,6 +23,21 @@ import { expect } from './crxRecorderTest';
 // Small evaluate calls are only observational (focus/evidence/download text), not
 // a shortcut for selecting options or deciding recorder internals.
 
+export type HumanLikeFallbackKind = 'locator-click' | 'force-click' | 'keyboard-enter' | 'keyboard-space' | 'popup-force-click' | 'popup-arrow-down' | 'dispatch-click' | 'cascader-fill-fallback' | 'tree-force-click';
+export type HumanLikeOptions = {
+  allowFallback?: boolean;
+  onFallback?: (kind: HumanLikeFallbackKind, detail: Record<string, unknown>) => void;
+};
+
+type HumanClickUntilOptions = HumanLikeOptions & { attempts?: number, afterClickDelayMs?: number };
+type HumanClickVisibleOptions = HumanLikeOptions & { delayMs?: number, position?: 'center' | 'left' | 'right' };
+
+function reportFallback(options: HumanLikeOptions | undefined, kind: HumanLikeFallbackKind, detail: Record<string, unknown> = {}) {
+  options?.onFallback?.(kind, detail);
+  if (options?.allowFallback === false)
+    throw new Error(`human-like fallback used: ${kind}`);
+}
+
 export async function humanClick(locator: Locator, options?: { delayMs?: number, position?: 'center' | 'left' | 'right' }) {
   await locator.scrollIntoViewIfNeeded();
   await expect(locator).toBeVisible({ timeout: 10_000 });
@@ -45,7 +60,7 @@ export async function humanClick(locator: Locator, options?: { delayMs?: number,
   await page.mouse.up();
 }
 
-export async function humanClickUntil(locator: Locator, condition: () => Promise<boolean>, options?: { attempts?: number, afterClickDelayMs?: number }) {
+export async function humanClickUntil(locator: Locator, condition: () => Promise<boolean>, options?: HumanClickUntilOptions) {
   const attempts = options?.attempts ?? 3;
   for (let i = 0; i < attempts; i++) {
     if (await condition())
@@ -61,19 +76,23 @@ export async function humanClickUntil(locator: Locator, condition: () => Promise
     if (await condition())
       return;
   }
+  reportFallback(options, 'locator-click', { attempts });
   await locator.click({ timeout: 10_000 }).catch(() => {});
   await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
   if (await condition())
     return;
+  reportFallback(options, 'force-click', { attempts });
   await locator.click({ force: true, timeout: 10_000 }).catch(() => {});
   await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
   if (await condition())
     return;
+  reportFallback(options, 'keyboard-enter', { attempts });
   await locator.focus({ timeout: 5_000 }).catch(() => {});
   await locator.page().keyboard.press('Enter').catch(() => {});
   await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
   if (await condition())
     return;
+  reportFallback(options, 'keyboard-space', { attempts });
   await locator.page().keyboard.press('Space').catch(() => {});
   await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
   if (await condition())
@@ -81,7 +100,7 @@ export async function humanClickUntil(locator: Locator, condition: () => Promise
   throw new Error(`humanClickUntil condition was not met after ${attempts} attempts`);
 }
 
-async function openPopupLikeUser(trigger: Locator, popup: Locator) {
+async function openPopupLikeUser(trigger: Locator, popup: Locator, options?: HumanLikeOptions) {
   for (let attempt = 0; attempt < 4; attempt++) {
     if (await popup.isVisible().catch(() => false))
       return;
@@ -95,20 +114,23 @@ async function openPopupLikeUser(trigger: Locator, popup: Locator) {
       // Retry with a fresh click. Some AntD controls ignore the first click while focus/animation settles.
     }
   }
+  reportFallback(options, 'popup-force-click');
   await trigger.click({ force: true, timeout: 2_000 }).catch(() => {});
   await popup.waitFor({ state: 'visible', timeout: 800 }).catch(() => {});
   if (await popup.isVisible().catch(() => false))
     return;
+  reportFallback(options, 'popup-arrow-down');
   await trigger.locator('input').first().press('ArrowDown', { timeout: 1_000 }).catch(async () => {
     await trigger.page().keyboard.press('ArrowDown').catch(() => {});
   });
   await expect(popup).toBeVisible({ timeout: 2_000 });
 }
 
-async function humanClickVisible(locator: Locator, options?: { delayMs?: number, position?: 'center' | 'left' | 'right' }) {
+async function humanClickVisible(locator: Locator, options?: HumanClickVisibleOptions) {
   await expect(locator).toBeVisible({ timeout: 10_000 });
   const box = await stableBoundingBox(locator);
   if (!box) {
+    reportFallback(options, 'dispatch-click');
     await locator.evaluate(element => {
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
@@ -186,7 +208,7 @@ async function exactTextOption(candidates: Locator, expectedText: string) {
   return undefined;
 }
 
-export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, optionText: string, options?: { searchText?: string }) {
+export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, optionText: string, options?: HumanLikeOptions & { searchText?: string }) {
   await closeAntdPopups(page);
   await humanClick(trigger);
 
@@ -211,11 +233,11 @@ export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, opt
   });
 }
 
-export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, nodeText: string, options?: { searchText?: string }) {
+export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, nodeText: string, options?: HumanLikeOptions & { searchText?: string }) {
   await closeAntdPopups(page);
   for (let attempt = 0; attempt < 3; attempt++) {
     const dropdown = page.locator('.ant-select-dropdown:visible').last();
-    await openPopupLikeUser(trigger, dropdown);
+    await openPopupLikeUser(trigger, dropdown, options);
     await expect(dropdown).toBeVisible({ timeout: 10_000 });
 
     if (options?.searchText)
@@ -226,8 +248,9 @@ export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, n
         .filter({ hasText: nodeText })
         .last();
     await expect(node).toBeVisible({ timeout: 10_000 });
-    await humanClickVisible(node, { delayMs: 80 });
+    await humanClickVisible(node, { delayMs: 80, allowFallback: options?.allowFallback, onFallback: options?.onFallback });
     await dropdown.waitFor({ state: 'hidden', timeout: 1200 }).catch(async () => {
+      reportFallback(options, 'tree-force-click', { attempt, nodeText });
       await node.click({ force: true, timeout: 2_000 }).catch(() => {});
     });
     await page.waitForTimeout(250);
@@ -237,19 +260,22 @@ export async function selectAntdTreeNodeLikeUser(page: Page, trigger: Locator, n
   await expect(trigger).toContainText(nodeText, { timeout: 5_000 });
 }
 
-export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locator, path: string[]) {
+export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locator, path: string[], options?: HumanLikeOptions) {
   await closeAntdPopups(page);
   const dropdown = page.locator('.ant-cascader-dropdown:visible').last();
-  await openPopupLikeUser(trigger, dropdown);
+  await openPopupLikeUser(trigger, dropdown, options);
   await expect(dropdown).toBeVisible({ timeout: 10_000 });
 
   const input = trigger.locator('input').first();
   if (await input.isVisible().catch(() => false)) {
     const leaf = path[path.length - 1];
-    await input.fill(leaf).catch(async () => page.keyboard.type(leaf, { delay: 25 }));
+    await input.fill(leaf).catch(async () => {
+      reportFallback(options, 'cascader-fill-fallback', { leaf });
+      await page.keyboard.type(leaf, { delay: 25 });
+    });
     const searchedItem = dropdown.locator('.ant-cascader-menu-item').filter({ hasText: leaf }).first();
     await expect(searchedItem).toBeVisible({ timeout: 10_000 });
-    await humanClickVisible(searchedItem, { delayMs: 80 });
+    await humanClickVisible(searchedItem, { delayMs: 80, allowFallback: options?.allowFallback, onFallback: options?.onFallback });
     await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
     return;
   }
@@ -264,7 +290,7 @@ export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locato
         .first();
     await expect(item).toBeVisible({ timeout: 10_000 });
     if (index < path.length - 1) {
-      await humanClickVisible(item, { delayMs: 80 });
+      await humanClickVisible(item, { delayMs: 80, allowFallback: options?.allowFallback, onFallback: options?.onFallback });
       await page.waitForTimeout(160);
       const nextMenu = dropdown.locator('.ant-cascader-menu').nth(index + 1);
       if (!await nextMenu.isVisible().catch(() => false)) {
@@ -274,7 +300,7 @@ export async function selectAntdCascaderPathLikeUser(page: Page, trigger: Locato
         await expect(nextMenu).toBeVisible({ timeout: 5_000 });
       }
     } else {
-      await humanClickVisible(item, { delayMs: 80 });
+      await humanClickVisible(item, { delayMs: 80, allowFallback: options?.allowFallback, onFallback: options?.onFallback });
     }
   }
 

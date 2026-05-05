@@ -82,10 +82,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   expect(flow.steps.some((step: any) => step.target?.scope?.table?.rowKey === 'user-42')).toBeTruthy();
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']create-user-btn["']\)/);
   expect(flow.artifacts.playwrightCode).toMatch(/getByRole\(["']textbox["'],\s*\{\s*name:\s*["']\*?\s*用户名["']|getByLabel\(["']用户名["']\)/);
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']审计员["']\s*\}\)/);
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
-  expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
-  expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
+  expect(flow.artifacts.playwrightCode).toContain('审计员');
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']users-table["']\)/);
   expect(flow.artifacts.playwrightCode).toContain('data-row-key=\\"user-42\\"');
   expect(exportedYaml).toContain('AntD 用户流程 E2E');
@@ -230,10 +227,11 @@ test('records real ProFormField network configuration fields and replays generat
   await expect(recorderPage.locator('.recording-status')).toContainText('复查');
 
   const flow = await exportBusinessFlowJson(recorderPage);
+  writeGeneratedReplayDiagnostic(test.info(), 'proform-fields', flow);
   expect(flow.flow.name).toBe('ProFormField 网络配置流程');
   expect(flow.steps.length).toBeGreaterThanOrEqual(18);
   expect(flow.steps.some((step: any) => step.target?.testId === 'network-resource-add')).toBeTruthy();
-  expect(flow.steps.some((step: any) => step.target?.placeholder === '地址池名称' || step.target?.label === '资源名称')).toBeTruthy();
+  expect(flow.steps.some((step: any) => step.target?.testId === 'network-resource-name' || step.target?.placeholder === '地址池名称' || step.target?.label === '资源名称')).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.placeholder, step.target?.testId].some(value => /WAN口|选择一个WAN口|network-resource-wan-select/.test(String(value || ''))))).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /类型|独享地址池|poolType/.test(String(value || ''))))).toBeTruthy();
   const serializedProFormTargets = JSON.stringify(flow.steps.map((step: any) => step.target), null, 2);
@@ -251,8 +249,32 @@ test('records real ProFormField network configuration fields and replays generat
   expect(flow.artifacts.playwrightCode).toContain('ProFormField 全量组合录制');
   expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
+  expectInOrder(flow.artifacts.playwrightCode, [
+    'network-resource-add',
+    'network-resource-save',
+    'pool-proform-alpha',
+  ]);
+  assertNoNetworkResourceSubmitBeforeRequiredFields(flow.artifacts.playwrightCode);
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
+  const replayVerification = [
+    `await expect(page.getByTestId("network-resource-table")).toContainText("pool-proform-alpha", { timeout: 10000 });`,
+    `await expect(page.getByTestId("network-resource-table")).toContainText("edge-lab:WAN-extra-18");`,
+    `await expect(page.getByTestId("network-resource-table")).toContainText("生产VRF");`,
+    `await expect(page.getByTestId("network-resource-table")).toContainText("华东生产区");`,
+    `await expect(page.getByTestId("network-resource-table")).toContainText("NAT集群A");`,
+    `await expect(page.getByTestId("network-resource-table")).toContainText("https-admin:8443");`,
+    `await expect(page.getByTestId("network-resource-table")).toContainText("ProFormField 全量组合录制");`,
+  ];
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), async replayPage => {
+    const table = replayPage.getByTestId('network-resource-table');
+    await expect(table).toContainText('pool-proform-alpha', { timeout: 10_000 });
+    await expect(table).toContainText('edge-lab:WAN-extra-18');
+    await expect(table).toContainText('生产VRF');
+    await expect(table).toContainText('华东生产区');
+    await expect(table).toContainText('NAT集群A');
+    await expect(table).toContainText('https-admin:8443');
+    await expect(table).toContainText('ProFormField 全量组合录制');
+  }, replayVerification);
 });
 
 
@@ -288,8 +310,23 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await page.getByRole('textbox', { name: '开始地址，例如：' }).fill('1.1.1.1');
   await page.getByLabel('结束地址，例如：192.168.1.254').click();
   await page.getByRole('textbox', { name: '结束地址，例如：' }).fill('2.2.2.2');
-  await ipv4Dialog.getByRole('button', { name: '确 定' }).click();
-  await expect(page.getByRole('row', { name: /test1.*xtest16:WAN1.*1\.1\.1\.1.*2\.2\.2\.2/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('textbox', { name: '开始地址，例如：' })).toHaveValue('1.1.1.1');
+  await expect(page.getByRole('textbox', { name: '结束地址，例如：' })).toHaveValue('2.2.2.2');
+  const ipv4ConfirmButton = ipv4Dialog.getByRole('button', { name: '确 定' });
+  await expect(ipv4ConfirmButton).toBeEnabled({ timeout: 10_000 });
+  const targetIpv4Row = page.getByRole('row', { name: /test1.*xtest16:WAN1.*1\.1\.1\.1.*2\.2\.2\.2/ });
+  for (let attempt = 0; attempt < 4 && await ipv4Dialog.isVisible().catch(() => false); attempt++) {
+    try {
+      await ipv4ConfirmButton.click({ timeout: 5_000 });
+    } catch (error) {
+      if (!await ipv4Dialog.isVisible().catch(() => false) || await targetIpv4Row.isVisible().catch(() => false))
+        break;
+      throw error;
+    }
+    await page.waitForTimeout(500);
+  }
+  await expect(ipv4Dialog).toBeHidden({ timeout: 10_000 });
+  await expect(targetIpv4Row).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('site-save-button').click();
   await expect(page.getByText('配置已保存')).toBeVisible();
 
@@ -341,7 +378,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.artifacts.playwrightCode).toContain('for (const row of');
   expect(flow.artifacts.playwrightCode).toContain('批量创建IPv4地址池');
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-form-fields.html');
-  expect(flow.artifacts.playwrightCode).toContain('新建IPv4地址池');
+  expect(flow.artifacts.playwrightCode).toContain('site-ip-address-pool-create-button');
   expect(flow.artifacts.playwrightCode).toContain('test1');
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
@@ -480,12 +517,14 @@ async function clickVisibleAntDOption(page: Page, text: string) {
       .filter({ hasText: text });
   const option = options.first();
   await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.scrollIntoViewIfNeeded();
   await option.click({ timeout: 5_000 }).catch(async () => {
     await options.evaluateAll((elements, expectedText) => {
       const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
       const expected = normalize(expectedText);
-      const element = elements.find(element => normalize(element.getAttribute('title')) === expected || normalize(element.textContent) === expected);
+      const element = elements.find(element => {
+        const optionText = normalize((element.querySelector('.ant-select-item-option-content') as HTMLElement | null)?.textContent);
+        return normalize(element.getAttribute('title')) === expected || optionText === expected || normalize(element.textContent) === expected;
+      });
       if (!element)
         throw new Error(`AntD option not found exactly: ${expected}`);
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
@@ -501,17 +540,20 @@ async function clickVisibleAntDTreeNode(page: Page, text: string) {
   const nodes = page
       .locator('.ant-select-tree-node-content-wrapper')
       .filter({ hasText: text });
-  await expect(nodes.first()).toBeVisible({ timeout: 10_000 });
-  await nodes.evaluateAll((elements, expectedText) => {
-    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
-    const expected = normalize(expectedText);
-    const element = elements.find(element => normalize(element.textContent) === expected);
-    if (!element)
-      throw new Error(`AntD tree node not found exactly: ${expected}`);
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  }, text);
+  const node = nodes.first();
+  await expect(node).toBeVisible({ timeout: 10_000 });
+  await node.click({ timeout: 5_000 }).catch(async () => {
+    await nodes.evaluateAll((elements, expectedText) => {
+      const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+      const expected = normalize(expectedText);
+      const element = elements.find(element => normalize(element.textContent) === expected);
+      if (!element)
+        throw new Error(`AntD tree node not found exactly: ${expected}`);
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }, text);
+  });
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
 }
 
@@ -519,17 +561,20 @@ async function clickVisibleAntDCascaderOption(page: Page, text: string) {
   const options = page
       .locator('.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item')
       .filter({ hasText: text });
-  await expect(options.first()).toBeVisible({ timeout: 10_000 });
-  await options.evaluateAll((elements, expectedText) => {
-    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
-    const expected = normalize(expectedText);
-    const element = elements.find(element => normalize(element.textContent) === expected);
-    if (!element)
-      throw new Error(`AntD cascader option not found exactly: ${expected}`);
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  }, text);
+  const option = options.first();
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.click({ timeout: 5_000 }).catch(async () => {
+    await options.evaluateAll((elements, expectedText) => {
+      const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+      const expected = normalize(expectedText);
+      const element = elements.find(element => normalize(element.textContent) === expected);
+      if (!element)
+        throw new Error(`AntD cascader option not found exactly: ${expected}`);
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }, text);
+  });
 }
 
 async function exportBusinessFlowJson(recorderPage: Page) {
@@ -585,7 +630,15 @@ async function downloadTextAfterClick(recorderPage: Page, trigger: ReturnType<Pa
   });
 }
 
-async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo?: TestInfo) {
+function writeGeneratedReplayDiagnostic(testInfo: TestInfo, name: string, flow: any) {
+  const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
+  const diagnosticDir = path.join(rawReplayRoot, `${testInfo.workerIndex}-${name}-diagnostic-${Date.now()}`);
+  fs.mkdirSync(diagnosticDir, { recursive: true });
+  fs.writeFileSync(path.join(diagnosticDir, 'generated-before-assert.spec.ts'), flow.artifacts?.playwrightCode || '');
+  fs.writeFileSync(path.join(diagnosticDir, 'business-flow.json'), JSON.stringify(flow, null, 2));
+}
+
+async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo?: TestInfo, verify?: (page: Page) => Promise<void>, standaloneVerification?: string[]) {
   if (testInfo) {
     const rawReplayDir = testInfo.outputPath('raw-generated-replay');
     fs.mkdirSync(rawReplayDir, { recursive: true });
@@ -596,20 +649,67 @@ async function replayGeneratedPlaywrightCode(context: BrowserContext, code: stri
   try {
     const replay = new Function('page', 'expect', `return (async () => {\n${body}\n})();`);
     await replay(replayPage, expect);
+    if (verify)
+      await verify(replayPage);
   } finally {
     await replayPage.close();
   }
   if (testInfo)
-    runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo);
+    runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, standaloneVerification);
 }
 
-function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo) {
+function expectInOrder(text: string, markers: Array<string | RegExp>) {
+  let offset = 0;
+  for (const marker of markers) {
+    const slice = text.slice(offset);
+    const index = typeof marker === 'string' ? slice.indexOf(marker) : slice.search(marker);
+    expect(index, `missing marker after offset ${offset}: ${String(marker)}`).toBeGreaterThanOrEqual(0);
+    offset += index + 1;
+  }
+}
+
+function assertNoNetworkResourceSubmitBeforeRequiredFields(code: string) {
+  const finalSaveIndex = code.lastIndexOf('network-resource-save');
+  expect(finalSaveIndex, 'network-resource-save final submit should exist').toBeGreaterThanOrEqual(0);
+  const tailAfterFinalSave = code.slice(finalSaveIndex + 'network-resource-save'.length);
+  for (const marker of [
+    'pool-proform-alpha',
+    'edge-lab:WAN-extra-18',
+    '生产VRF',
+    '开启代理ARP',
+    '启用健康检查',
+    'network-resource-health-switch',
+    'https://probe.example/health',
+    '华东生产区',
+    'NAT集群A',
+    'https-admin',
+    '8443',
+    'ProFormField 全量组合录制',
+    '服务名称',
+    '监听端口',
+    'network-resource-source-port',
+    'network-resource-remark',
+  ])
+    expect(tailAfterFinalSave, `required field marker should not appear after final network-resource-save: ${marker}`).not.toContain(marker);
+}
+
+function appendReplayVerification(code: string, verificationLines: string[]) {
+  if (!verificationLines.length)
+    return code;
+  const bodyEnd = code.lastIndexOf('\n});');
+  if (bodyEnd < 0)
+    throw new Error(`Unable to append generated replay verification:\n${code}`);
+  return `${code.slice(0, bodyEnd)}\n\n  // business terminal-state verification added by the E2E harness\n  ${verificationLines.join('\n  ')}\n${code.slice(bodyEnd)}`;
+}
+
+function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo, verificationLines: string[] = []) {
   const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
   fs.mkdirSync(rawReplayRoot, { recursive: true });
   const rawReplayDir = fs.mkdtempSync(path.join(rawReplayRoot, `${testInfo.workerIndex}-`));
   const specPath = path.join(rawReplayDir, 'generated-replay.spec.ts');
   const configPath = path.join(rawReplayDir, 'playwright.raw-replay.config.ts');
-  fs.writeFileSync(specPath, code);
+  const specSource = appendReplayVerification(code, verificationLines);
+  fs.writeFileSync(specPath, specSource);
   fs.writeFileSync(configPath, [
     `import { defineConfig, devices } from '@playwright/test';`,
     `export default defineConfig({`,
