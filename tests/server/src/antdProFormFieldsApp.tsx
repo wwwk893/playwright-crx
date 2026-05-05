@@ -33,6 +33,7 @@ type NetworkResource = {
   id: string;
   name: string;
   wan: string;
+  vrf?: string;
   poolType: string;
   scope?: string;
   egressPath?: string[];
@@ -155,6 +156,7 @@ function AntDProFormFieldsApp() {
   const columns: ProColumns<NetworkResource>[] = [
     { title: '资源名称', dataIndex: 'name' },
     { title: 'WAN口', dataIndex: 'wan', render: (_, row) => <Tag color="blue">{row.wan}</Tag> },
+    { title: '关联VRF', dataIndex: 'vrf' },
     { title: '类型', dataIndex: 'poolType' },
     { title: '发布范围', dataIndex: 'scope' },
     { title: '出口路径', dataIndex: 'egressPath', render: (_, row) => row.egressPath?.join(' / ') },
@@ -184,6 +186,7 @@ function AntDProFormFieldsApp() {
       id: `network-resource-${Date.now()}`,
       name: values.name,
       wan: labelFromOptions(wanOptions, values.wan),
+      vrf: values.vrf ? labelFromOptions(vrfOptions, values.vrf) : undefined,
       poolType: values.poolType,
       scope: treeLabel(values.scope),
       egressPath: cascaderLabels(values.egressPath),

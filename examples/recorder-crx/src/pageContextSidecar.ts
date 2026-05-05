@@ -82,6 +82,10 @@ type ActiveDropdownContext = {
   time: number;
 };
 let activeDropdownContexts: ActiveDropdownContext[] = [];
+let lastDropdownPointerKey = '';
+let lastDropdownPointerAt = 0;
+const dropdownContextTtlMs = 2500;
+const dropdownPointerDedupeMs = 80;
 
 if (!(window as any)[installKey]) {
   (window as any)[installKey] = true;
@@ -97,6 +101,17 @@ function recordDropdownOptionPointerEvent(event: Event) {
   const target = dropdownOptionEventTarget(event);
   if (!target || shouldIgnoreTarget(target, 'click'))
     return;
+  const overlay = closestWithin(target, '.ant-select-dropdown, .ant-cascader-dropdown, .ant-dropdown, [role="listbox"], [role="tree"]');
+  const key = [
+    dropdownTypeForOverlay(overlay) || 'dropdown',
+    elementText(target),
+    Math.round(performance.now() / dropdownPointerDedupeMs),
+  ].join(':');
+  const now = performance.now();
+  if (key === lastDropdownPointerKey && now - lastDropdownPointerAt < dropdownPointerDedupeMs)
+    return;
+  lastDropdownPointerKey = key;
+  lastDropdownPointerAt = now;
   recordEventForTarget('click', event, target);
 }
 
@@ -434,14 +449,14 @@ function rememberDropdownContext(context: Omit<ActiveDropdownContext, 'id' | 'ti
     ...context,
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     time: performance.now(),
-  }, ...activeDropdownContexts.filter(context => performance.now() - context.time < 5000)].slice(0, 5);
+  }, ...activeDropdownContexts.filter(context => performance.now() - context.time < dropdownContextTtlMs)].slice(0, 5);
 }
 
 function activeDropdownContextFor(target: Element) {
   const overlay = closestWithin(target, '.ant-select-dropdown, .ant-cascader-dropdown, .ant-dropdown, [role="listbox"], [role="tree"]');
   const type = dropdownTypeForOverlay(overlay);
   return activeDropdownContexts
-      .filter(context => performance.now() - context.time < 5000)
+      .filter(context => performance.now() - context.time < dropdownContextTtlMs)
       .filter(context => !type || !context.dropdownType || context.dropdownType === type)
       .sort((a, b) => b.time - a.time)[0];
 }

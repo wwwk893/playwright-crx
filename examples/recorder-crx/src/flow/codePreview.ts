@@ -145,12 +145,26 @@ function hasOwnPageContext(step: FlowStep) {
 }
 
 function canInheritDialogContext(step: FlowStep) {
+  if (!hasOwnPageContext(step))
+    return false;
+  const hasOwnDialog = isPersistentDialog(step.context?.before.dialog) || isPersistentDialog(step.target?.scope?.dialog);
+  if (!hasOwnDialog) {
+    if (step.context?.before.section || step.target?.scope?.section)
+      return false;
+    if (step.context?.before.table || step.target?.scope?.table)
+      return false;
+    const testId = step.target?.testId || step.context?.before.target?.testId || step.context?.before.form?.testId || step.target?.scope?.form?.testId;
+    if (testId && !looksLikeDialogOwnedTestId(testId))
+      return false;
+  }
   const label = normalizeGeneratedText(step.target?.label || step.target?.name || step.target?.displayName || step.context?.before.form?.label || step.target?.scope?.form?.label);
   if (/^下方/.test(label || ''))
     return false;
-  if (step.context?.before.section || step.target?.scope?.section)
-    return false;
-  return hasOwnPageContext(step);
+  return true;
+}
+
+function looksLikeDialogOwnedTestId(testId: string) {
+  return /(modal|drawer|dialog|popup|popover|overlay)/i.test(testId);
 }
 
 function isDialogClosingClick(step: FlowStep) {
@@ -486,7 +500,10 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     case 'fill': {
       const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
       const isComboboxFill = step.target?.role === 'combobox' || /^(select|tree-select|cascader)$/.test(step.context?.before.target?.controlType || '');
-      const preferred = isComboboxFill ? undefined : fieldLocator(step);
+      const selectTrigger = isComboboxFill ? antdSelectFieldLocator(step) : undefined;
+      if (selectTrigger)
+        return `await ${selectTrigger}.locator(${stringLiteral('input')}).first().fill(${value});`;
+      const preferred = fieldLocator(step);
       if (preferred)
         return `await ${preferred}.fill(${value});`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
@@ -981,10 +998,21 @@ function parameterizeLine(line: string, step: FlowStep, segment: FlowRepeatSegme
   if (!parameter?.currentValue)
     return line;
   const replacement = rowValues ? stringLiteral(rowValues[parameter.id] ?? parameter.currentValue) : `String(row.${parameter.variableName})`;
+  const activePopupReplacement = parameterizedActivePopupOptionClick(line, parameter.variableName, replacement);
+  if (activePopupReplacement)
+    return activePopupReplacement;
   return line
       .replaceAll(JSON.stringify(parameter.currentValue), replacement)
       .replaceAll(`'${escapeSingleQuoted(parameter.currentValue)}'`, replacement)
       .replaceAll(`"${parameter.currentValue.replace(/"/g, '\\"')}"`, replacement);
+}
+
+function parameterizedActivePopupOptionClick(line: string, variableName: string, replacement: string) {
+  if (!/\.getByText\([^)]*\)\.click\(\);/.test(line))
+    return undefined;
+  if (!/^(wan|wanPort|vrf|scope|egressPath|role)$/i.test(variableName))
+    return undefined;
+  return `await page.locator(${stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item')}).filter({ hasText: ${replacement} }).first().click();`;
 }
 
 function replaceTemplateValues(value: string, segment: FlowRepeatSegment) {

@@ -968,16 +968,22 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
       recordedActionIds: reconciled.upgradedActionIds,
     });
   }
-  if (!afterStepId && drafts.some(draft => typeof draftWallTime(draft) === 'number')) {
-    for (const draft of drafts)
-      insertProjectedDraftByWallTime(steps, draft);
-    return {
-      ...flow,
-      steps: recomputeOrders(steps),
-    };
+  if (!afterStepId && shouldPlaceRecordedBatchAroundSyntheticSteps(steps, drafts)) {
+    const insertAt = projectedDraftInsertionIndex(steps, drafts[0]);
+    return insertProjectedDraftBatch(flow, steps, drafts, insertAt);
   }
 
   const insertAt = afterStepId ? Math.max(0, steps.findIndex(step => step.id === afterStepId) + 1) : steps.length;
+  return insertProjectedDraftBatch(flow, steps, drafts, insertAt);
+}
+
+function shouldPlaceRecordedBatchAroundSyntheticSteps(steps: FlowStep[], drafts: StepDraft[]) {
+  if (!drafts.length || !drafts.some(draft => typeof draftWallTime(draft) === 'number'))
+    return false;
+  return steps.some(step => isSyntheticClickStep(step) && typeof stepWallTime(step) === 'number');
+}
+
+function insertProjectedDraftBatch(flow: BusinessFlow, steps: FlowStep[], drafts: StepDraft[], insertAt: number): BusinessFlow {
   while (drafts.length) {
     const previous = steps[insertAt - 1];
     const [firstDraft] = drafts;
@@ -1006,27 +1012,6 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
     ...flow,
     steps: recomputeOrders(steps),
   };
-}
-
-function insertProjectedDraftByWallTime(steps: FlowStep[], draft: StepDraft) {
-  const insertAt = projectedDraftInsertionIndex(steps, draft);
-  const previous = steps[insertAt - 1];
-  if (previous && shouldMergeTyping(previous, draft.step)) {
-    steps[insertAt - 1] = mergeFillStep(previous, draft.step);
-    return;
-  }
-  if (previous && draft.step.action === 'press' && isTypingPress(draft.step) && sameEditableTarget(previous, draft.step)) {
-    steps[insertAt - 1] = mergeSourceActions(previous, draft.step);
-    return;
-  }
-  if (previous && draft.step.action === 'assert' && draft.step.assertions.some(assertion => assertion.enabled)) {
-    steps[insertAt - 1] = {
-      ...mergeSourceActions(previous, draft.step),
-      assertions: mergeAssertions(previous.assertions, draft.step.assertions),
-    };
-    return;
-  }
-  steps.splice(insertAt, 0, draft.step);
 }
 
 function projectedDraftInsertionIndex(steps: FlowStep[], draft: StepDraft) {

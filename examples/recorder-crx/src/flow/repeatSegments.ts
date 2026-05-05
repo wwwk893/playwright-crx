@@ -157,10 +157,11 @@ function repeatParameterValue(step: FlowStep) {
     return undefined;
   const before = step.context?.before;
   const fieldLabel = before?.form?.label || step.target?.scope?.form?.label || step.target?.label;
-  const inDropdown = before?.dialog?.type === 'dropdown' || /dropdown|select/i.test(step.target?.role || '') || isPopupOptionClick(step);
-  if (fieldLabel && inDropdown && !isOrdinaryFormLabelClick(step, fieldLabel, optionText))
+  const isFormPopupOption = isPopupOptionClick(step) && !!fieldLabel && /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(controlType || '');
+  if (isFormPopupOption && !isOrdinaryFormLabelClick(step, fieldLabel, optionText))
     return optionText;
-  if (!fieldLabel && inDropdown && isPopupOptionClick(step))
+  const contextLightFormDropdownOption = before?.dialog?.type === 'dropdown' && !/^(menuitem)$/i.test(role) && controlType !== 'menu-item';
+  if (!fieldLabel && ((isPopupOptionClick(step) && controlType !== 'menu-item' && !/^(menuitem)$/i.test(role)) || contextLightFormDropdownOption))
     return optionText;
   return undefined;
 }
