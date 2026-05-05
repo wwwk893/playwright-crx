@@ -503,6 +503,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const selectTrigger = isComboboxFill ? antdSelectFieldLocator(step) : undefined;
       if (selectTrigger)
         return `await ${selectTrigger}.locator(${stringLiteral('input')}).first().fill(${value});`;
+      const testIdLocator = globalTestIdLocator(step);
+      if (testIdLocator)
+        return `await ${testIdLocator}.fill(${value});`;
       const preferred = fieldLocator(step);
       if (preferred)
         return `await ${preferred}.fill(${value});`;
@@ -768,7 +771,10 @@ function antdSelectOptionDispatchSource(locator: string, optionName?: string, op
     `await ${locator}.evaluateAll((elements, expectedText) => {`,
     `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
     `  const expected = normalize(expectedText);`,
-    `  const element = elements.find(element => normalize(element.getAttribute("title")) === expected || normalize(element.textContent) === expected) || elements[elements.length - 1];`,
+    `  const element = elements.find(element => {`,
+    `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
+    `    return normalize(element.getAttribute("title")) === expected || optionText === expected || normalize(element.textContent) === expected;`,
+    `  });`,
     `  if (!element)`,
     `    throw new Error(\`AntD option not found: \${expected}\`);`,
     `  const text = normalize(element.textContent);`,
@@ -1012,7 +1018,33 @@ function parameterizedActivePopupOptionClick(line: string, variableName: string,
     return undefined;
   if (!/^(wan|wanPort|vrf|scope|egressPath|role)$/i.test(variableName))
     return undefined;
-  return `await page.locator(${stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item')}).filter({ hasText: ${replacement} }).first().click();`;
+  return activePopupOptionDispatchSource('page.locator(' + stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item') + ')', replacement);
+}
+
+function activePopupOptionDispatchSource(locator: string, expectedExpression: string) {
+  return [
+    `await ${locator}.first().waitFor({ state: "visible", timeout: 10000 });`,
+    `await ${locator}.evaluateAll((elements, expectedText) => {`,
+    `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
+    `  const expected = normalize(expectedText);`,
+    `  const element = elements.find(element => {`,
+    `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
+    `    return normalize(element.getAttribute("title")) === expected || optionText === expected || normalize(element.textContent) === expected;`,
+    `  });`,
+    `  if (!element)`,
+    `    throw new Error(\`AntD popup option not found: \${expected}\`);`,
+    `  const text = normalize(element.textContent);`,
+    `  if (text !== expected && normalize(element.getAttribute("title")) !== expected)`,
+    `    throw new Error(\`AntD popup option text mismatch: expected \${expected}, got \${text}\`);`,
+    `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled") || element.classList.contains("ant-cascader-menu-item-disabled"))`,
+    `    throw new Error(\`AntD popup option is disabled: \${expected}\`);`,
+    `  element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
+    `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+    `}, ${expectedExpression});`,
+  ].join('\n');
 }
 
 function replaceTemplateValues(value: string, segment: FlowRepeatSegment) {

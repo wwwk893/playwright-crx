@@ -17,7 +17,7 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { BrowserContext } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import type { TestInfo } from '@playwright/test';
 import { test, expect } from './crxRecorderTest';
 import {
@@ -301,14 +301,33 @@ test('case-driven human-like records network resource complex form repeat flow a
   expect(flow.artifacts.playwrightCode).toContain('生产访问策略');
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo);
+  const networkReplayVerificationLines = [
+    `const table = page.getByTestId("network-resource-table");`,
+    `await expect(table).toContainText("res-web-01", { timeout: 10000 });`,
+    `await expect(table).toContainText("edge-lab:WAN1");`,
+    `await expect(table).toContainText("生产VRF");`,
+    `await expect(table).toContainText("华东生产区");`,
+    `await expect(table).toContainText("NAT集群A");`,
+    `await expect(table).toContainText("web:443");`,
+    `await expect(table).toContainText("生产访问策略");`,
+  ];
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo, async replayPage => {
+    const table = replayPage.getByTestId('network-resource-table');
+    await expect(table).toContainText('res-web-01', { timeout: 10_000 });
+    await expect(table).toContainText('edge-lab:WAN1');
+    await expect(table).toContainText('生产VRF');
+    await expect(table).toContainText('华东生产区');
+    await expect(table).toContainText('NAT集群A');
+    await expect(table).toContainText('web:443');
+    await expect(table).toContainText('生产访问策略');
+  }, networkReplayVerificationLines);
 });
 
 function loadBenchmarkCase(fileName: string) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'benchmarks', 'agent_models', 'cases', fileName), 'utf8'));
 }
 
-async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo: TestInfo) {
+async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo: TestInfo, verify?: (page: Page) => Promise<void>, standaloneVerificationLines: string[] = []) {
   const rawReplayDir = testInfo.outputPath('raw-generated-replay');
   fs.mkdirSync(rawReplayDir, { recursive: true });
   fs.writeFileSync(path.join(rawReplayDir, 'generated-before-inline.spec.ts'), code);
@@ -318,19 +337,31 @@ async function replayGeneratedPlaywrightCode(context: BrowserContext, code: stri
   try {
     const replay = new Function('page', 'expect', `return (async () => {\n${body}\n})();`);
     await replay(replayPage, expect);
+    if (verify)
+      await verify(replayPage);
   } finally {
     await replayPage.close();
   }
-  runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo);
+  runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, standaloneVerificationLines);
 }
 
-function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo) {
+function appendReplayVerification(code: string, verificationLines: string[]) {
+  if (!verificationLines.length)
+    return code;
+  const bodyEnd = code.lastIndexOf('\n});');
+  if (bodyEnd < 0)
+    throw new Error(`Unable to append generated replay verification:\n${code}`);
+  return `${code.slice(0, bodyEnd)}\n\n  // business terminal-state verification added by the E2E harness\n  ${verificationLines.join('\n  ')}\n${code.slice(bodyEnd)}`;
+}
+
+function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo, verificationLines: string[] = []) {
   const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
   fs.mkdirSync(rawReplayRoot, { recursive: true });
   const rawReplayDir = fs.mkdtempSync(path.join(rawReplayRoot, `${testInfo.workerIndex}-`));
   const specPath = path.join(rawReplayDir, 'generated-replay.spec.ts');
   const configPath = path.join(rawReplayDir, 'playwright.raw-replay.config.ts');
-  fs.writeFileSync(specPath, code);
+  const specSource = appendReplayVerification(code, verificationLines);
+  fs.writeFileSync(specPath, specSource);
   fs.writeFileSync(configPath, [
     `import { defineConfig, devices } from '@playwright/test';`,
     `export default defineConfig({`,

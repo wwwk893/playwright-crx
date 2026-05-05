@@ -264,7 +264,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
 
   base = {
     ...base,
-    steps: recomputeOrders(steps),
+    steps: recomputeOrders(moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps)),
     updatedAt: new Date().toISOString(),
   };
   emitDiagnostic({ diagnostics: options.diagnostics }, 'merge.synthetic-page-click', '页面侧 click 已根据上下文合成业务步骤', {
@@ -969,7 +969,7 @@ function insertProjectedSteps(flow: BusinessFlow, drafts: StepDraft[], afterStep
     });
   }
   if (!afterStepId && shouldPlaceRecordedBatchAroundSyntheticSteps(steps, drafts)) {
-    const insertAt = projectedDraftInsertionIndex(steps, drafts[0]);
+    const insertAt = projectedDraftInsertionIndex(steps, insertionAnchorDraft(drafts));
     return insertProjectedDraftBatch(flow, steps, drafts, insertAt);
   }
 
@@ -981,6 +981,10 @@ function shouldPlaceRecordedBatchAroundSyntheticSteps(steps: FlowStep[], drafts:
   if (!drafts.length || !drafts.some(draft => typeof draftWallTime(draft) === 'number'))
     return false;
   return steps.some(step => isSyntheticClickStep(step) && typeof stepWallTime(step) === 'number');
+}
+
+function insertionAnchorDraft(drafts: StepDraft[]) {
+  return drafts.find(draft => typeof draftWallTime(draft) === 'number') || drafts[0];
 }
 
 function insertProjectedDraftBatch(flow: BusinessFlow, steps: FlowStep[], drafts: StepDraft[], insertAt: number): BusinessFlow {
@@ -1010,7 +1014,7 @@ function insertProjectedDraftBatch(flow: BusinessFlow, steps: FlowStep[], drafts
   steps.splice(insertAt, 0, ...drafts.map(draft => draft.step));
   return {
     ...flow,
-    steps: recomputeOrders(steps),
+    steps: recomputeOrders(moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps)),
   };
 }
 
@@ -1023,6 +1027,38 @@ function projectedDraftInsertionIndex(steps: FlowStep[], draft: StepDraft) {
     return typeof existingWallTime === 'number' && existingWallTime > wallTime;
   });
   return firstLaterStepIndex >= 0 ? firstLaterStepIndex : steps.length;
+}
+
+function isSyntheticSubmitClickStep(step: FlowStep) {
+  if (!isSyntheticClickStep(step))
+    return false;
+  const targetText = [step.target?.testId, step.target?.name, step.target?.text, step.target?.displayName].filter(Boolean).join('|');
+  return /save|submit|confirm|保存|提交|确定|确 定/i.test(targetText);
+}
+
+function moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps: FlowStep[]) {
+  let ordered = [...steps];
+  for (let index = 0; index < ordered.length; index++) {
+    const syntheticStep = ordered[index];
+    if (!isSyntheticSubmitClickStep(syntheticStep))
+      continue;
+    const syntheticWallTime = stepWallTime(syntheticStep);
+    if (typeof syntheticWallTime !== 'number')
+      continue;
+    const before = ordered.slice(0, index);
+    const after = ordered.slice(index + 1);
+    const earlierAfterSynthetic = after.filter(step => {
+      const wallTime = stepWallTime(step);
+      return typeof wallTime === 'number' && wallTime < syntheticWallTime;
+    });
+    if (!earlierAfterSynthetic.length)
+      continue;
+    const earlierIds = new Set(earlierAfterSynthetic.map(step => step.id));
+    const laterOrUntimed = after.filter(step => !earlierIds.has(step.id));
+    ordered = [...before, ...earlierAfterSynthetic, syntheticStep, ...laterOrUntimed];
+    index += earlierAfterSynthetic.length;
+  }
+  return ordered;
 }
 
 function draftWallTime(draft: StepDraft) {

@@ -1632,6 +1632,104 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'recorded action batch with first untimed draft uses first timed draft for synthetic-relative insertion',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickActionWithWallTime('打开新建弹窗', 1000),
+      ], [], {});
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [
+        pageClickEventWithTarget('ctx-cascader-option', 3000, {
+          tag: 'div',
+          role: 'menuitem',
+          controlType: 'cascader-option',
+          text: '上海',
+          normalizedText: '上海',
+        }),
+      ]);
+      const merged = mergeActionsIntoFlow(withSynthetic, [
+        clickActionWithWallTime('打开新建弹窗', 1000),
+        clickAction('无时间戳动作'),
+        fillActionWithWallTime('关联VRF', '生产', 2000),
+      ], [], {});
+
+      assertEqual(merged.steps.map(step => step.target?.name || step.value || step.target?.text), [
+        '打开新建弹窗',
+        '无时间戳动作',
+        '生产',
+        '上海',
+      ]);
+    },
+  },
+  {
+    name: 'late recorded fields are restored before a later synthetic submit click',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('network-resource-add', 1000),
+        testIdClickAction('network-resource-save', 1100),
+        fillActionWithWallTime('地址池名称', 'pool-proform-alpha', 1200),
+      ], [], {});
+      const withSyntheticSubmit: BusinessFlow = {
+        ...initial,
+        steps: [
+          ...initial.steps,
+          {
+            ...initial.steps[1],
+            id: 's004',
+            order: 4,
+            kind: 'manual',
+            sourceActionIds: [],
+            rawAction: {
+              syntheticContextEventId: 'ctx-final-save',
+              syntheticContextEventWallTime: 3000,
+            },
+            context: {
+              eventId: 'ctx-final-save',
+              capturedAt: 3000,
+              before: {
+                target: {
+                  tag: 'button',
+                  role: 'button',
+                  testId: 'network-resource-save',
+                  text: '保 存',
+                  normalizedText: '保 存',
+                },
+              },
+            },
+            target: {
+              testId: 'network-resource-save',
+              role: 'button',
+              name: '保 存',
+              text: '保 存',
+            },
+            sourceCode: 'await page.getByTestId("network-resource-save").click();',
+          },
+        ],
+      };
+      const merged = mergeActionsIntoFlow(withSyntheticSubmit, [
+        testIdClickAction('network-resource-add', 1000),
+        testIdClickAction('network-resource-save', 1100),
+        fillActionWithWallTime('地址池名称', 'pool-proform-alpha', 1200),
+        fillActionWithWallTime('探测地址', 'https://probe.example/health', 2000),
+        fillActionWithWallTime('服务名称', 'https-admin', 2100),
+        fillActionWithWallTime('监听端口', '8443', 2200),
+      ], [], {
+        appendNewActions: true,
+        insertBaseActionCount: 3,
+      });
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertTextInOrder(code, [
+        'network-resource-add',
+        'network-resource-save',
+        'pool-proform-alpha',
+        'https://probe.example/health',
+        'https-admin',
+        '8443',
+        'network-resource-save',
+      ]);
+    },
+  },
+  {
     name: 'synthetic page context click orders before recorded fill using end wall time',
     run: () => {
       const initial = mergeActionsIntoFlow(undefined, [
@@ -1769,7 +1867,11 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       assert(code.includes('for (const row of repeat_1Data)'), 'repeat loop should be emitted');
       assert(code.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parameterized popup option should stay scoped to active AntD dropdown');
-      assert(code.includes('filter({ hasText: String(row.vrf) })'), 'popup option should use the row variable as the option text');
+      assert(code.includes('evaluateAll((elements, expectedText)'), 'parameterized popup option should validate against the active popup options');
+      assert(code.includes('AntD option text mismatch'), 'parameterized popup option should fail on partial or wrong text matches');
+      assert(code.includes('}, String(row.vrf));'), 'popup option should use the row variable as exact expected text');
+      assert(!code.includes('|| elements[elements.length - 1]'), 'popup option must not fall back to the last partial match');
+      assert(!code.includes('filter({ hasText: String(row.vrf) }).first().click()'), 'parameterized dropdown option must not use partial first-match clicks');
       assert(!code.includes('page.getByText(String(row.vrf)).click()'), 'parameterized dropdown option must not become a global text click');
     },
   },
@@ -2932,6 +3034,59 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input").first().fill("WAN-extra-18");'), 'search fill should target the input inside the scoped ProFormSelect trigger');
       assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'search fill should not rely on brittle combobox accessible name');
       assert(!firstStep.includes('internal:role=combobox'), 'search fill should not replay the raw combobox selector');
+    },
+  },
+  {
+    name: 'fill with stable test id ignores polluted ProFormSelect label context',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            testId: 'network-resource-name',
+            name: '选择一个WAN口',
+            displayName: '选择一个WAN口',
+            scope: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+            },
+          },
+          value: 'pool-proform-alpha',
+          context: {
+            eventId: 'ctx-polluted-name-fill',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+              target: {
+                tag: 'input',
+                testId: 'network-resource-name',
+                framework: 'procomponents',
+                controlType: 'input',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="network-resource-name"s]',
+              text: 'pool-proform-alpha',
+            },
+          },
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input").first().fill("pool-proform-alpha");`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('page.getByTestId("network-resource-name").fill("pool-proform-alpha");'), 'stable test id fill should win over polluted select label context');
+      assert(!firstStep.includes('filter({ hasText: "WAN口" })'), 'resource-name fill should not target the WAN ProFormSelect input');
     },
   },
   {
