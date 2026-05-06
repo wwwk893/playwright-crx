@@ -37,6 +37,29 @@ import {
 
 test.describe.configure({ mode: 'serial' });
 
+test('human-like recorder warns before leaving an unsaved recording @human-smoke', async ({ page, attachRecorder, baseURL }) => {
+  test.setTimeout(60_000);
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
+
+  await beginNewFlowFromLibraryLikeUser(recorderPage);
+  await fillFlowMetaLikeUser(recorderPage, '流程名称', '未保存离开提醒');
+  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await humanClick(recorderPage.getByRole('button', { name: '返回流程库' }));
+  await expect(recorderPage.getByRole('dialog', { name: '还有未保存的流程' })).toBeVisible();
+  await humanClick(recorderPage.getByRole('button', { name: '继续编辑' }));
+  await expect(recorderPage.getByRole('dialog', { name: '还有未保存的流程' })).toBeHidden();
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await humanClick(recorderPage.getByRole('button', { name: '返回流程库' }));
+  await expect(recorderPage.getByRole('dialog', { name: '还有未保存的流程' })).toBeVisible();
+  await humanClick(recorderPage.getByRole('button', { name: '不保存，返回流程库' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('流程库');
+});
+
 test('human-like recorder preserves nth for duplicate test id save button @human-smoke', async ({ page, attachRecorder, baseURL }, testInfo) => {
   test.setTimeout(120_000);
 

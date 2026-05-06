@@ -163,6 +163,26 @@ function cloneFlowRecord(flow: BusinessFlow): BusinessFlow {
   };
 }
 
+function hasMeaningfulFlowWork(flow: BusinessFlow) {
+  return !!flow.flow.name.trim() ||
+    flow.steps.length > 0 ||
+    flow.network.length > 0 ||
+    !!flow.repeatSegments?.length ||
+    !!flow.artifacts?.recorder?.actionLog.length;
+}
+
+function flowSaveSnapshot(flow: BusinessFlow, code?: string) {
+  const snapshot = {
+    ...flow,
+    artifacts: {
+      ...flow.artifacts,
+      playwrightCode: code,
+    },
+    updatedAt: undefined,
+  };
+  return JSON.stringify(snapshot);
+}
+
 function businessFlowSources(sources: Source[], code: string): Source[] {
   const source = sources.find(source => source.id === 'playwright-test') ?? sources.find(source => source.isRecorded);
   return [{
@@ -429,6 +449,8 @@ export const CrxRecorder: React.FC = ({
   const [aiGenerating, setAiGenerating] = React.useState(false);
   const [aiPendingStepIds, setAiPendingStepIds] = React.useState<Set<string>>(() => new Set());
   const [diagnosticLogs, setDiagnosticLogs] = React.useState<RecorderDiagnosticLog[]>(() => loadPersistedDiagnosticLogs());
+  const [unsavedFlowPromptOpen, setUnsavedFlowPromptOpen] = React.useState(false);
+  const [savingBeforeLeave, setSavingBeforeLeave] = React.useState(false);
   const flowDraftRef = React.useRef<BusinessFlow>(flowDraft);
   const pendingAssertionPickRef = React.useRef<PendingAssertionPick>();
   const pendingInsertRecordingRef = React.useRef<PendingInsertRecording>();
@@ -950,6 +972,17 @@ export const CrxRecorder: React.FC = ({
   const businessFlowPlaybackCode = React.useMemo(() => generateBusinessFlowPlaybackCode(flowDraft), [flowDraft]);
   const generatedBusinessSources = React.useMemo(() => businessFlowSources(sources, businessFlowCode), [businessFlowCode, sources]);
   const currentCodeText = settings.businessFlowEnabled === false ? source?.text : businessFlowCode;
+  const hasUnsavedFlowChanges = React.useMemo(() => {
+    if (!hasMeaningfulFlowWork(flowDraft))
+      return false;
+    if (panelStage === 'library' || panelStage === 'aiSettings' || panelStage === 'aiUsage')
+      return false;
+    const savedRecord = selectedRecordId ? flowRecords.find(record => record.flow.id === selectedRecordId) : undefined;
+    if (!savedRecord)
+      return true;
+    const codeForCurrentDraft = settings.businessFlowEnabled === false ? currentCodeText : businessFlowCode;
+    return flowSaveSnapshot(flowDraft, codeForCurrentDraft) !== flowSaveSnapshot(savedRecord, savedRecord.artifacts?.playwrightCode);
+  }, [businessFlowCode, currentCodeText, flowDraft, flowRecords, panelStage, selectedRecordId, settings.businessFlowEnabled]);
 
   React.useEffect(() => {
     businessFlowPlaybackCodeRef.current = businessFlowPlaybackCode;
@@ -1049,12 +1082,14 @@ export const CrxRecorder: React.FC = ({
     setFlowDraft(flow);
   }, []);
 
-  const saveCurrentRecord = React.useCallback(() => {
-    if (!flowDraft.flow.name.trim()) {
+  const saveCurrentRecord = React.useCallback(async () => {
+    if (!flowDraftRef.current.flow.name.trim()) {
       window.alert('请先填写流程名称。');
-      return Promise.resolve(false);
+      return false;
     }
-    const savedFlow = withPlaywrightCodeForStorage(flowDraft, currentCodeText);
+    const latestFlow = await flushPageContextEventsNow();
+    const codeForStorage = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaywrightCode(latestFlow);
+    const savedFlow = withPlaywrightCodeForStorage(latestFlow, codeForStorage);
     setFlowDraft(savedFlow);
     setSelectedRecordId(savedFlow.flow.id);
     setRecordStatus('正在保存流程记录');
@@ -1069,16 +1104,46 @@ export const CrxRecorder: React.FC = ({
           window.alert('流程记录保存失败。');
           return false;
         });
-  }, [currentCodeText, flowDraft, refreshFlowRecords]);
+  }, [currentCodeText, flushPageContextEventsNow, refreshFlowRecords, settings.businessFlowEnabled]);
 
-  const goToLibrary = React.useCallback(() => {
+  const goToLibraryNow = React.useCallback(() => {
     pendingInsertRecordingRef.current = undefined;
     setInsertRecordingAfterStepId(undefined);
+    setUnsavedFlowPromptOpen(false);
+    setSavingBeforeLeave(false);
     setPanelStage('library');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
     refreshFlowRecords();
   }, [refreshFlowRecords]);
+
+  const goToLibrary = React.useCallback(() => {
+    if (hasUnsavedFlowChanges) {
+      setUnsavedFlowPromptOpen(true);
+      return;
+    }
+    goToLibraryNow();
+  }, [goToLibraryNow, hasUnsavedFlowChanges]);
+
+  const saveAndGoToLibrary = React.useCallback(async () => {
+    setSavingBeforeLeave(true);
+    const saved = await saveCurrentRecord();
+    if (saved)
+      goToLibraryNow();
+    else
+      setSavingBeforeLeave(false);
+  }, [goToLibraryNow, saveCurrentRecord]);
+
+  React.useEffect(() => {
+    if (!hasUnsavedFlowChanges)
+      return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [hasUnsavedFlowChanges]);
 
   const beginNewFlow = React.useCallback(() => {
     const emptyDraft = createDraft(settings, false);
@@ -1772,6 +1837,21 @@ export const CrxRecorder: React.FC = ({
 
   return <>
     <ModalContainer />
+    {unsavedFlowPromptOpen && <div className='library-modal-backdrop'>
+      <div className='unsaved-flow-modal' role='dialog' aria-label='还有未保存的流程'>
+        <button type='button' className='modal-close' onClick={() => setUnsavedFlowPromptOpen(false)} disabled={savingBeforeLeave}>x</button>
+        <div className='modal-warning-icon'>!</div>
+        <h3>还有未保存的流程</h3>
+        <p>当前流程「{flowDraft.flow.name || '未命名业务流程'}」还没有保存到流程库。可以立即保存，也可以不保存本次修改后返回。</p>
+        <div className='unsaved-flow-actions'>
+          <button type='button' className='primary' onClick={saveAndGoToLibrary} disabled={savingBeforeLeave}>
+            {savingBeforeLeave ? '正在保存...' : '立即保存并返回'}
+          </button>
+          <button type='button' onClick={goToLibraryNow} disabled={savingBeforeLeave}>不保存，返回流程库</button>
+          <button type='button' onClick={() => setUnsavedFlowPromptOpen(false)} disabled={savingBeforeLeave}>继续编辑</button>
+        </div>
+      </div>
+    </div>}
 
     <div className='recorder'>
       {settings.experimental && !isBusinessFlowEnabled && <>
@@ -1973,7 +2053,7 @@ export const CrxRecorder: React.FC = ({
               onSaveRecord={() => {
                 saveCurrentRecord().then(saved => {
                   if (saved)
-                    goToLibrary();
+                    goToLibraryNow();
                 });
               }}
               onClearSteps={() => {
