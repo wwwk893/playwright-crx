@@ -22,7 +22,7 @@ import { PreferencesForm } from './preferencesForm';
 import type { CallLog, ElementInfo, Mode, Source } from '@recorder/recorderTypes';
 import { Recorder } from '@recorder/recorder';
 import type { CrxSettings } from './settings';
-import { addSettingsChangedListener, defaultSettings, loadSettings, removeSettingsChangedListener } from './settings';
+import { addSettingsChangedListener, defaultSettings, loadSettings, removeSettingsChangedListener, storeSettings } from './settings';
 import ModalContainer, { create as createModal } from 'react-modal-promise';
 import { SaveCodeForm } from './saveCodeForm';
 import { FlowFormSheet, type FlowFormSheetAction } from './components/FlowFormSheet';
@@ -1068,6 +1068,11 @@ export const CrxRecorder: React.FC = ({
     modal().catch(() => {});
   }, []);
 
+  const updateCrxSettings = React.useCallback((nextSettings: CrxSettings) => {
+    setSettings(nextSettings);
+    storeSettings(nextSettings).catch(() => {});
+  }, []);
+
   const saveCode = React.useCallback(() => {
     if (!settings.experimental)
       return;
@@ -1955,7 +1960,7 @@ export const CrxRecorder: React.FC = ({
   const selectedAssertionStepLabel = stepDisplayLabel(selectedAssertionStep, selectedAssertionStepIndex + 1 || 1);
   const selectedAssertionSuggestion = selectedAssertionStep ? buildSuggestion(flowDraft.steps, selectedAssertionStepIndex) : undefined;
   const recordingFlowName = flowDraft.flow.name.trim();
-  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '复查' : panelStage === 'recording' ? (recordingFlowName ? `录制 · ${recordingFlowName} · 录制中` : '录制 · 未选择流程') : '新建流程';
+  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? '设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '导出检查' : panelStage === 'recording' ? (recordingFlowName ? `录制 · ${recordingFlowName} · 录制中` : '录制 · 未选择流程') : '新建流程';
   const statusClass = panelStage === 'assertion' ? 'assertion' : panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
   const metaLine = [flowDraft.flow.module, flowDraft.flow.role, `${stats.stepCount} 步骤`].filter(Boolean).join(' · ');
   const insertAnchorStep = insertRecordingAfterStepId ? flowDraft.steps.find(step => step.id === insertRecordingAfterStepId) : undefined;
@@ -2048,12 +2053,14 @@ export const CrxRecorder: React.FC = ({
             profiles={aiProfiles}
             activeProfile={activeAiProfile}
             apiKey={activeAiApiKey}
+            crxSettings={settings}
             status={aiStatus}
             generating={aiGenerating}
             onBack={() => setPanelStage('library')}
             onSettingsChange={updateAiSettings}
             onProfilesChange={updateAiProfiles}
             onApiKeyChange={updateActiveAiApiKey}
+            onCrxSettingsChange={updateCrxSettings}
             onTestConnection={testAiConnection}
             onGenerate={() => runAiGeneration()}
             onOpenUsage={() => setAiUsageSheetOpen(true)}
@@ -2238,6 +2245,8 @@ export const CrxRecorder: React.FC = ({
               }}
               onExportJson={() => exportBusinessFlow('json')}
               onExportYaml={() => exportBusinessFlow('yaml')}
+              onOpenReplayCode={() => setActiveTab('code')}
+              playwrightCode={businessFlowPlaybackCode}
               onSaveRepeatSegment={saveRepeatSegment}
               onDeleteRepeatSegment={removeRepeatSegment}
             />}

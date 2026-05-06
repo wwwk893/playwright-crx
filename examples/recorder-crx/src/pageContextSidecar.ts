@@ -391,11 +391,12 @@ function collectTable(target: Element, anchor = actionAnchorForElement(target)) 
   const rowText = row ? elementText(row, 160) : undefined;
   const rowIdentity = rowIdentityFor(row, table);
   const parentExpandedRow = parentRowForExpandedRow(row);
+  const inferredRowKey = row?.getAttribute('data-row-key') || parentExpandedRow?.getAttribute('data-row-key') || inferRowKeyFromPeerRows({ row, table, wrapper, columnIndex, cellText: cell ? elementText(cell, 120) : undefined, rowText });
   const rowKind = rowKindFor(row);
   const context = compactObject({
     title: proTableTitle(wrapper) || (table ? tableTitle(table) : undefined) || sectionTitleAround(wrapper || table || row),
     testId: (wrapper ? testIdOf(wrapper) : undefined) || (table ? testIdOf(table) : undefined) || tableContainerTestId(wrapper || table || row),
-    rowKey: row?.getAttribute('data-row-key') || parentExpandedRow?.getAttribute('data-row-key') || (rowIdentity?.stable ? rowIdentity.value : undefined),
+    rowKey: inferredRowKey || (rowIdentity?.stable ? rowIdentity.value : undefined),
     rowText,
     rowIdentity,
     rowIndex: numericAttribute(row, 'data-row-index') ?? numericAttribute(row, 'data-index'),
@@ -712,6 +713,34 @@ function sectionTitleAround(root?: Element | null) {
     return undefined;
   const section = closestWithin(root, '.ant-pro-card, .ant-card, section, [role="region"]');
   return section ? textFromFirst('.ant-pro-card-title, .ant-card-head-title, h1, h2, h3, h4, [class*="title"]', section) : undefined;
+}
+
+function inferRowKeyFromPeerRows({ row, table, wrapper, columnIndex, cellText, rowText }: { row?: Element; table?: Element; wrapper?: Element; columnIndex: number; cellText?: string; rowText?: string }) {
+  const root = wrapper || table || row?.parentElement;
+  if (!root)
+    return undefined;
+  const rows = Array.from(root.querySelectorAll('tr[data-row-key], .ant-table-row[data-row-key], [role="row"][data-row-key]'));
+  const normalizedRowText = normalizeComparableText(rowText);
+  const normalizedCellText = normalizeComparableText(cellText);
+  const matches = rows.filter(candidate => {
+    if (candidate === row)
+      return false;
+    const candidateRowText = normalizeComparableText(elementText(candidate, 160));
+    if (normalizedRowText && candidateRowText && (candidateRowText === normalizedRowText || candidateRowText.includes(normalizedRowText) || normalizedRowText.includes(candidateRowText)))
+      return true;
+    if (columnIndex >= 0 && normalizedCellText) {
+      const cells = Array.from(candidate.children);
+      const candidateCellText = normalizeComparableText(elementText(cells[columnIndex], 120));
+      return candidateCellText === normalizedCellText;
+    }
+    return false;
+  });
+  const keys = Array.from(new Set(matches.map(match => match.getAttribute('data-row-key')).filter((key): key is string => !!key)));
+  return keys.length === 1 ? keys[0] : undefined;
+}
+
+function normalizeComparableText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim();
 }
 
 function rowIdentityFor(row?: Element, table?: Element) {
