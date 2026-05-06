@@ -23,6 +23,33 @@ import { test, expect } from './crxRecorderTest';
 
 test.describe.configure({ mode: 'serial' });
 
+test('shows grouped settings accordion from the flow library', async ({ page, attachRecorder, baseURL }) => {
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
+
+  await expect(recorderPage.locator('.flow-library')).toContainText('业务流程记录');
+  await recorderPage.locator('.global-ai-card').getByRole('button', { name: '设置' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('设置');
+  await expect(recorderPage.locator('.settings-accordion-panel')).toContainText('录制偏好与导出安全');
+
+  const highFrequency = recorderPage.locator('.settings-section').filter({ hasText: '高频录制偏好' });
+  const aiDetails = recorderPage.locator('.settings-section').filter({ hasText: 'AI Intent 细节' });
+  const privacyExport = recorderPage.locator('.settings-section').filter({ hasText: '隐私与导出' });
+  await expect(highFrequency).toHaveJSProperty('open', true);
+  await expect(aiDetails).toHaveJSProperty('open', false);
+  await expect(privacyExport).toHaveJSProperty('open', false);
+
+  await privacyExport.locator('summary').click();
+  await expect(privacyExport).toHaveJSProperty('open', true);
+  await expect(privacyExport).toContainText('导出前脱敏');
+  await expect(privacyExport).toContainText('导出检查页会单独展示 P0/P1 风险');
+
+  await aiDetails.locator('summary').click();
+  await expect(aiDetails).toHaveJSProperty('open', true);
+  await expect(aiDetails).toContainText('API Key');
+  await expect(aiDetails.locator('input[type="password"]')).toBeVisible();
+});
+
 test('records a real AntD user business flow through the plugin UI, exports it, and replays generated Playwright code @smoke', async ({ context, page, attachRecorder, baseURL }) => {
   test.setTimeout(120_000);
 
@@ -71,6 +98,11 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await expect(recorderPage.locator('.assertion-workbench')).toContainText(/保存到 step-\d{3}/);
   await recorderPage.getByRole('button', { name: '← 返回流程', exact: true }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('导出前复核：AntD 用户流程 E2E');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('Replay CTA');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('P1');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('脱敏开启');
+  await expect(recorderPage.locator('.export-code-preview')).toContainText('代码预览');
 
   const exportedJson = await downloadTextAfterClick(
       recorderPage,
