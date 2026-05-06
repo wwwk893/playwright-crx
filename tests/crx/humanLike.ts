@@ -372,11 +372,11 @@ export async function beginNewFlowFromLibraryLikeUser(recorderPage: Page) {
   }
   await expect(newFlowButton).toBeVisible({ timeout: 10_000 });
   await humanClick(newFlowButton);
-  await expect(recorderPage.locator('.flow-meta-panel')).toBeVisible({ timeout: 10_000 });
+  await expect(recorderPage.locator('.flow-form-sheet, .flow-meta-panel')).toBeVisible({ timeout: 10_000 });
 }
 
 export async function fillFlowMetaLikeUser(recorderPage: Page, label: string, value: string) {
-  const input = recorderPage.locator('.flow-meta-panel label').filter({ hasText: label }).locator('input, textarea').first();
+  const input = recorderPage.locator('.flow-form-sheet, .flow-meta-panel').locator('label').filter({ hasText: label === '页面' ? /起始 URL|页面/ : label }).locator('input, textarea').first();
   await humanType(input, value, { blur: true });
 }
 

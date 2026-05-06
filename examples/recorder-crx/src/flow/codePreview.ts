@@ -18,7 +18,7 @@ import { actionLabel, summarizeStepSubject } from './display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 
 export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
-  const effectiveFlow = withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow));
+  const effectiveFlow = withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)));
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
@@ -46,7 +46,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
 }
 
 export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
-  const effectiveFlow = withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow));
+  const effectiveFlow = withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)));
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
@@ -74,7 +74,7 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
 }
 
 export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
-  const effectiveFlow = withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow));
+  const effectiveFlow = withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)));
   let count = 0;
   const emittedRepeatStepIds = new Set<string>();
   for (const [index, step] of effectiveFlow.steps.entries()) {
@@ -101,6 +101,71 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
 }
 
 type FlowDialogScope = NonNullable<NonNullable<FlowStep['target']>['scope']>['dialog'];
+type FlowTableScope = NonNullable<NonNullable<FlowStep['target']>['scope']>['table'];
+
+function withInheritedTableRowContext(flow: BusinessFlow): BusinessFlow {
+  let previousTableRow: { table: FlowTableScope; rowText?: string; stepText?: string } | undefined;
+  let changed = false;
+  const steps = flow.steps.map(step => {
+    const currentTable = step.target?.scope?.table || step.context?.before.table;
+    const currentRowText = normalizeGeneratedText(currentTable?.rowText || step.target?.text || step.target?.name || step.target?.displayName);
+    const shouldInherit = !currentTable && !!previousTableRow?.table && isRunnableRowClick(step) && sameBusinessRow(previousTableRow, step);
+    const nextStep = shouldInherit ? {
+      ...step,
+      target: {
+        ...step.target,
+        scope: {
+          ...step.target?.scope,
+          table: previousTableRow!.table,
+        },
+      },
+      context: {
+        ...step.context,
+        before: {
+          ...step.context?.before,
+          table: previousTableRow!.table,
+        },
+      },
+    } as FlowStep : step;
+    changed = changed || shouldInherit;
+
+    const table = nextStep.target?.scope?.table || nextStep.context?.before.table;
+    if (table?.testId && (table.rowKey || table.rowIdentity?.stable || table.rowText)) {
+      previousTableRow = {
+        table,
+        rowText: normalizeGeneratedText(table.rowText),
+        stepText: normalizeGeneratedText(nextStep.target?.text || nextStep.target?.name || nextStep.target?.displayName || currentRowText),
+      };
+    } else if (!isRowLikeStep(nextStep)) {
+      previousTableRow = undefined;
+    }
+
+    return nextStep;
+  });
+  return changed ? { ...flow, steps } : flow;
+}
+
+function isRunnableRowClick(step: FlowStep) {
+  return step.action === 'click' && isRowLikeStep(step) && !step.target?.scope?.table && !step.context?.before.table;
+}
+
+function isRowLikeStep(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role;
+  const text = normalizeGeneratedText(step.target?.text || step.target?.name || step.target?.displayName);
+  return role === 'row' || !!text && /\brow\b/i.test(step.target?.displayName || '');
+}
+
+function sameBusinessRow(previous: { rowText?: string; stepText?: string }, step: FlowStep) {
+  const currentText = normalizeGeneratedText(step.target?.text || step.target?.name || step.target?.displayName);
+  if (!currentText)
+    return false;
+  const candidates = [previous.rowText, previous.stepText].filter(Boolean) as string[];
+  return candidates.some(candidate => normalizedRowComparable(candidate) === normalizedRowComparable(currentText) || normalizedRowComparable(candidate).includes(normalizedRowComparable(currentText)) || normalizedRowComparable(currentText).includes(normalizedRowComparable(candidate)));
+}
+
+function normalizedRowComparable(value?: string) {
+  return normalizeGeneratedText(value)?.replace(/\s+/g, '') || '';
+}
 
 function withInheritedDialogContext(flow: BusinessFlow): BusinessFlow {
   let activeDialog: FlowDialogScope | undefined;

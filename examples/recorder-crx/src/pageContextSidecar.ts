@@ -84,14 +84,23 @@ type ActiveDropdownContext = {
 let activeDropdownContexts: ActiveDropdownContext[] = [];
 let lastDropdownPointerKey = '';
 let lastDropdownPointerAt = 0;
+let lastTablePointerKey = '';
+let lastTablePointerAt = 0;
 const dropdownContextTtlMs = 2500;
 const dropdownPointerDedupeMs = 80;
+const tablePointerDedupeMs = 220;
 
 if (!(window as any)[installKey]) {
   (window as any)[installKey] = true;
   document.addEventListener('click', event => recordEvent('click', event), true);
-  document.addEventListener('pointerdown', event => recordDropdownOptionPointerEvent(event), true);
-  document.addEventListener('mousedown', event => recordDropdownOptionPointerEvent(event), true);
+  document.addEventListener('pointerdown', event => {
+    recordDropdownOptionPointerEvent(event);
+    recordTablePointerEvent(event);
+  }, true);
+  document.addEventListener('mousedown', event => {
+    recordDropdownOptionPointerEvent(event);
+    recordTablePointerEvent(event);
+  }, true);
   document.addEventListener('input', event => recordEvent('input', event), true);
   document.addEventListener('change', event => recordEvent('change', event), true);
   document.addEventListener('keydown', event => recordEvent('keydown', event), true);
@@ -125,8 +134,44 @@ function dropdownOptionEventTarget(event: Event) {
   return target && isDropdownOptionTarget(target) ? target : undefined;
 }
 
+function recordTablePointerEvent(event: Event) {
+  const target = event.target instanceof Element ? event.target : undefined;
+  if (!target)
+    return;
+  const contextTarget = eventPointTarget(event, target);
+  if (isDropdownOptionTarget(contextTarget))
+    return;
+  const key = tablePointerKey(contextTarget);
+  if (!key || shouldIgnoreTarget(contextTarget, 'click'))
+    return;
+  const now = performance.now();
+  if (key === lastTablePointerKey && now - lastTablePointerAt < tablePointerDedupeMs)
+    return;
+  lastTablePointerKey = key;
+  lastTablePointerAt = now;
+  recordEventForTarget('click', event, contextTarget);
+}
+
+function tablePointerKey(target: Element) {
+  const row = closestWithin(target, tableRowSelectors);
+  const table = closestWithin(target, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
+  if (!row && !table)
+    return undefined;
+  const tableElement = table || row;
+  const tableKey = tableElement ? (testIdOf(tableElement) || tableTitle(tableElement) || '') : '';
+  const rowKey = row?.getAttribute('data-row-key') || elementText(row || target, 120) || elementText(target, 80) || '';
+  return `${tableKey}:${rowKey}`;
+}
+
+function isRecentTablePointerDuplicate(target: Element) {
+  const key = tablePointerKey(target);
+  return !!key && key === lastTablePointerKey && performance.now() - lastTablePointerAt < tablePointerDedupeMs;
+}
+
 function recordEvent(kind: ContextEventKind, event: Event) {
   const target = event.target instanceof Element ? event.target : undefined;
+  if (kind === 'click' && target && isRecentTablePointerDuplicate(eventPointTarget(event, target)))
+    return;
   recordEventForTarget(kind, event, target);
 }
 
@@ -168,6 +213,10 @@ function eventPointTarget(event: Event, fallback: Element) {
   if (!(pointed instanceof Element))
     return fallback;
   if (fallback === pointed || fallback.contains(pointed) || pointed.contains(fallback))
+    return pointed;
+  const fallbackTable = closestWithin(fallback, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
+  const pointedTable = closestWithin(pointed, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
+  if (fallbackTable && pointedTable && fallbackTable === pointedTable)
     return pointed;
   return fallback;
 }

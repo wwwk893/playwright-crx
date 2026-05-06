@@ -45,7 +45,7 @@ test('human-like recorder warns before leaving an unsaved recording @human-smoke
 
   await beginNewFlowFromLibraryLikeUser(recorderPage);
   await fillFlowMetaLikeUser(recorderPage, '流程名称', '未保存离开提醒');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await humanClick(recorderPage.getByRole('button', { name: '返回流程库' }));
@@ -73,7 +73,7 @@ test('human-like recorder preserves nth for duplicate test id save button @human
   await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
   await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置');
   await fillFlowMetaLikeUser(recorderPage, '角色', 'admin');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
@@ -89,7 +89,7 @@ test('human-like recorder preserves nth for duplicate test id save button @human
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('site-save-button');
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   await attachRecorderEvidence(testInfo, page, recorderPage, flow);
@@ -125,7 +125,7 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
   await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置');
   await fillFlowMetaLikeUser(recorderPage, '角色', 'admin');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
@@ -158,7 +158,7 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('runtime-pool');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('1.1.1.1');
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expectAddressAndPortPoolsPage(page);
@@ -188,7 +188,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
   await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置');
   await fillFlowMetaLikeUser(recorderPage, '角色', 'admin');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
@@ -251,7 +251,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('site-ip-port-pool-create-button');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('default');
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   let flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-global-ip-pools-section')).toBeFalsy();
@@ -298,7 +298,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
   await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置');
   await fillFlowMetaLikeUser(recorderPage, '角色', 'admin');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
@@ -329,7 +329,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/WAN口|选择一个WAN口|xtest16:WAN1/);
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   await createRepeatSegmentLikeUser(recorderPage, {
     fromStepText: 'site-ip-address-pool-create-button',
@@ -367,7 +367,7 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   await fillFlowMetaLikeUser(recorderPage, '模块', '系统管理');
   await fillFlowMetaLikeUser(recorderPage, '页面', '用户列表');
   await fillFlowMetaLikeUser(recorderPage, '角色', 'admin');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-users-real.html`);
@@ -398,7 +398,7 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/角色|审计员/);
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   await createRepeatSegmentLikeUser(recorderPage, {
     fromStepText: 'create-user-btn',
@@ -436,7 +436,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
   await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置');
   await fillFlowMetaLikeUser(recorderPage, '角色', 'admin');
-  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
@@ -523,7 +523,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('生产访问策略');
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   await createRepeatSegmentLikeUser(recorderPage, {
     fromStepText: 'network-resource-add',

@@ -1422,6 +1422,53 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'runnable row click inherits table scope from adjacent non-runnable row context',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: {
+              role: 'generic',
+              text: 'Alice 管理员编辑',
+              displayName: 'Alice 管理员编辑',
+              scope: {
+                table: {
+                  title: '用户列表',
+                  testId: 'users-table',
+                  rowKey: 'user-42',
+                  rowText: 'Alice 管理员 编辑',
+                },
+              },
+            },
+            sourceCode: '// s001 has no runnable Playwright action source.',
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: {
+              role: 'row',
+              name: 'Alice 管理员 编辑',
+              text: 'Alice 管理员 编辑',
+              displayName: 'row Alice 管理员 编辑',
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const secondStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's002');
+
+      assert(secondStep.includes('page.getByTestId("users-table").locator('), 'runnable row click should inherit table scope from adjacent page-context row');
+      assert(secondStep.includes('data-row-key=\\"user-42\\"') || secondStep.includes('data-row-key="user-42"'), 'runnable row click should use inherited stable row key');
+      assert(!secondStep.includes('await page.getByRole("row", { name: "Alice 管理员 编辑" }).click();'), 'runnable row click should not fall back to global row name');
+    },
+  },
+  {
     name: 'dialog button code preview uses dialog scoped locator when button text repeats',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:has-text="确定"i >> nth=2')], [], {});
