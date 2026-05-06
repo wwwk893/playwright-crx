@@ -54,6 +54,7 @@ export const StepList: React.FC<{
         return <React.Fragment key={step.id}>
           <StepEditor
             step={step}
+            displayStepId={`step-${String(index + 1).padStart(3, '0')}`}
             isEditingAssertion={editingAssertionStepId === step.id}
             suggestion={buildSuggestion(steps, index)}
             onUpdateStep={onUpdateStep}
@@ -87,7 +88,7 @@ export const StepList: React.FC<{
   </section>;
 };
 
-function buildSuggestion(steps: FlowStep[], index: number): AssertionEditorSuggestion | undefined {
+export function buildSuggestion(steps: FlowStep[], index: number): AssertionEditorSuggestion | undefined {
   const step = steps[index];
   const targetText = summarizeTarget(step.target);
   const previousValues = latestPreviousValues(steps, index);

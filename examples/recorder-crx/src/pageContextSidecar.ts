@@ -134,8 +134,9 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
   if (!target || shouldIgnoreTarget(target, kind))
     return;
 
+  const contextTarget = eventPointTarget(event, target);
   const time = performance.now();
-  const before = collectPageContext(target);
+  const before = collectPageContext(contextTarget);
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const baseEvent = {
     id,
@@ -158,6 +159,17 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
   } else {
     emit(baseEvent);
   }
+}
+
+function eventPointTarget(event: Event, fallback: Element) {
+  if (!(event instanceof MouseEvent) || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY))
+    return fallback;
+  const pointed = document.elementFromPoint(event.clientX, event.clientY);
+  if (!(pointed instanceof Element))
+    return fallback;
+  if (fallback === pointed || fallback.contains(pointed) || pointed.contains(fallback))
+    return pointed;
+  return fallback;
 }
 
 function collectPageContext(target: Element) {

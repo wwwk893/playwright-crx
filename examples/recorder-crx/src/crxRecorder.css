@@ -165,6 +165,10 @@
   background: var(--success);
 }
 
+.recording-status.assertion span {
+  background: var(--primary);
+}
+
 .flow-library {
   position: relative;
   min-height: calc(100vh - 84px);
@@ -1940,6 +1944,122 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.assertion-workbench {
+  display: grid;
+  gap: 12px;
+  padding: 14px 18px var(--footer-safe-space);
+}
+
+.assertion-workbench-header {
+  display: grid;
+  gap: 8px;
+}
+
+.assertion-workbench-header h2 {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.assertion-workbench-header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.assertion-workbench-back {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.assertion-step-context-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: var(--primary-soft);
+}
+
+.assertion-step-context-title {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.assertion-step-context-title span {
+  font-family: var(--font-mono);
+}
+
+.assertion-step-context-card p {
+  margin: 0;
+  color: #1d4ed8;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.assertion-step-context-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.assertion-step-context-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.assertion-step-context-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assertion-step-context-row strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  text-overflow: ellipsis;
+}
+
+.assertion-workbench-editor {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.assertion-workbench-editor .assertion-heading {
+  margin-top: 0;
+}
+
+.assertion-workbench-editor .assertion-drawer {
+  box-shadow: none;
+}
+
+.assertion-empty-state {
+  align-content: start;
+}
+
+.assertion-empty-state button {
+  margin-top: 4px;
 }
 
 .sticky-export-bar {

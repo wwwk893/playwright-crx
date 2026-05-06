@@ -34,8 +34,9 @@ import { AiUsagePanel } from './components/AiUsagePanel';
 import { FlowAiIntentControl, type FlowAiIntentOverride } from './components/FlowAiIntentControl';
 import { FlowSelectionGuard } from './components/FlowSelectionGuard';
 import { RecordingFlowContextBar } from './components/RecordingFlowContextBar';
+import { AssertionWorkbench } from './components/AssertionWorkbench';
 import type { AssertionPickedTarget } from './components/AssertionEditor';
-import { StepList } from './components/StepList';
+import { StepList, buildSuggestion } from './components/StepList';
 import { applyAiIntentResults } from './aiIntent/applyAiIntent';
 import { generateAiIntentsForFlow, selectAiIntentSteps, testAiProviderConnection } from './aiIntent/queue';
 import { createDeepSeekV4FlashProfile, normalizeAiIntentSettings, normalizeProfiles } from './aiIntent/settings';
@@ -300,7 +301,7 @@ function cleanupPickedText(value?: string) {
   return value?.replace(/\\(["'])/g, '$1').trim();
 }
 
-type PanelStage = 'library' | 'setup' | 'recording' | 'review' | 'editRecord' | 'aiSettings' | 'aiUsage';
+type PanelStage = 'library' | 'setup' | 'recording' | 'assertion' | 'review' | 'editRecord' | 'aiSettings' | 'aiUsage';
 type PanelTab = 'business' | 'code' | 'log';
 type FlowFormSheetState =
   | { mode: 'new'; flow: BusinessFlow }
@@ -470,6 +471,7 @@ export const CrxRecorder: React.FC = ({
   const [aiUsageSheetOpen, setAiUsageSheetOpen] = React.useState(false);
   const [expandedRuntimeLogIds, setExpandedRuntimeLogIds] = React.useState<Set<number>>(() => new Set());
   const [editingAssertionStepId, setEditingAssertionStepId] = React.useState<string>();
+  const [assertionReturnStage, setAssertionReturnStage] = React.useState<PanelStage>('recording');
   const [pickedAssertionTarget, setPickedAssertionTarget] = React.useState<AssertionPickedTarget>();
   const [pickingAssertionStepId, setPickingAssertionStepId] = React.useState<string>();
   const [suppressDefaultMeta, setSuppressDefaultMeta] = React.useState(false);
@@ -1646,7 +1648,8 @@ export const CrxRecorder: React.FC = ({
       };
     });
     setEditingAssertionStepId(undefined);
-  }, []);
+    setPanelStage(stage => stage === 'assertion' ? assertionReturnStage : stage);
+  }, [assertionReturnStage]);
 
   const clearSteps = React.useCallback(() => {
     pendingAssertionPickRef.current = undefined;
@@ -1890,12 +1893,25 @@ export const CrxRecorder: React.FC = ({
     setInsertRecordingAfterStepId(undefined);
   }, [appendDiagnosticLog, flowDraft.steps.length, recordedActionCount]);
 
-  const beginAddAssertion = React.useCallback((stepId: string) => {
-    setEditingAssertionStepId(stepId);
+  const backToAssertionReturnStage = React.useCallback(() => {
+    const returnMode = pendingAssertionPickRef.current?.returnMode;
+    setEditingAssertionStepId(undefined);
+    setPickingAssertionStepId(undefined);
+    pendingAssertionPickRef.current = undefined;
+    setPanelStage(assertionReturnStage === 'assertion' ? 'recording' : assertionReturnStage);
     setActiveTab('business');
-    if (panelStage === 'review')
-      setPanelStage('recording');
-  }, [panelStage]);
+    if (returnMode)
+      window.dispatch({ event: 'setMode', params: { mode: returnMode } }).catch(() => {});
+  }, [assertionReturnStage]);
+
+  const beginAddAssertion = React.useCallback((stepId: string) => {
+    setAssertionReturnStage(panelStage === 'review' || panelStage === 'recording' || panelStage === 'editRecord' ? panelStage : flowDraft.steps.length ? 'review' : 'recording');
+    setEditingAssertionStepId(stepId);
+    setPickedAssertionTarget(undefined);
+    setPickingAssertionStepId(undefined);
+    setActiveTab('business');
+    setPanelStage('assertion');
+  }, [flowDraft.steps.length, panelStage]);
 
   const startAssertionPick = React.useCallback((stepId: string, subject: FlowAssertionSubject) => {
     pendingAssertionPickRef.current = {
@@ -1934,9 +1950,13 @@ export const CrxRecorder: React.FC = ({
   const stats = flowStats(flowDraft);
   const isBusinessFlowEnabled = settings.businessFlowEnabled !== false;
   const hasActiveRecordingFlowContext = hasRecordingFlowContext(flowDraft);
+  const selectedAssertionStepIndex = editingAssertionStepId ? flowDraft.steps.findIndex(step => step.id === editingAssertionStepId) : -1;
+  const selectedAssertionStep = selectedAssertionStepIndex >= 0 ? flowDraft.steps[selectedAssertionStepIndex] : undefined;
+  const selectedAssertionStepLabel = stepDisplayLabel(selectedAssertionStep, selectedAssertionStepIndex + 1 || 1);
+  const selectedAssertionSuggestion = selectedAssertionStep ? buildSuggestion(flowDraft.steps, selectedAssertionStepIndex) : undefined;
   const recordingFlowName = flowDraft.flow.name.trim();
-  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '复查' : panelStage === 'recording' ? (recordingFlowName ? `录制 · ${recordingFlowName} · 录制中` : '录制 · 未选择流程') : '新建流程';
-  const statusClass = panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
+  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '复查' : panelStage === 'recording' ? (recordingFlowName ? `录制 · ${recordingFlowName} · 录制中` : '录制 · 未选择流程') : '新建流程';
+  const statusClass = panelStage === 'assertion' ? 'assertion' : panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
   const metaLine = [flowDraft.flow.module, flowDraft.flow.role, `${stats.stepCount} 步骤`].filter(Boolean).join(' · ');
   const insertAnchorStep = insertRecordingAfterStepId ? flowDraft.steps.find(step => step.id === insertRecordingAfterStepId) : undefined;
   const insertAnchorIndex = insertAnchorStep ? flowDraft.steps.indexOf(insertAnchorStep) : -1;
@@ -2118,7 +2138,7 @@ export const CrxRecorder: React.FC = ({
               <button type='button' className={activeTab === 'code' ? 'selected' : ''} onClick={() => setActiveTab('code')}>Playwright 代码</button>
               <button type='button' className={activeTab === 'log' ? 'selected' : ''} onClick={() => setActiveTab('log')}>运行日志</button>
             </div>
-            {activeTab === 'business' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
+            {activeTab === 'business' && panelStage !== 'assertion' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
               flow={flowDraft}
               settings={aiSettings}
               activeProfile={activeAiProfile}
@@ -2128,6 +2148,21 @@ export const CrxRecorder: React.FC = ({
               onGenerate={() => runAiGeneration()}
               onOpenUsage={() => setAiUsageSheetOpen(true)}
             />}
+            {activeTab === 'business' && panelStage === 'assertion' && (selectedAssertionStep ? <AssertionWorkbench
+              step={selectedAssertionStep}
+              displayStepId={selectedAssertionStepLabel}
+              suggestion={selectedAssertionSuggestion}
+              pickedTarget={pickedAssertionTarget}
+              isPickingTarget={pickingAssertionStepId === selectedAssertionStep.id}
+              onPickAssertionTarget={startAssertionPick}
+              onCancelAddAssertion={backToAssertionReturnStage}
+              onSaveAssertion={addAssertion}
+              onChangeAssertions={(stepId, assertions) => updateStep(stepId, { assertions })}
+              onBackToFlow={backToAssertionReturnStage}
+            /> : <div className='assertion-workbench assertion-empty-state'>
+              <div className='business-flow-empty'>没有选中的步骤，无法添加断言。</div>
+              <button type='button' className='assertion-workbench-back' onClick={backToAssertionReturnStage}>← 返回流程</button>
+            </div>)}
             {activeTab === 'business' && panelStage === 'recording' && (hasActiveRecordingFlowContext ? <>
               <RecordingFlowContextBar
                 flow={flowDraft}

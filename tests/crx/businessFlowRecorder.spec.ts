@@ -61,9 +61,15 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(5);
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('create-user-btn');
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('alice');
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('Alice 管理员 编辑');
+  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('管理员');
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await recorderPage.getByRole('button', { name: /添加断言/ }).first().click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('断言 ·');
+  await expect(recorderPage.locator('.assertion-step-context-card')).toContainText('Step Context：');
+  await expect(recorderPage.locator('.assertion-workbench')).toContainText(/保存到 step-\d{3}/);
+  await recorderPage.getByRole('button', { name: '← 返回流程', exact: true }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText('复查');
 
   const exportedJson = await downloadTextAfterClick(

@@ -73,10 +73,25 @@ export function summarizeStepSubject(step: FlowStep) {
     return `等待 ${formatWaitSeconds(step.value)} 秒`;
   if (step.url)
     return step.url;
+  const tableSubject = summarizeTableStepSubject(step);
+  if (tableSubject)
+    return tableSubject;
   const target = summarizeTarget(step.target);
   if (step.value)
     return `${target}（值：${step.value}）`;
   return target;
+}
+
+function summarizeTableStepSubject(step: FlowStep) {
+  if (step.action !== 'click')
+    return undefined;
+  const table = step.target?.scope?.table;
+  if (!table)
+    return undefined;
+  const rowText = normalizeReadableTargetText(table.rowText);
+  if (rowText)
+    return rowText;
+  return table.rowKey ? `row ${table.rowKey}` : undefined;
 }
 
 function normalizeReadableTargetText(value?: string) {
