@@ -36,9 +36,10 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await fillFlowMeta(recorderPage, '模块', '用户管理');
   await fillFlowMeta(recorderPage, '页面', '用户列表');
   await fillFlowMeta(recorderPage, '角色', '运营');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+  await expect(recorderPage.locator('.recording-context-card')).toContainText('不是全局录制');
 
   await page.goto(`${baseURL}/antd-users-real.html`);
   await expect(page.getByTestId('create-user-btn')).toBeVisible();
@@ -104,7 +105,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await fillFlowMeta(recorderPage, '模块', '条目管理');
   await fillFlowMeta(recorderPage, '页面', '真实组件页');
   await fillFlowMeta(recorderPage, '角色', '运营');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
@@ -167,7 +168,7 @@ test('records real ProFormField network configuration fields and replays generat
   await fillFlowMeta(recorderPage, '模块', '网络配置');
   await fillFlowMeta(recorderPage, '页面', '资源配置');
   await fillFlowMeta(recorderPage, '角色', '网络管理员');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
@@ -291,7 +292,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await fillFlowMeta(recorderPage, '模块', '站点配置');
   await fillFlowMeta(recorderPage, '页面', '全局配置');
   await fillFlowMeta(recorderPage, '角色', 'admin');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
@@ -405,7 +406,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await fillFlowMeta(recorderPage, '模块', '稳定性编辑');
   await fillFlowMeta(recorderPage, '页面', '循环与插入');
   await fillFlowMeta(recorderPage, '角色', '测试');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await page.goto(`${baseURL}/antd-business-flow-stability.html`);
   await expect(page.getByText('业务流程稳定性测试页')).toBeVisible();
@@ -502,11 +503,16 @@ async function beginNewFlowFromLibrary(recorderPage: Page) {
   }
   await expect(newFlowButton).toBeVisible({ timeout: 10_000 });
   await newFlowButton.click();
-  await expect(recorderPage.locator('.flow-meta-panel')).toBeVisible({ timeout: 10_000 });
+  await expect(recorderPage.locator('.flow-form-sheet')).toBeVisible({ timeout: 10_000 });
+  await expect(recorderPage.locator('.flow-form-sheet')).toContainText('新建流程');
 }
 
 async function fillFlowMeta(recorderPage: Page, label: string, value: string) {
-  await recorderPage.locator('.flow-meta-panel label').filter({ hasText: label }).locator('input, textarea').first().fill(value);
+  const sheetLabel = label === '应用' ? '应用 / 模块 · 应用' :
+    label === '模块' ? '应用 / 模块 · 模块' :
+    label === '页面' ? '起始 URL / 页面 · 页面' :
+    label;
+  await recorderPage.locator('.flow-form-sheet label').filter({ hasText: sheetLabel }).locator('input, textarea, select').first().fill(value);
 }
 
 async function clickVisibleAntDOption(page: Page, text: string) {

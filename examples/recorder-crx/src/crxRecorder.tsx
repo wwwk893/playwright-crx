@@ -32,6 +32,8 @@ import { FlowMetaPanel } from './components/FlowMetaPanel';
 import { AiIntentSettingsPanel } from './components/AiIntentSettingsPanel';
 import { AiUsagePanel } from './components/AiUsagePanel';
 import { FlowAiIntentControl, type FlowAiIntentOverride } from './components/FlowAiIntentControl';
+import { FlowSelectionGuard } from './components/FlowSelectionGuard';
+import { RecordingFlowContextBar } from './components/RecordingFlowContextBar';
 import type { AssertionPickedTarget } from './components/AssertionEditor';
 import { StepList } from './components/StepList';
 import { applyAiIntentResults } from './aiIntent/applyAiIntent';
@@ -170,6 +172,30 @@ function hasMeaningfulFlowWork(flow: BusinessFlow) {
     flow.network.length > 0 ||
     !!flow.repeatSegments?.length ||
     !!flow.artifacts?.recorder?.actionLog.length;
+}
+
+function hasRecordingFlowContext(flow: BusinessFlow) {
+  return !!flow.flow.id.trim() && !!flow.flow.name.trim();
+}
+
+function stepDisplayLabel(step: FlowStep | undefined, fallbackIndex: number) {
+  const id = step?.id.trim();
+  const numericId = id?.match(/^s(\d+)$/i)?.[1] || id?.match(/^step-(\d+)$/i)?.[1];
+  if (numericId)
+    return `step-${numericId.padStart(3, '0')}`;
+  return id || `step-${String(fallbackIndex).padStart(3, '0')}`;
+}
+
+function nextAppendStepLabel(flow: BusinessFlow) {
+  return `step-${String(flow.steps.length + 1).padStart(3, '0')}`;
+}
+
+function flowContextMissingMessage(flow: BusinessFlow) {
+  if (!flow.flow.id.trim())
+    return '请先选择或新建一个流程后再录制。';
+  if (!flow.flow.name.trim())
+    return '请先填写流程名称，录制必须绑定到具体流程。';
+  return '请先选择或新建一个流程后再录制。';
 }
 
 function flowSaveSnapshot(flow: BusinessFlow, code?: string) {
@@ -1731,8 +1757,11 @@ export const CrxRecorder: React.FC = ({
   }, []);
 
   const startRecording = React.useCallback(() => {
-    if (!flowDraft.flow.name.trim()) {
-      window.alert('请先填写流程名称。');
+    if (!hasRecordingFlowContext(flowDraft)) {
+      setPanelStage('recording');
+      setActiveTab('business');
+      setRecordStatus(flowContextMissingMessage(flowDraft));
+      window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
       return;
     }
     pendingInsertRecordingRef.current = undefined;
@@ -1775,6 +1804,13 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog, flowDraft.steps.length, flushPageContextEventsNow, recordedActionCount]);
 
   const continueRecording = React.useCallback(() => {
+    if (!hasRecordingFlowContext(flowDraft)) {
+      setPanelStage('recording');
+      setActiveTab('business');
+      setRecordStatus(flowContextMissingMessage(flowDraft));
+      window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
+      return;
+    }
     const playbackBoundary = actionCountForMergeBoundary(flowDraft);
     const baseActionCount = Math.max(recordedActionCount, playbackBoundary);
     pendingInsertRecordingRef.current = {
@@ -1802,6 +1838,13 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog, flowDraft, recordedActionCount]);
 
   const continueRecordingFrom = React.useCallback((afterStepId: string) => {
+    if (!hasRecordingFlowContext(flowDraft)) {
+      setPanelStage('recording');
+      setActiveTab('business');
+      setRecordStatus(flowContextMissingMessage(flowDraft));
+      window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
+      return;
+    }
     const playbackBoundary = actionCountForMergeBoundary(flowDraft);
     const baseActionCount = Math.max(recordedActionCount, playbackBoundary);
     const anchorStep = flowDraft.steps.find(step => step.id === afterStepId);
@@ -1890,12 +1933,16 @@ export const CrxRecorder: React.FC = ({
 
   const stats = flowStats(flowDraft);
   const isBusinessFlowEnabled = settings.businessFlowEnabled !== false;
-  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '复查' : panelStage === 'recording' ? '录制中' : '新建流程';
-  const statusClass = panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? 'recording' : 'setup';
+  const hasActiveRecordingFlowContext = hasRecordingFlowContext(flowDraft);
+  const recordingFlowName = flowDraft.flow.name.trim();
+  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '复查' : panelStage === 'recording' ? (recordingFlowName ? `录制 · ${recordingFlowName} · 录制中` : '录制 · 未选择流程') : '新建流程';
+  const statusClass = panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
   const metaLine = [flowDraft.flow.module, flowDraft.flow.role, `${stats.stepCount} 步骤`].filter(Boolean).join(' · ');
   const insertAnchorStep = insertRecordingAfterStepId ? flowDraft.steps.find(step => step.id === insertRecordingAfterStepId) : undefined;
   const insertAnchorIndex = insertAnchorStep ? flowDraft.steps.indexOf(insertAnchorStep) : -1;
   const insertNextStep = insertAnchorIndex >= 0 ? flowDraft.steps[insertAnchorIndex + 1] : undefined;
+  const nextRecordingStepLabel = nextAppendStepLabel(flowDraft);
+  const insertAfterStepLabel = insertRecordingAfterStepId ? stepDisplayLabel(insertAnchorStep, insertAnchorIndex + 1 || flowDraft.steps.length) : undefined;
   const runtimeLogs = React.useMemo(() => diagnosticLogs.filter(log => log.type.startsWith('runtime.')).slice(-80), [diagnosticLogs]);
   const runtimeLogIdSet = React.useMemo(() => new Set(runtimeLogs.map(log => log.id)), [runtimeLogs]);
 
@@ -2071,7 +2118,7 @@ export const CrxRecorder: React.FC = ({
               <button type='button' className={activeTab === 'code' ? 'selected' : ''} onClick={() => setActiveTab('code')}>Playwright 代码</button>
               <button type='button' className={activeTab === 'log' ? 'selected' : ''} onClick={() => setActiveTab('log')}>运行日志</button>
             </div>
-            {activeTab === 'business' && <FlowAiIntentControl
+            {activeTab === 'business' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
               flow={flowDraft}
               settings={aiSettings}
               activeProfile={activeAiProfile}
@@ -2081,7 +2128,17 @@ export const CrxRecorder: React.FC = ({
               onGenerate={() => runAiGeneration()}
               onOpenUsage={() => setAiUsageSheetOpen(true)}
             />}
-            {activeTab === 'business' && panelStage === 'recording' && <>
+            {activeTab === 'business' && panelStage === 'recording' && (hasActiveRecordingFlowContext ? <>
+              <RecordingFlowContextBar
+                flow={flowDraft}
+                selectedRecordId={selectedRecordId}
+                draftStatus={draftStatus}
+                nextStepLabel={nextRecordingStepLabel}
+                insertAfterStepLabel={insertAfterStepLabel}
+                onSwitchFlow={goToLibrary}
+                onEditFlow={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}
+                onSaveDraft={saveDraftNow}
+              />
               <div className={insertRecordingAfterStepId ? 'recording-toolbar inserting' : 'recording-toolbar'}>
                 <button type='button' onClick={pauseRecording}>{mode === 'recording' ? '暂停' : '继续'}</button>
                 <button type='button' className='danger' onClick={stopRecording}>停止录制</button>
@@ -2120,7 +2177,10 @@ export const CrxRecorder: React.FC = ({
                 <button type='button' onClick={() => exportBusinessFlow('json')}>导出流程 JSON</button>
                 <button type='button' onClick={() => exportBusinessFlow('yaml')}>导出紧凑 YAML</button>
               </div>
-            </>}
+            </> : <FlowSelectionGuard
+              onBackToLibrary={goToLibraryNow}
+              onNewFlow={openNewFlowSheet}
+            />)}
             {activeTab === 'business' && panelStage === 'review' && <FlowReviewPanel
               flow={flowDraft}
               redactionEnabled={settings.redactSensitiveData !== false}
