@@ -2199,6 +2199,20 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'recorded duplicate test id selector ordinal is exported as locator hint',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [
+        rawClickAction('internal:testid=[data-testid="site-save-button"s] >> nth=1'),
+      ], [], {});
+      const step = flow.steps[0];
+      assertEqual(step.target?.testId, 'site-save-button');
+      assertEqual(step.target?.locatorHint?.pageCount, 2);
+      assertEqual(step.target?.locatorHint?.pageIndex, 1);
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      assert(code.includes('page.getByTestId("site-save-button").nth(1).click();'), 'raw selector ordinal should survive code generation');
+    },
+  },
+  {
     name: 'synthetic page context test id click stores duplicate ordinal in source code',
     run: () => {
       const result = appendSyntheticPageContextStepsWithResult(createNamedFlow(), [

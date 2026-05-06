@@ -554,14 +554,20 @@ async function fillFlowMeta(recorderPage: Page, label: string, value: string) {
 }
 
 async function clickVisibleAntDOption(page: Page, text: string) {
-  const options = page
-      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-      .last()
-      .locator('.ant-select-item-option')
-      .filter({ hasText: text });
+  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  const exactText = new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`);
+  const options = dropdown.locator('.ant-select-item-option').filter({ hasText: exactText });
   const option = options.first();
   await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.click({ timeout: 5_000 }).catch(async () => {
+  await option.scrollIntoViewIfNeeded();
+  await option.click({ timeout: 5_000, force: true }).catch(async () => {
+    const box = await option.boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.up();
+      return;
+    }
     await options.evaluateAll((elements, expectedText) => {
       const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
       const expected = normalize(expectedText);
@@ -577,6 +583,10 @@ async function clickVisibleAntDOption(page: Page, text: string) {
     }, text);
   });
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+}
+
+function escapeRegExp(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 
