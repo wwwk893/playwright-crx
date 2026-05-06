@@ -81,7 +81,7 @@ export default class CrxPlayer extends EventEmitter {
 
     if (pageOrContext instanceof Page) {
       page = pageOrContext;
-      context = page.context();
+      context = page.browserContext;
     } else {
       context = pageOrContext;
       page = context.pages()[0] ?? await context.newPage(serverSideCallMetadata());
@@ -246,6 +246,14 @@ export default class CrxPlayer extends EventEmitter {
 
     if (action.name === 'click') {
       const options = toClickOptions(action);
+      const activeAntdOptionClick = activeAntdOptionClickTarget(selector);
+      if (activeAntdOptionClick) {
+        return await innerPerformAction(mainFrame, actionInContext, async callMetadata => {
+          if (await dispatchActiveAntdOptionClick(mainFrame, activeAntdOptionClick, kActionTimeout))
+            return;
+          await mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true });
+        });
+      }
       return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true }));
     }
     if (action.name === 'press') {
@@ -318,4 +326,101 @@ export default class CrxPlayer extends EventEmitter {
       throw new Stopped();
     }
   }
+}
+
+function activeAntdOptionClickTarget(selector: string) {
+  const optionKind = activeAntdOptionKind(selector);
+  if (!optionKind)
+    return undefined;
+  const tokens = activeAntdOptionTextTokens(selector);
+  if (!tokens.length && !/internal:has-text=(?:\\"|")?\[object/i.test(selector))
+    return undefined;
+  return { optionKind, tokens };
+}
+
+function activeAntdOptionKind(selector: string) {
+  if (/ant-cascader-menu-item/.test(selector))
+    return 'cascader';
+  if (/ant-select-tree/.test(selector))
+    return 'tree';
+  if (/ant-select-item-option/.test(selector))
+    return 'select';
+  return undefined;
+}
+
+function activeAntdOptionTextTokens(selector: string) {
+  return [...selector.matchAll(/internal:has-text=(?:\\"|")([^"\\]+)(?:\\"|")/g)]
+      .map(match => match[1])
+      .filter(token => token && token !== '[object Object]');
+}
+
+async function dispatchActiveAntdOptionClick(mainFrame: Frame, target: { optionKind: string, tokens: string[] }, timeout: number) {
+  const clicked = await mainFrame.evaluateExpression(String(async ({ optionKind, tokens, timeout }) => {
+    const normalize = (value: string | null | undefined) => (value || '').replace(/\s+/g, ' ').trim();
+    const tokenGroups = tokens.map(token => {
+      const normalized = normalize(token);
+      const pieces = normalized.split(/[:：\s]+/).map(normalize).filter(Boolean);
+      return [normalized, ...pieces].filter(Boolean);
+    }).filter(group => group.length);
+    const selector = optionKind === 'cascader' ?
+      '.ant-cascader-menu-item:not(.ant-cascader-menu-item-disabled)' :
+      optionKind === 'tree' ?
+        '.ant-select-tree-node-content-wrapper:not(.ant-select-tree-node-disabled), .ant-select-tree-title' :
+        '.ant-select-item-option:not(.ant-select-item-option-disabled)';
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const textFor = (element: Element) => normalize([
+      element.getAttribute('title'),
+      element.querySelector('.ant-select-item-option-content')?.textContent,
+      element.textContent,
+    ].filter(Boolean).join(' '));
+    const matches = (element: Element) => {
+      const text = textFor(element);
+      return !tokenGroups.length || tokenGroups.every(group => text.includes(group[0]) || group.slice(1).every(token => text.includes(token)));
+    };
+    const findOption = () => [...document.querySelectorAll(selector)].find(element => isVisible(element) && matches(element));
+    const dispatchClick = (element: Element) => {
+      element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    };
+    const openTriggersAndFindOption = async () => {
+      const preferred = [...document.querySelectorAll('.ant-select-focused .ant-select-selector, .ant-select-open .ant-select-selector')].filter(isVisible);
+      const all = [...document.querySelectorAll('.ant-select-selector')].filter(isVisible);
+      const triggers = [...preferred, ...all].filter((trigger, index, list) => list.indexOf(trigger) === index);
+      for (const trigger of triggers) {
+        dispatchClick(trigger);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const option = findOption();
+        if (option)
+          return option;
+      }
+      return undefined;
+    };
+    const deadline = Date.now() + timeout;
+    let retriedByOpeningTrigger = false;
+    while (Date.now() <= deadline) {
+      const option = findOption();
+      if (option) {
+        dispatchClick(option);
+        return true;
+      }
+      if (!retriedByOpeningTrigger && (optionKind === 'select' || optionKind === 'tree')) {
+        retriedByOpeningTrigger = true;
+        const openedOption = await openTriggersAndFindOption();
+        if (openedOption) {
+          dispatchClick(openedOption);
+          return true;
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return false;
+  }), { isFunction: true }, { ...target, timeout });
+  return clicked;
 }
