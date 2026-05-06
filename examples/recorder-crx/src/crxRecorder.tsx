@@ -2054,7 +2054,7 @@ export const CrxRecorder: React.FC = ({
                   <span>刷新后保留；DevTools: window.__playwrightCrxRecorderDiagnostics</span>
                 </div>
                 {diagnosticLogs.length === 0 && <div className='business-flow-empty compact'>暂无诊断日志。</div>}
-                {diagnosticLogs.map(entry => <details className={`diagnostic-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id}>
+                {diagnosticLogs.slice().reverse().map(entry => <details className={`diagnostic-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id}>
                   <summary>
                     <span>{new Date(entry.time).toLocaleTimeString()}</span>
                     <strong>{entry.message}</strong>
