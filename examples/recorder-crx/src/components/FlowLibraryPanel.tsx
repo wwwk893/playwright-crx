@@ -116,7 +116,7 @@ export const FlowLibraryPanel: React.FC<{
       className='library-search'
       type='search'
       value={query}
-      placeholder='搜索流程名称 / 模块 / 标签'
+      placeholder='搜索流程名称、模块或标签'
       onChange={e => setQuery(e.target.value)}
     />
 

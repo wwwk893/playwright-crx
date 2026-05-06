@@ -2795,6 +2795,214 @@
   background: linear-gradient(90deg, transparent, #c7d7ee, transparent);
 }
 
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.24);
+  box-sizing: border-box;
+}
+
+.sheet-surface {
+  width: min(480px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 20px 54px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+}
+
+.flow-form-sheet {
+  align-self: center;
+}
+
+.usage-sheet {
+  align-self: center;
+  width: min(440px, calc(100vw - 24px));
+}
+
+.sheet-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sheet-header h2,
+.sheet-section-heading h3 {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.sheet-header p,
+.sheet-section-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.sheet-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sheet-close.compact {
+  align-self: flex-start;
+}
+
+.sheet-body {
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  background: var(--surface-subtle);
+}
+
+.flow-sheet-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.flow-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.flow-form-field.full {
+  grid-column: 1 / -1;
+}
+
+.flow-form-field input,
+.flow-form-field select {
+  min-height: 34px;
+  border-color: var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.sheet-actions button,
+.ai-usage-actions button {
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.sheet-actions .primary,
+.ai-usage-actions .primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.sheet-actions button:disabled,
+.ai-usage-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.usage-sheet .ai-usage-panel {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 18px;
+  border-bottom: 0;
+}
+
+.sheet-section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ai-usage-summary-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ai-usage-summary-row > div {
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: var(--primary-soft);
+}
+
+.ai-usage-summary-row span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-usage-summary-row strong {
+  color: var(--fg);
+  font-size: 16px;
+}
+
+.ai-usage-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 12px 0;
+}
+
+.ai-usage-actions .danger-outline {
+  border-color: #fecaca;
+  color: var(--danger);
+}
+
+.sheet-note {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.ai-usage-row.failed {
+  border-color: #fecaca;
+  background: var(--danger-soft);
+}
+
 @media (max-width: 420px) {
   .business-flow-panel {
     width: 100%;
@@ -2804,7 +3012,23 @@
   .flow-form-grid,
   .recording-toolbar,
   .flow-compact-stats,
-  .review-summary-grid {
+  .review-summary-grid,
+  .flow-sheet-two-col,
+  .ai-usage-summary-row {
     grid-template-columns: 1fr;
+  }
+
+  .sheet-backdrop {
+    padding: 8px;
+  }
+
+  .sheet-surface,
+  .usage-sheet {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  .ai-usage-actions {
+    grid-template-columns: 1fr 1fr;
   }
 }

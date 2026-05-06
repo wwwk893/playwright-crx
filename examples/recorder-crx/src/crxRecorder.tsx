@@ -25,6 +25,7 @@ import type { CrxSettings } from './settings';
 import { addSettingsChangedListener, defaultSettings, loadSettings, removeSettingsChangedListener } from './settings';
 import ModalContainer, { create as createModal } from 'react-modal-promise';
 import { SaveCodeForm } from './saveCodeForm';
+import { FlowFormSheet, type FlowFormSheetAction } from './components/FlowFormSheet';
 import { FlowLibraryPanel } from './components/FlowLibraryPanel';
 import { FlowReviewPanel } from './components/FlowReviewPanel';
 import { FlowMetaPanel } from './components/FlowMetaPanel';
@@ -275,6 +276,10 @@ function cleanupPickedText(value?: string) {
 
 type PanelStage = 'library' | 'setup' | 'recording' | 'review' | 'editRecord' | 'aiSettings' | 'aiUsage';
 type PanelTab = 'business' | 'code' | 'log';
+type FlowFormSheetState =
+  | { mode: 'new'; flow: BusinessFlow }
+  | { mode: 'edit'; flow: BusinessFlow };
+
 type PendingAssertionPick = {
   stepId: string;
   subject: FlowAssertionSubject;
@@ -435,6 +440,8 @@ export const CrxRecorder: React.FC = ({
   const [recordedActionCount, setRecordedActionCount] = React.useState(0);
   const [panelStage, setPanelStage] = React.useState<PanelStage>('library');
   const [activeTab, setActiveTab] = React.useState<PanelTab>('business');
+  const [flowFormSheet, setFlowFormSheet] = React.useState<FlowFormSheetState>();
+  const [aiUsageSheetOpen, setAiUsageSheetOpen] = React.useState(false);
   const [expandedRuntimeLogIds, setExpandedRuntimeLogIds] = React.useState<Set<number>>(() => new Set());
   const [editingAssertionStepId, setEditingAssertionStepId] = React.useState<string>();
   const [pickedAssertionTarget, setPickedAssertionTarget] = React.useState<AssertionPickedTarget>();
@@ -1166,6 +1173,78 @@ export const CrxRecorder: React.FC = ({
     window.dispatch({ event: 'businessFlowCodeChanged', params: { code: null } }).catch(() => {});
   }, [settings]);
 
+  const openNewFlowSheet = React.useCallback(() => {
+    setFlowFormSheet({ mode: 'new', flow: createDraft(settings, false) });
+  }, [settings]);
+
+  const openEditFlowSheet = React.useCallback((flow: BusinessFlow) => {
+    setFlowFormSheet({ mode: 'edit', flow: normalizeIntentSources(normalizeFlowStepIds(flow)) });
+  }, []);
+
+  const activateNewFlowDraft = React.useCallback((flow: BusinessFlow) => {
+    pendingAssertionPickRef.current = undefined;
+    pendingInsertRecordingRef.current = undefined;
+    setInsertRecordingAfterStepId(undefined);
+    setFlowDraft(flow);
+    setSelectedRecordId(flow.flow.id);
+    setSuppressDefaultMeta(false);
+    setRecordedActionCount(0);
+    setSources([]);
+    setLog(new Map());
+    setPickedAssertionTarget(undefined);
+    setPickingAssertionStepId(undefined);
+    setEditingAssertionStepId(undefined);
+    setActiveTab('business');
+    window.dispatch({ event: 'clear', params: {} }).catch(() => {});
+    window.dispatch({ event: 'businessFlowCodeChanged', params: { code: null } }).catch(() => {});
+  }, []);
+
+  const saveFlowFromSheet = React.useCallback(async (flow: BusinessFlow, action: FlowFormSheetAction) => {
+    if (!flow.flow.name.trim())
+      throw new Error('请先填写流程名称。');
+
+    const normalized = normalizeIntentSources(normalizeFlowStepIds(flow));
+    const codeForStorage = settings.businessFlowEnabled === false ? normalized.artifacts?.playwrightCode : generateBusinessFlowPlaywrightCode(normalized);
+    const flowForStorage = withPlaywrightCodeForStorage(normalized, codeForStorage);
+
+    if (action === 'saveDraft' || action === 'saveAndStart')
+      activateNewFlowDraft(flowForStorage);
+    else {
+      setFlowDraft(flowForStorage);
+      setSelectedRecordId(flowForStorage.flow.id);
+      setSuppressDefaultMeta(true);
+      setActiveTab('business');
+    }
+
+    setRecordStatus(action === 'saveAndStart' ? '正在保存并开始录制' : action === 'saveDraft' ? '正在保存草稿' : '正在保存流程修改');
+    await Promise.all([
+      saveFlowDraft(flowForStorage),
+      saveFlowRecord(flowForStorage),
+    ]);
+    await refreshFlowRecords();
+    setFlowFormSheet(undefined);
+
+    if (action === 'saveAndStart') {
+      setPanelStage('recording');
+      setRecordStatus(`已保存并开始录制 ${new Date().toLocaleTimeString()}`);
+      appendDiagnosticLog({
+        type: 'ui.recording-start',
+        message: '从新建流程 sheet 开始录制',
+        data: {
+          flowId: flowForStorage.flow.id,
+          flowName: flowForStorage.flow.name,
+          stepCount: flowForStorage.steps.length,
+        },
+      });
+      window.dispatch({ event: 'setMode', params: { mode: 'recording' } }).catch(() => {});
+      return;
+    }
+
+    if (action === 'saveDraft')
+      setPanelStage('library');
+    setRecordStatus(action === 'saveDraft' ? `草稿已保存 ${new Date().toLocaleTimeString()}` : `流程修改已保存 ${new Date().toLocaleTimeString()}`);
+  }, [activateNewFlowDraft, appendDiagnosticLog, refreshFlowRecords, settings.businessFlowEnabled]);
+
   const openRecord = React.useCallback((flow: BusinessFlow) => {
     const normalized = normalizeIntentSources(normalizeFlowStepIds(flow));
     setFlowDraft(normalized);
@@ -1886,9 +1965,9 @@ export const CrxRecorder: React.FC = ({
             aiProfiles={aiProfiles}
             activeAiProfile={activeAiProfile}
             aiUsageRecords={aiUsageRecords}
-            onNewFlow={beginNewFlow}
+            onNewFlow={openNewFlowSheet}
             onOpenRecord={openRecord}
-            onEditRecord={editRecord}
+            onEditRecord={openEditFlowSheet}
             onDuplicateRecord={duplicateRecord}
             onDeleteRecord={deleteRecord}
             onRestoreRecord={restoreRecord}
@@ -1896,7 +1975,7 @@ export const CrxRecorder: React.FC = ({
             onExportAll={exportAllRecords}
             onAiSettingsChange={updateAiSettings}
             onOpenAiSettings={() => setPanelStage('aiSettings')}
-            onOpenAiUsage={() => setPanelStage('aiUsage')}
+            onOpenAiUsage={() => setAiUsageSheetOpen(true)}
           /> : panelStage === 'aiSettings' ? <AiIntentSettingsPanel
             settings={aiSettings}
             profiles={aiProfiles}
@@ -1910,10 +1989,12 @@ export const CrxRecorder: React.FC = ({
             onApiKeyChange={updateActiveAiApiKey}
             onTestConnection={testAiConnection}
             onGenerate={() => runAiGeneration()}
-            onOpenUsage={() => setPanelStage('aiUsage')}
+            onOpenUsage={() => setAiUsageSheetOpen(true)}
           /> : panelStage === 'aiUsage' ? <AiUsagePanel
             records={aiUsageRecords}
+            activeProfile={activeAiProfile}
             onBack={() => setPanelStage('library')}
+            onOpenSettings={() => setPanelStage('aiSettings')}
             onExport={exportAiUsage}
             onClear={clearAiUsage}
           /> : panelStage === 'setup' ? <>
@@ -1983,7 +2064,7 @@ export const CrxRecorder: React.FC = ({
                 <h2>{flowDraft.flow.name || '未命名业务流程'}</h2>
                 <div>{metaLine || draftStatus}</div>
               </div>
-              <button type='button' onClick={() => setPanelStage(selectedRecordId ? 'editRecord' : 'setup')}>编辑</button>
+              <button type='button' onClick={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}>编辑</button>
             </div>
             <div className='business-tabs'>
               <button type='button' className={activeTab === 'business' ? 'selected' : ''} onClick={() => setActiveTab('business')}>业务流程</button>
@@ -1998,7 +2079,7 @@ export const CrxRecorder: React.FC = ({
               generating={aiGenerating}
               onOverrideChange={updateFlowAiIntentOverride}
               onGenerate={() => runAiGeneration()}
-              onOpenUsage={() => setPanelStage('aiUsage')}
+              onOpenUsage={() => setAiUsageSheetOpen(true)}
             />}
             {activeTab === 'business' && panelStage === 'recording' && <>
               <div className={insertRecordingAfterStepId ? 'recording-toolbar inserting' : 'recording-toolbar'}>
@@ -2150,6 +2231,31 @@ export const CrxRecorder: React.FC = ({
               </div>)}
             </div>}
           </>}
+          {flowFormSheet && <FlowFormSheet
+            mode={flowFormSheet.mode}
+            flow={flowFormSheet.flow}
+            globalAiMode={aiSettings.mode}
+            onClose={() => setFlowFormSheet(undefined)}
+            onSubmit={saveFlowFromSheet}
+          />}
+          {aiUsageSheetOpen && <div className='sheet-backdrop' role='presentation' onMouseDown={event => {
+            if (event.target === event.currentTarget)
+              setAiUsageSheetOpen(false);
+          }}>
+            <section className='usage-sheet sheet-surface' role='dialog' aria-modal='true' aria-label='AI Intent 用量'>
+              <AiUsagePanel
+                records={aiUsageRecords}
+                activeProfile={activeAiProfile}
+                onClose={() => setAiUsageSheetOpen(false)}
+                onOpenSettings={() => {
+                  setAiUsageSheetOpen(false);
+                  setPanelStage('aiSettings');
+                }}
+                onExport={exportAiUsage}
+                onClear={clearAiUsage}
+              />
+            </section>
+          </div>}
         </aside> : <div className='recorder-editor'>
           <Recorder sources={sources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
         </div>}
