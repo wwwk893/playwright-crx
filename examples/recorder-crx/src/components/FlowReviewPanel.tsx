@@ -36,10 +36,12 @@ export const FlowReviewPanel: React.FC<{
   onExportJson: () => void;
   onExportYaml: () => void;
   onOpenReplayCode: () => void;
+  onEditFlow: () => void;
+  onOpenSettings: () => void;
   playwrightCode?: string;
   onSaveRepeatSegment: (segment: FlowRepeatSegment) => void;
   onDeleteRepeatSegment: (segmentId: string) => void;
-}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onOpenReplayCode, playwrightCode, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
+}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onOpenReplayCode, onEditFlow, onOpenSettings, playwrightCode, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
   const stats = flowStats(flow);
   const repeatStats = repeatSegmentStats(flow);
   const [activeInsertStepId, setActiveInsertStepId] = React.useState<string>();
@@ -135,13 +137,11 @@ export const FlowReviewPanel: React.FC<{
       onExportJson={onExportJson}
       onExportYaml={onExportYaml}
       onOpenReplayCode={onOpenReplayCode}
+      onEditFlow={onEditFlow}
+      onContinueRecording={onContinueRecording}
+      onAddAssertion={onAddAssertion}
+      onOpenSettings={onOpenSettings}
     />
-    <div className='review-toolbar'>
-      <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
-      <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
-      <button type='button' className='danger-outline' onClick={onClearSteps}>清空步骤</button>
-      <span>继续录制会接在当前步骤后；也可以在步骤之间插入操作。</span>
-    </div>
     <div className='review-summary-grid'>
       <div><strong>{repeatStats.segmentCount ? repeatStats.rowCount : stats.stepCount}</strong><span>{repeatStats.segmentCount ? '循环次数' : '步骤'}</span></div>
       <div><strong>{repeatStats.segmentCount ? repeatStats.expandedStepCount : stats.assertionCount}</strong><span>{repeatStats.segmentCount ? '展开步骤' : '断言'}</span></div>
@@ -216,6 +216,12 @@ export const FlowReviewPanel: React.FC<{
           </div>}
         </React.Fragment>;
       })}
+    </div>
+    <div className='review-toolbar'>
+      <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
+      <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
+      <button type='button' className='danger-outline' onClick={onClearSteps}>清空步骤</button>
+      <span>继续录制会接在当前步骤后；也可以在步骤之间插入操作。</span>
     </div>
   </div>;
 };

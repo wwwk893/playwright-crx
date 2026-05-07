@@ -202,26 +202,34 @@ export const AssertionEditor: React.FC<{
   const suggestedAssertions = step.assertions.filter(assertion => !assertion.enabled);
 
   return <div className='assertion-editor'>
-    <div className='assertion-heading'>断言（{enabledAssertions.length}）</div>
-    <div className='assertion-chip-row'>
+    <div className='assertion-chip-row assertion-chip-summary'>
       {enabledAssertions.map(assertion => <span className='assertion-chip enabled' key={assertion.id}>
         <span className='chip-dot'>✓</span>
         {summarizeAssertion(assertion)}
         <button type='button' aria-label='删除断言' onClick={() => removeAssertion(assertion.id)}>×</button>
       </span>)}
-      {suggestedAssertions.map(assertion => <span className='assertion-chip suggested' key={assertion.id}>
+      {!isEditing && suggestedAssertions.map(assertion => <span className='assertion-chip suggested' key={assertion.id}>
         建议 {summarizeAssertion(assertion)}
       </span>)}
-      {!enabledAssertions.length && !suggestedAssertions.length && suggestion && <span className='assertion-chip suggested'>
-        建议 {assertionSubjectLabel[suggestion.subject]}：{suggestion.label}
-      </span>}
+      {!enabledAssertions.length && !suggestedAssertions.length && !suggestion && <span className='assertion-chip muted'>这一步还没有断言。</span>}
       <button className='add-assertion-button' type='button' onClick={onBeginAddAssertion}>+ 添加断言</button>
     </div>
-    {!step.assertions.length && <div className='business-flow-empty'>这一步还没有断言。</div>}
+    {suggestion && <div className='assertion-suggestion-card top-suggestion'>
+      <div>
+        <strong>推荐断言：{suggestion.label}</strong>
+        <span>这条断言会挂到当前步骤之后；来自 StepList 规则和页面上下文。</span>
+      </div>
+      <span className='pill warn'>置信度 0.82</span>
+      <button className='mini-button' type='button' onClick={applySuggestion}>使用建议</button>
+      <div className='chip-row'>
+        {suggestion.rowKeyword && <span className='chip'>候选值 {suggestion.rowKeyword}</span>}
+        {suggestion.tableArea && <span className='chip'>表格：{suggestion.tableArea}</span>}
+        {suggestion.apiStatus && <span className='chip'>接口：{suggestion.apiStatus}</span>}
+      </div>
+    </div>}
     {isEditing && <div className='assertion-drawer'>
-      <div className='assertion-drawer-title'>为 {step.id} 添加断言</div>
-      <label>
-        断言对象
+      <div className='section-title assertion-type-title'><strong>断言对象</strong><span>subject / type</span></div>
+      <div className='assertion-subject-block'>
         <div className='assertion-object-grid'>
           {assertionSubjects.map(assertionSubject => <button
             key={assertionSubject}
@@ -230,9 +238,9 @@ export const AssertionEditor: React.FC<{
             onClick={() => selectSubject(assertionSubject)}
           >{assertionSubjectLabel[assertionSubject]}</button>)}
         </div>
-      </label>
+      </div>
       <label>
-        断言类型
+        匹配方式
         <select value={type} onChange={e => setType(e.target.value as FlowAssertionType)}>
           {assertionTypesBySubject[subject].map(assertionType => <option key={assertionType} value={assertionType}>{assertionLabel[assertionType]}</option>)}
         </select>
@@ -252,15 +260,8 @@ export const AssertionEditor: React.FC<{
         </label>
       </>}
       {subject === 'table' && <>
-        {suggestion?.subject === 'table' && <div className='assertion-suggestion-card'>
-          <div>
-            <strong>推荐断言</strong>
-            <span>在「{suggestion.tableArea || '当前表格/列表'}」中查找包含「{suggestion.rowKeyword || '关键字'}」的行</span>
-          </div>
-          <button type='button' onClick={applySuggestion}>使用建议</button>
-        </div>}
         <label>
-          表格/列表
+          目标
           <div className='assertion-inline-control'>
             <input ref={tableInputRef} type='text' value={tableArea} onChange={e => setTableArea(e.target.value)} placeholder='共享 WAN 表格' />
             <button type='button' onClick={() => onPickTarget('table')}>{isPickingTarget ? '选择中...' : '重新选择'}</button>
@@ -271,7 +272,7 @@ export const AssertionEditor: React.FC<{
           <button type='button' onClick={useCurrentTable}>使用当前推荐值</button>
         </div>}
         <label>
-          行关键字
+          期望值
           <input type='text' value={rowKeyword} onChange={e => setRowKeyword(e.target.value)} placeholder='WAN2' />
         </label>
         {!!suggestion?.candidates?.length && <div className='assertion-candidates'>
@@ -286,8 +287,8 @@ export const AssertionEditor: React.FC<{
             }}
           >{candidate}</button>)}
         </div>}
-        <details className='assertion-advanced-match' open>
-          <summary>高级匹配</summary>
+        <details className='assertion-advanced-match'>
+          <summary><span className='summary-title'><strong>Selector 与页面上下文</strong><span>默认折叠，开发排查时再展开</span></span></summary>
           <label className='assertion-enabled'>
             <input type='checkbox' checked={useColumnCondition} onChange={e => setUseColumnCondition(e.target.checked)} />
             指定列条件
