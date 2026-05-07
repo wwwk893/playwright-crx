@@ -141,7 +141,7 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   await expect(wanDialog).toBeVisible({ timeout: 10_000 });
   await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('Nova专线');
 
-  const popconfirm = page.locator('.ant-popover, [role="tooltip"]').filter({ hasText: '删除此行？' }).last();
+  const popconfirm = page.locator('.ant-popover:visible, [role="tooltip"]:visible').filter({ hasText: '删除此行？' }).last();
   await humanClickUntil(
       wanDialog.getByTestId('wan-transport-row-delete-action'),
       async () => await popconfirm.isVisible().catch(() => false),
