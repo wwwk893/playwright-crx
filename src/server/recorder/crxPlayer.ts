@@ -378,7 +378,7 @@ async function dispatchDuplicateOrdinalClick(mainFrame: Frame, target: { index: 
     else if (role)
       candidates = Array.from(document.querySelectorAll(`[role="${CSS.escape(role)}"]`)).filter(element => normalize(element.textContent).includes(normalize(name)));
     candidates = candidates.filter(isVisible);
-    const element = candidates[index] || candidates[candidates.length - 1];
+    const element = candidates[index];
     if (!element)
       return false;
     dispatchClick(element);

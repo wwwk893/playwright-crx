@@ -2113,7 +2113,7 @@ export const CrxRecorder: React.FC = ({
               <button type='button' className={activeTab === 'code' ? 'selected' : ''} onClick={() => setActiveTab('code')}>Playwright 代码</button>
               <button type='button' className={activeTab === 'log' ? 'selected' : ''} onClick={() => setActiveTab('log')}>运行日志</button>
             </div>
-            {activeTab === 'business' && panelStage !== 'assertion' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
+            {activeTab === 'business' && aiSettings.enabled && panelStage !== 'assertion' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
               flow={flowDraft}
               settings={aiSettings}
               activeProfile={activeAiProfile}
@@ -2176,7 +2176,7 @@ export const CrxRecorder: React.FC = ({
                 onCancelAddAssertion={() => setEditingAssertionStepId(undefined)}
                 onSaveAssertion={addAssertion}
                 onDeleteStep={deleteStep}
-                onRegenerateIntent={stepId => runAiGeneration([stepId], 'single')}
+                onRegenerateIntent={effectiveAiIntentEnabled ? stepId => runAiGeneration([stepId], 'single') : undefined}
                 onPickAssertionTarget={startAssertionPick}
                 pickedTarget={pickedAssertionTarget}
                 pickingStepId={pickingAssertionStepId}

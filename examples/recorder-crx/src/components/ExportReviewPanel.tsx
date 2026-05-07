@@ -33,67 +33,76 @@ export const ExportReviewPanel: React.FC<{
   const okCount = risks.filter(item => item.level === 'ok').length;
   const disabledByP0 = p0Count > 0;
 
-  return <section className='export-review-panel' aria-label='导出检查'>
-    <div className='export-review-header'>
+  return <details className='export-review-panel' aria-label='导出检查' open>
+    <summary className='export-review-header'>
       <div>
         <span className='eyebrow'>导出检查</span>
         <h2>导出前复核：{flow.flow.name || '未命名业务流程'}</h2>
         <p>P0 会阻塞导出；P1 可以继续，但建议先处理。代码预览默认折叠，避免挤占主屏。</p>
       </div>
-      <div className='export-risk-score' data-risk={p0Count ? 'p0' : p1Count ? 'p1' : 'ok'}>
+      <div className='export-risk-score' data-risk={p0Count ? 'p0' : p1Count ? 'p1' : 'ok'} aria-hidden='true'>
         <strong>{p0Count ? `P0 × ${p0Count}` : p1Count ? `P1 × ${p1Count}` : 'OK'}</strong>
         <span>{p0Count ? '需要先修' : p1Count ? '可导出，有风险' : '可导出'}</span>
       </div>
-    </div>
+      <span className='export-review-chevron'>⌄</span>
+    </summary>
 
-    <div className='export-risk-strip'>
-      <span className={p0Count ? 'risk-pill p0 active' : 'risk-pill p0'}>P0 {p0Count}</span>
-      <span className={p1Count ? 'risk-pill p1 active' : 'risk-pill p1'}>P1 {p1Count}</span>
-      <span className='risk-pill ok'>OK {okCount}</span>
-      <span className={redactionEnabled ? 'risk-pill ok active' : 'risk-pill p1 active'}>{redactionEnabled ? '脱敏开启' : '脱敏关闭'}</span>
-    </div>
+    <div className='export-review-body'>
+      <div className='export-risk-strip'>
+        <span className={p0Count ? 'risk-pill p0 active' : 'risk-pill p0'}>P0 {p0Count}</span>
+        <span className={p1Count ? 'risk-pill p1 active' : 'risk-pill p1'}>P1 {p1Count}</span>
+        <span className='risk-pill ok'>OK {okCount}</span>
+        <span className={redactionEnabled ? 'risk-pill ok active' : 'risk-pill p1 active'}>{redactionEnabled ? '脱敏开启' : '脱敏关闭'}</span>
+      </div>
 
-    <div className='export-risk-list'>
-      {risks.map(item => <article className={`export-risk-card ${item.level}`} key={item.id}>
-        <span>{item.level.toUpperCase()}</span>
-        <div>
-          <strong>{item.title}</strong>
-          <p>{item.detail}</p>
+      <details className='export-risk-details' open>
+        <summary>
+          <span>检查结果</span>
+          <em>{risks.length} 项</em>
+        </summary>
+        <div className='export-risk-list'>
+          {risks.map(item => <article className={`export-risk-card ${item.level}`} key={item.id}>
+            <span>{item.level.toUpperCase()}</span>
+            <div>
+              <strong>{item.title}</strong>
+              <p>{item.detail}</p>
+            </div>
+          </article>)}
         </div>
-      </article>)}
-    </div>
+      </details>
 
-    <div className='export-cta-card'>
-      <div>
-        <strong>Replay CTA</strong>
-        <span>先打开生成的 Playwright replay 代码检查，再选择导出格式。</span>
+      <div className='export-cta-card replay-cta-card'>
+        <div>
+          <strong>Replay CTA</strong>
+          <span>先打开生成的 Playwright replay 代码检查，再选择导出格式。</span>
+        </div>
+        <button type='button' className='primary replay-code-button' onClick={onOpenReplayCode}>查看 Replay 代码</button>
       </div>
-      <button type='button' className='primary' onClick={onOpenReplayCode}>查看 Replay 代码</button>
-    </div>
 
-    <div className='export-format-row'>
-      <label>
-        默认格式
-        <select value={format} onChange={event => setFormat(event.target.value as ExportFormat)}>
-          <option value='json'>流程 JSON（完整记录）</option>
-          <option value='yaml'>紧凑 YAML（轻量交接）</option>
-        </select>
-      </label>
-      <div className='export-format-actions'>
-        <button type='button' className='primary' disabled={disabledByP0} onClick={format === 'json' ? onExportJson : onExportYaml}>导出所选格式</button>
-        <button type='button' disabled={disabledByP0} onClick={onExportJson}>导出流程 JSON</button>
-        <button type='button' disabled={disabledByP0} onClick={onExportYaml}>导出紧凑 YAML</button>
+      <div className='export-format-row'>
+        <label>
+          默认格式
+          <select value={format} onChange={event => setFormat(event.target.value as ExportFormat)}>
+            <option value='json'>流程 JSON（完整记录）</option>
+            <option value='yaml'>紧凑 YAML（轻量交接）</option>
+          </select>
+        </label>
+        <div className='export-format-actions'>
+          <button type='button' className='primary' disabled={disabledByP0} onClick={format === 'json' ? onExportJson : onExportYaml}>导出所选格式</button>
+          <button type='button' disabled={disabledByP0} onClick={onExportJson}>导出流程 JSON</button>
+          <button type='button' disabled={disabledByP0} onClick={onExportYaml}>导出紧凑 YAML</button>
+        </div>
       </div>
-    </div>
 
-    <details className='export-code-preview'>
-      <summary>
-        <span>代码预览</span>
-        <em>{playwrightCode ? `${playwrightCode.split('\n').length} 行` : '暂无代码'}</em>
-      </summary>
-      <pre>{playwrightCode || '暂无生成代码。先录制步骤或打开 Replay 代码。'}</pre>
-    </details>
-  </section>;
+      <details className='export-code-preview'>
+        <summary>
+          <span>代码预览</span>
+          <em>{playwrightCode ? `${playwrightCode.split('\n').length} 行` : '暂无代码'}</em>
+        </summary>
+        <pre>{playwrightCode || '暂无生成代码。先录制步骤或打开 Replay 代码。'}</pre>
+      </details>
+    </div>
+  </details>;
 };
 
 function buildExportRisks(flow: BusinessFlow, redactionEnabled: boolean): ExportRiskItem[] {

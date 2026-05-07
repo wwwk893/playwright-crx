@@ -2230,6 +2230,45 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'test id locator ignores stale context ordinal from a different target',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'site-ip-address-pool-create-button',
+            text: '新建',
+          },
+          context: {
+            eventId: 'ctx-stale-select',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'div',
+                role: 'option',
+                testId: 'site-ip-address-pool-create-button',
+                text: '选择一个WAN口',
+                locatorQuality: 'testid',
+                uniqueness: { pageCount: 5, pageIndex: 4 },
+              },
+            },
+          },
+          rawAction: testIdClickAction('site-ip-address-pool-create-button'),
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.getByTestId("site-ip-address-pool-create-button").click();'), 'unique create button should not inherit a stale contextual nth');
+      assert(!code.includes('site-ip-address-pool-create-button").nth(4)'), 'stale context ordinal should not be emitted for the test id locator');
+    },
+  },
+  {
     name: 'recorded duplicate test id selector ordinal is exported as locator hint',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -2851,6 +2890,60 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('.ant-select-item-option') && firstStep.includes('hasText: "test1"'), 'runtime replay should click the active dropdown option by the primary token');
       assert(firstStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'runtime option click should keep enough identifying tokens to avoid partial test1/test12 ambiguity');
       assertEqual(firstStep.split(fieldClick).length - 1, 1);
+    },
+  },
+  {
+    name: 'ReactNode AntD select option dedupe keeps shared and dedicated option semantics',
+    run: () => {
+      const optionStep = (id: string, order: number, optionText: string): FlowStep => ({
+        id,
+        order,
+        kind: 'recorded',
+        sourceActionIds: [`a${order.toString().padStart(3, '0')}`],
+        action: 'click',
+        target: {
+          text: optionText,
+          scope: {
+            form: { label: 'IP地址池' },
+            dialog: { title: '新建IP端口地址池', type: 'modal', visible: true },
+          },
+        },
+        context: {
+          eventId: `ctx-${id}`,
+          capturedAt: 1000 + order,
+          before: {
+            form: { label: 'IP地址池' },
+            dialog: { title: '选择一个IP地址池', type: 'dropdown', visible: true },
+            target: {
+              tag: 'div',
+              role: 'option',
+              text: optionText,
+              selectedOption: optionText,
+              normalizedText: optionText,
+              framework: 'procomponents',
+              controlType: 'select-option',
+            },
+          },
+        },
+        rawAction: {
+          action: {
+            name: 'click',
+            selector: `internal:text="${optionText}"i`,
+          },
+        },
+        assertions: [],
+      });
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          optionStep('s001', 1, 'test11.1.1.1--2.2.2.2共享'),
+          optionStep('s002', 2, 'test11.1.1.1--2.2.2.2独享'),
+        ],
+      };
+      const code = generateBusinessFlowPlaybackCode(flow);
+
+      assert(stepCodeBlock(code, 's001').includes('共享'), 'shared option should be emitted');
+      assert(stepCodeBlock(code, 's002').includes('独享'), 'dedicated option should not be deduped as a duplicate of shared');
     },
   },
   {

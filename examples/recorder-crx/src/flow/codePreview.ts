@@ -178,8 +178,8 @@ function areDuplicateDropdownOptionClicks(a: FlowStep, b: FlowStep) {
   const compactB = compactDropdownOptionIdentity(antdSelectOptionName(b) || popupOptionName(b) || '');
   if (compactA && compactB && compactA === compactB)
     return true;
-  const tokensA = optionTextTokens(antdSelectOptionName(a) || popupOptionName(a) || '').map(normalizeComparableText).filter(Boolean);
-  const tokensB = optionTextTokens(antdSelectOptionName(b) || popupOptionName(b) || '').map(normalizeComparableText).filter(Boolean);
+  const tokensA = optionTextTokens(antdSelectOptionName(a) || popupOptionName(a) || '', { keepSecondaryTokens: true }).map(normalizeComparableText).filter(Boolean);
+  const tokensB = optionTextTokens(antdSelectOptionName(b) || popupOptionName(b) || '', { keepSecondaryTokens: true }).map(normalizeComparableText).filter(Boolean);
   if (!tokensA.length || !tokensB.length)
     return false;
   return tokensA.every(token => tokensB.includes(token)) || tokensB.every(token => tokensA.includes(token));
@@ -207,7 +207,6 @@ function looksLikeDropdownOptionStepForDedup(step: FlowStep) {
 function compactDropdownOptionIdentity(value: string) {
   return normalizeGeneratedText(value)
       ?.replace(/\s+/g, '')
-      .replace(/共享|独享|shared|dedicated/gi, '')
       .trim();
 }
 
@@ -1011,15 +1010,15 @@ function optionLocatorWithTextTokens(baseLocator: string, optionName: string) {
   }, baseLocator);
 }
 
-function optionTextTokens(optionName: string) {
+function optionTextTokens(optionName: string, options: { keepSecondaryTokens?: boolean } = {}) {
   const normalized = normalizeGeneratedText(optionName) || '';
   const tokens = normalized.split(/\s+/).filter(Boolean);
   if (tokens.length <= 1) {
-    const compactTokens = compactOptionTextTokens(normalized);
+    const compactTokens = compactOptionTextTokens(normalized, options);
     if (compactTokens.length)
       return compactTokens;
   }
-  const identityTokens = tokens.length > 2 ? tokens.filter(token => !isSecondaryOptionToken(token)) : tokens;
+  const identityTokens = tokens.length > 2 && !options.keepSecondaryTokens ? tokens.filter(token => !isSecondaryOptionToken(token)) : tokens;
   return uniqueValues(identityTokens.length ? identityTokens : [optionName]);
 }
 
@@ -1027,7 +1026,7 @@ function isSecondaryOptionToken(token: string) {
   return /^(共享|独享|shared|dedicated)$/i.test(token);
 }
 
-function compactOptionTextTokens(text: string) {
+function compactOptionTextTokens(text: string, options: { keepSecondaryTokens?: boolean } = {}) {
   const rangeMatch = bestCompactIpRangeMatch(text);
   if (!rangeMatch)
     return [];
@@ -1036,7 +1035,7 @@ function compactOptionTextTokens(text: string) {
   return uniqueValues([
     prefix,
     rangeMatch.text.replace(/\s+/g, ''),
-    suffix && !isSecondaryOptionToken(suffix) ? suffix : undefined,
+    suffix && (options.keepSecondaryTokens || !isSecondaryOptionToken(suffix)) ? suffix : undefined,
   ].filter(Boolean) as string[]);
 }
 
@@ -1288,7 +1287,7 @@ function globalTestIdLocator(step: FlowStep) {
   if (step.target?.testId) {
     if (tableHasStableRow && step.target.testId === table?.testId)
       return undefined;
-    return testIdLocatorWithOrdinal(step, step.target.testId);
+    return testIdLocatorWithOrdinal(step, step.target.testId, 'target');
   }
   const contextControlType = step.context?.before.target?.controlType || '';
   const contextDialogType = step.context?.before.dialog?.type;
@@ -1298,14 +1297,14 @@ function globalTestIdLocator(step: FlowStep) {
   if (testId) {
     if (tableHasStableRow && testId === table?.testId)
       return undefined;
-    return testIdLocatorWithOrdinal(step, testId);
+    return testIdLocatorWithOrdinal(step, testId, 'context');
   }
   return undefined;
 }
 
-function testIdLocatorWithOrdinal(step: FlowStep, testId: string) {
+function testIdLocatorWithOrdinal(step: FlowStep, testId: string, source: 'target' | 'context') {
   const locator = `page.getByTestId(${stringLiteral(testId)})`;
-  const pageIndex = duplicatePageIndex(step);
+  const pageIndex = duplicatePageIndex(step, testId, source);
   return pageIndex === undefined ? locator : `${locator}.nth(${pageIndex})`;
 }
 
@@ -1328,11 +1327,11 @@ function looksLikeButtonText(step: FlowStep) {
   return /button|btn|save|submit|confirm|cancel|create|add|edit|delete/i.test(testId) || /保存|确定|取消|新建|编辑|删除|提交/.test(text);
 }
 
-function duplicatePageIndex(step: FlowStep) {
+function duplicatePageIndex(step: FlowStep, expectedTestId?: string, source: 'target' | 'context' = 'context') {
   const hints = [
     step.target?.locatorHint,
-    step.context?.before.target?.uniqueness,
-    uniquenessFromRawTarget(step.target?.raw),
+    source === 'context' && (!expectedTestId || step.context?.before.target?.testId === expectedTestId) ? step.context?.before.target?.uniqueness : undefined,
+    expectedTestId && rawTargetTestId(step.target?.raw) !== expectedTestId ? undefined : uniquenessFromRawTarget(step.target?.raw),
   ];
   for (const hint of hints) {
     const pageCount = Number(hint?.pageCount);
@@ -1341,6 +1340,12 @@ function duplicatePageIndex(step: FlowStep) {
       return pageIndex;
   }
   return undefined;
+}
+
+function rawTargetTestId(raw: unknown) {
+  if (!raw || typeof raw !== 'object')
+    return undefined;
+  return (raw as { testId?: unknown; pageContext?: { testId?: unknown } }).pageContext?.testId || (raw as { testId?: unknown }).testId;
 }
 
 function uniquenessFromRawTarget(raw: unknown) {
