@@ -1,8 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { App, Button, ConfigProvider, Form, Modal, Space, Table, Tag, Typography } from 'antd';
+import { App, Button, ConfigProvider, Form, List, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   ProCard,
   ProForm,
@@ -51,6 +51,26 @@ type NetworkResource = {
   sourcePort?: number;
   mappings?: Array<{ serviceName?: string; listenPort?: number }>;
   remark?: string;
+};
+
+type WanTransport = {
+  id: string;
+  transport: string;
+  tags: string[];
+};
+
+type WanConfig = {
+  id: string;
+  index: number;
+  name: string;
+  linkType: string;
+  connectionType: string;
+  ip?: string;
+  gateway?: string;
+  qosEnabled?: boolean;
+  internetEnabled?: boolean;
+  desc?: string;
+  transports: WanTransport[];
 };
 
 const wanOptions = [
@@ -117,6 +137,16 @@ const egressPathOptions = [
   },
 ];
 
+const transportColor: Record<string, string> = {
+  private: 'green',
+  public: 'blue',
+};
+
+const transportShort: Record<string, string> = {
+  private: 'Nova专线',
+  public: 'Internet',
+};
+
 function labelFromOptions(options: Array<{ label: string; value: string }>, value: string) {
   return options.find(option => option.value === value)?.label || value;
 }
@@ -145,6 +175,35 @@ function cascaderLabels(values?: string[]) {
   return labels;
 }
 
+function initialWanConfigs(): WanConfig[] {
+  return [
+    {
+      id: 'wan-1',
+      index: 1,
+      name: 'WAN1',
+      linkType: '未配置',
+      connectionType: 'DHCP',
+      qosEnabled: true,
+      internetEnabled: false,
+      desc: '',
+      transports: [],
+    },
+    {
+      id: 'wan-2',
+      index: 2,
+      name: 'WAN2',
+      linkType: 'Nova专线',
+      connectionType: '静态IP',
+      ip: '20.100.101.176/16',
+      gateway: '20.100.255.254',
+      qosEnabled: false,
+      internetEnabled: false,
+      desc: '',
+      transports: [{ id: 'transport-private', transport: 'private', tags: ['default'] }],
+    },
+  ];
+}
+
 function ipPoolOptionLabel(pool: IPv4Pool) {
   return <div className="ip-pool-option" style={{ display: 'flex', justifyContent: 'space-between', gap: 16, width: '100%' }}>
     <span>
@@ -162,6 +221,9 @@ function AntDProFormFieldsApp() {
   const [rows, setRows] = React.useState<NetworkResource[]>([]);
   const [ipv4Pools, setIpv4Pools] = React.useState<IPv4Pool[]>([]);
   const [ipPortPools, setIpPortPools] = React.useState<IpPortPool[]>([]);
+  const [wanConfigs, setWanConfigs] = React.useState<WanConfig[]>(initialWanConfigs);
+  const [editingWan, setEditingWan] = React.useState<WanConfig | undefined>();
+  const [editingWanOpen, setEditingWanOpen] = React.useState(false);
   const [configSaved, setConfigSaved] = React.useState(false);
   const [form] = Form.useForm();
   const [ipv4PoolForm] = Form.useForm();
@@ -194,6 +256,54 @@ function AntDProFormFieldsApp() {
     { title: '健康检查', dataIndex: 'healthCheck', render: (_, row) => row.healthCheck ? '启用' : '关闭' },
     { title: '端口映射', dataIndex: 'mappings', render: (_, row) => row.mappings?.map(item => `${item.serviceName}:${item.listenPort}`).join(', ') },
     { title: '备注', dataIndex: 'remark' },
+  ];
+
+  const wanConfigColumns: ProColumns<WanConfig>[] = [
+    { title: '名称', dataIndex: 'name', width: '10%' },
+    {
+      title: '传输网络',
+      dataIndex: 'transports',
+      width: '20%',
+      render: (_, row) => <Space direction="vertical" size={4}>
+        <Tag color={row.linkType === 'Nova专线' ? 'green' : 'default'}>{row.linkType}</Tag>
+        {row.transports.map(item => <Tag key={item.id} color={transportColor[item.transport] || 'blue'}>{transportShort[item.transport] || item.transport}</Tag>)}
+      </Space>,
+    },
+    {
+      title: '基础配置',
+      dataIndex: 'connectionType',
+      width: '28%',
+      render: (_, row) => <Space direction="vertical" size={4}>
+        <Tag color="blue">IPv4</Tag>
+        <span>连接类型：<strong>{row.connectionType}</strong></span>
+        {row.ip ? <span>IP：{row.ip}</span> : null}
+        {row.gateway ? <span>网关：{row.gateway}</span> : null}
+        <Tag>通用</Tag>
+        <span>禁用Internet能力：{row.internetEnabled ? '已配置' : '未配置'}</span>
+      </Space>,
+    },
+    {
+      title: 'QoS&告警配置',
+      dataIndex: 'qosEnabled',
+      width: '20%',
+      render: (_, row) => <Button disabled>{row.qosEnabled ? '启用QoS保障' : '启用QoS保障'}</Button>,
+    },
+    {
+      title: '描述',
+      dataIndex: 'desc',
+      width: '12%',
+      render: (_, row) => row.desc || <Button type="link">添加描述</Button>,
+    },
+    {
+      title: '操作',
+      valueType: 'option',
+      width: '10%',
+      render: (_, row) => [
+        <a key="edit" data-testid={`wan-edit-${row.index}`} onClick={() => openWanEditor(row)}>
+          <EditOutlined />
+        </a>,
+      ],
+    },
   ];
 
   async function saveIpv4Pool() {
@@ -247,8 +357,57 @@ function AntDProFormFieldsApp() {
     form.resetFields();
   }
 
+  function openWanEditor(row: WanConfig) {
+    setEditingWan({ ...row, transports: row.transports.map(item => ({ ...item, tags: [...item.tags] })) });
+    setEditingWanOpen(true);
+  }
+
+  function removeWanTransport(row: WanTransport) {
+    setEditingWan(current => current ? {
+      ...current,
+      transports: current.transports.filter(item => item.id !== row.id),
+    } : current);
+  }
+
+  function applyWanDraft() {
+    if (!editingWan)
+      return;
+    const commit = () => {
+      setWanConfigs(current => current.map(row => row.id === editingWan.id ? editingWan : row));
+      setEditingWanOpen(false);
+      setEditingWan(undefined);
+      setConfigSaved(false);
+    };
+    if (!editingWan.transports.length) {
+      Modal.confirm({
+        title: '确定要配置WAN的传输网络？',
+        content: 'WAN2 删除最后一条传输网络后会作为未配置传输网络保存。',
+        onOk: commit,
+      });
+      return;
+    }
+    commit();
+  }
+
   return <ConfigProvider locale={zhCN}>
     <App>
+
+      <ProCard title="WAN配置" bordered data-testid="site-global-wan-section" style={{ margin: 24 }}>
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Typography.Text type="secondary">抽象自租户站点全局配置中的 WAN 与共享 WAN 场景。</Typography.Text>
+          <Table<WanConfig>
+            data-testid="wan-config-table"
+            rowKey={row => String(row.index)}
+            pagination={false}
+            columns={wanConfigColumns as any}
+            dataSource={wanConfigs}
+            onRow={row => ({
+              'data-testid': 'wan-config-row',
+              'data-row-key': String(row.index),
+            })}
+          />
+        </Space>
+      </ProCard>
 
       <ProCard title="地址池与端口池" bordered data-testid="site-global-ip-pools-section" style={{ margin: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -402,6 +561,51 @@ function AntDProFormFieldsApp() {
             rules={[{ required: true, message: '请选择关联VRF' }]}
           />
         </ProForm>
+      </Modal>
+
+      <Modal
+        title={editingWan ? `编辑WAN${editingWan.index}` : '编辑WAN'}
+        open={editingWanOpen}
+        destroyOnClose
+        width={760}
+        data-testid="wan-config-modal"
+        onCancel={() => {
+          setEditingWanOpen(false);
+          setEditingWan(undefined);
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => setEditingWanOpen(false)}>取 消</Button>,
+          <Button key="ok" type="primary" data-testid="wan-config-confirm" onClick={applyWanDraft}>确 定</Button>,
+        ]}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            删除 WAN2 的传输网络后，本页会弹出二次确认，模拟共享 WAN/普通 WAN 草稿保存前的真实风险提示。
+          </Typography.Text>
+          <List
+            data-testid="wan-transport-list"
+            itemLayout="horizontal"
+            dataSource={editingWan?.transports || []}
+            locale={{ emptyText: '暂无数据' }}
+            renderItem={item => (
+              <List.Item
+                data-testid="wan-transport-row"
+                data-row-key={item.transport}
+                actions={[
+                  <a key="edit" data-testid="wan-transport-row-edit-action"><EditOutlined /></a>,
+                  <Popconfirm key="delete" title="删除此行？" onConfirm={() => removeWanTransport(item)}>
+                    <a href="#" data-testid="wan-transport-row-delete-action"><DeleteOutlined /></a>
+                  </Popconfirm>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={<Tag color={transportColor[item.transport] || 'blue'}>{transportShort[item.transport] || item.transport}</Tag>}
+                  description={<Space size={0}>{item.tags.map(tag => <Tag key={`${item.id}-${tag}`}>{tag}</Tag>)}</Space>}
+                />
+              </List.Item>
+            )}
+          />
+        </Space>
       </Modal>
 
       <ProCard title="网络配置资源" bordered data-testid="network-config-card" style={{ margin: 24 }}>
