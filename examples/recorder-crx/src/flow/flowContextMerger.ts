@@ -14,6 +14,7 @@
 import { suggestIntent, stepContextFromEvent } from './intentRules';
 import { matchPageContextEvent } from './pageContextMatcher';
 import type { ElementContext, PageContextEvent, StepContextSnapshot } from './pageContextTypes';
+import type { UiSemanticContext } from '../uiSemantics/types';
 import type { BusinessFlow, FlowTargetScope, FlowStep, FlowTarget, LocatorHint } from './types';
 
 const autoIntentThreshold = 0.6;
@@ -89,27 +90,30 @@ function applySuggestion(step: FlowStep, suggestion: FlowStep['intentSuggestion'
 function upgradeStepTargetFromContext(step: FlowStep, context: StepContextSnapshot): FlowStep {
   const contextTarget = context.before.target;
   if (!contextTarget)
-    return step;
+    return context.before.ui?.recipe ? { ...step, uiRecipe: context.before.ui.recipe } : step;
 
   const nextTarget = mergeTargetWithContext(step.target, contextTarget, context);
-  if (nextTarget === step.target)
+  if (nextTarget === step.target && !context.before.ui?.recipe)
     return step;
 
   return {
     ...step,
     target: nextTarget,
+    uiRecipe: context.before.ui?.recipe || step.uiRecipe,
   };
 }
 
 function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: ElementContext, context: StepContextSnapshot): FlowTarget | undefined {
   const contextScope = scopeFromContext(context);
-  const locatorHint = locatorHintFromContext(contextTarget, contextScope);
+  const ui = context.before.ui;
+  const locatorHint = locatorHintFromContext(contextTarget, contextScope, ui);
   const contextText = stableElementText(contextTarget);
+  const uiText = ui?.option?.text || ui?.targetText;
   if (!target)
-    return flowTargetFromElementContext(contextTarget, contextScope, locatorHint);
+    return flowTargetFromElementContext(contextTarget, contextScope, locatorHint, ui);
 
-  const hasBetterTestId = !target.testId && contextTarget.testId;
-  const hasBetterDisplayName = !target.displayName && (contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId);
+  const hasBetterTestId = !target.testId && (contextTarget.testId || ui?.targetTestId);
+  const hasBetterDisplayName = !target.displayName && (uiText || contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId);
   const hasBetterRole = !target.role && contextTarget.role;
   const hasBetterText = !target.text && contextTarget.text;
   const hasBetterPlaceholder = !target.placeholder && contextTarget.placeholder;
@@ -125,18 +129,19 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
 
   return {
     ...target,
-    testId: target.testId || contextTarget.testId,
+    testId: target.testId || ui?.targetTestId || contextTarget.testId,
     role: target.role || contextTarget.role,
-    name: target.name && !preferredContextText ? target.name : contextTarget.ariaLabel || preferredContextText || contextText || contextTarget.title,
-    displayName: target.displayName && !preferredContextText ? target.displayName : preferredContextText || contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || target.displayName,
-    label: target.label || contextScope?.form?.label,
-    placeholder: target.placeholder || contextTarget.placeholder,
-    text: target.text && !preferredContextText ? target.text : preferredContextText || contextText,
+    name: target.name && !preferredContextText && !uiText ? target.name : contextTarget.ariaLabel || preferredContextText || uiText || contextText || contextTarget.title,
+    displayName: target.displayName && !preferredContextText && !uiText ? target.displayName : preferredContextText || uiText || contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || target.displayName,
+    label: target.label || ui?.form?.label || contextScope?.form?.label,
+    placeholder: target.placeholder || ui?.form?.placeholder || contextTarget.placeholder,
+    text: target.text && !preferredContextText && !uiText ? target.text : preferredContextText || uiText || contextText,
     scope: mergeScope(target.scope, contextScope),
     locatorHint: target.locatorHint || locatorHint,
     raw: {
       recorder: target.raw,
       pageContext: contextTarget,
+      ui,
     },
   };
 }
@@ -185,19 +190,22 @@ function mergeTableScope(current?: FlowTargetScope['table'], context?: FlowTarge
   };
 }
 
-function flowTargetFromElementContext(contextTarget: ElementContext, scope?: FlowTargetScope, locatorHint?: LocatorHint): FlowTarget {
+function flowTargetFromElementContext(contextTarget: ElementContext, scope?: FlowTargetScope, locatorHint?: LocatorHint, ui?: UiSemanticContext): FlowTarget {
   const contextText = stableElementText(contextTarget);
   return {
-    testId: contextTarget.testId,
+    testId: ui?.targetTestId || contextTarget.testId,
     role: contextTarget.role,
-    name: contextTarget.ariaLabel || contextText || contextTarget.title,
-    displayName: contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || scope?.form?.label,
-    label: scope?.form?.label,
-    placeholder: contextTarget.placeholder,
-    text: contextText,
+    name: contextTarget.ariaLabel || ui?.targetText || contextText || contextTarget.title,
+    displayName: ui?.recipe?.optionText || ui?.recipe?.targetText || ui?.targetText || contextText || contextTarget.ariaLabel || contextTarget.placeholder || contextTarget.testId || scope?.form?.label,
+    label: ui?.form?.label || scope?.form?.label,
+    placeholder: ui?.form?.placeholder || contextTarget.placeholder,
+    text: ui?.option?.text || ui?.targetText || contextText,
     scope,
     locatorHint,
-    raw: contextTarget,
+    raw: {
+      pageContext: contextTarget,
+      ui,
+    },
   };
 }
 
@@ -267,11 +275,19 @@ function scopeFromContext(context: StepContextSnapshot): FlowTargetScope | undef
   return Object.keys(scope).length ? scope : undefined;
 }
 
-function locatorHintFromContext(contextTarget: ElementContext, scope?: FlowTargetScope): LocatorHint | undefined {
+function locatorHintFromContext(contextTarget: ElementContext, scope?: FlowTargetScope, ui?: UiSemanticContext): LocatorHint | undefined {
+  const uiBest = ui?.locatorHints?.slice().sort((a, b) => b.score - a.score)[0];
+  if (uiBest?.kind === 'testid')
+    return { strategy: 'global-testid', confidence: uiBest.score, reason: uiBest.reason };
+  if (uiBest?.kind === 'label')
+    return { strategy: 'field-scoped', confidence: uiBest.score, reason: uiBest.reason };
+  if (uiBest?.kind === 'role')
+    return { strategy: scope?.dialog?.title ? 'dialog-scoped-role' : 'global-role', confidence: uiBest.score, reason: uiBest.reason };
   if (contextTarget.testId)
     return { strategy: 'global-testid', confidence: 0.98, pageCount: contextTarget.uniqueness?.pageCount, pageIndex: contextTarget.uniqueness?.pageIndex, scopeCount: contextTarget.uniqueness?.scopeCount };
-  if (scope?.table?.testId && (scope.table.rowKey || scope.table.rowIdentity?.value || scope.table.rowText))
-    return { strategy: scope.table.rowKey || scope.table.rowIdentity?.stable ? 'table-row-testid' : 'table-row-text', confidence: scope.table.rowKey || scope.table.rowIdentity?.stable ? 0.9 : 0.72 };
+  const tableScope = scope?.table;
+  if (tableScope?.testId && (tableScope.rowKey || tableScope.rowIdentity?.value || tableScope.rowText))
+    return { strategy: tableScope.rowKey || tableScope.rowIdentity?.stable ? 'table-row-testid' : 'table-row-text', confidence: tableScope.rowKey || tableScope.rowIdentity?.stable ? 0.9 : 0.72 };
   if (scope?.dialog?.title)
     return { strategy: 'dialog-scoped-role', confidence: 0.78 };
   if (scope?.section?.testId)

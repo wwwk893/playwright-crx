@@ -11,6 +11,8 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
+import { collectUiSemanticContext, semanticAdapterEnabled } from './uiSemantics';
+import type { UiSemanticContext } from './uiSemantics/types';
 
 type ContextEventKind = 'click' | 'input' | 'change' | 'keydown';
 
@@ -223,6 +225,7 @@ function eventPointTarget(event: Event, fallback: Element) {
 
 function collectPageContext(target: Element) {
   const anchor = actionAnchorForElement(target);
+  const baseUi = semanticAdapterEnabled ? collectUiSemanticContext(anchor, document) : undefined;
   const form = collectForm(target, anchor);
   const section = collectSection(target, anchor);
   const directDialog = collectDialog(target, anchor);
@@ -239,6 +242,7 @@ function collectPageContext(target: Element) {
     });
   }
   const dropdownField = isDropdownOptionTarget(target, anchor) ? activeDropdownContextFor(target) : undefined;
+  const ui = enrichUiWithDropdownContext(baseUi, dropdownField);
   return compactObject({
     url: safeText(location.href, 180),
     title: safeText(document.title || headingText(document.body), maxTextLength),
@@ -249,6 +253,7 @@ function collectPageContext(target: Element) {
     table: collectTable(target, anchor),
     form: form?.label ? form : formFromDropdownContext(dropdownField),
     target: collectElement(target, anchor),
+    ui,
     nearbyText: collectNearbyText(target),
   });
 }
@@ -323,8 +328,11 @@ function anchorScore(element: Element, original: Element) {
   const depth = ancestorDistance(original, element);
   let score = 0;
 
-  if (testIdOf(element))
-    score += depth <= 2 ? 1000 : 220;
+  const testId = testIdOf(element);
+  if (testId) {
+    const actionLikeTestId = looksLikeActionTestId(testId);
+    score += depth === 0 || actionLikeTestId ? (depth <= 2 ? 1000 : 220) : 140;
+  }
   if (tag === 'button')
     score += 500;
   if (className.includes('ant-btn'))
@@ -564,6 +572,32 @@ function formFromDropdownContext(context?: ActiveDropdownContext) {
     testId: context.fieldTestId,
     title: context.sectionTitle,
   });
+}
+
+function enrichUiWithDropdownContext(ui?: UiSemanticContext, context?: ActiveDropdownContext): UiSemanticContext | undefined {
+  if (!ui || !context)
+    return ui;
+  const form = {
+    ...(ui.form || {}),
+    label: ui.form?.label || context.fieldLabel,
+    name: ui.form?.name || context.fieldName,
+    formTitle: ui.form?.formTitle || context.sectionTitle,
+  };
+  const recipe = ui.recipe ? {
+    ...ui.recipe,
+    fieldLabel: ui.recipe.fieldLabel || context.fieldLabel,
+    fieldName: ui.recipe.fieldName || context.fieldName,
+    overlayTitle: ui.recipe.overlayTitle || context.dialogTitle,
+  } : undefined;
+  const reasons = ui.reasons.includes('matched active dropdown trigger context') ? ui.reasons : [...ui.reasons, 'matched active dropdown trigger context'];
+  return {
+    ...ui,
+    form,
+    recipe,
+    reasons,
+    confidence: Math.max(ui.confidence, context.fieldLabel ? 0.82 : ui.confidence),
+    weak: ui.weak && !context.fieldLabel,
+  };
 }
 
 function isDropdownLikeTarget(anchor: Element, target: Element) {

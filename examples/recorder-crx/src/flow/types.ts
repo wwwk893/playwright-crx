@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { UiActionRecipe } from '../uiSemantics/types';
 import type {
   DialogContext,
   FormContext,
@@ -174,6 +175,7 @@ export interface FlowStep {
   intent?: string;
   intentSource?: IntentSource;
   intentSuggestion?: IntentSuggestion;
+  uiRecipe?: UiActionRecipe;
   comment?: string;
   context?: StepContextSnapshot;
   target?: FlowTarget;

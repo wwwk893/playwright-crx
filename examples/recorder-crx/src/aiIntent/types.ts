@@ -3,6 +3,7 @@
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import type { CompactUiSemanticContext } from '../uiSemantics/compact';
 import type { FlowActionType } from '../flow/types';
 
 export type AiProviderProtocol = 'openai-compatible' | 'anthropic-compatible';
@@ -135,6 +136,7 @@ export interface AiIntentStepInput {
   order: number;
   action: FlowActionType;
   target?: AiIntentTargetInput;
+  ui?: CompactUiSemanticContext;
   before?: AiIntentContextInput;
   after?: AiIntentAfterInput;
 }
