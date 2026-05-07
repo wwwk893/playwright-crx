@@ -1931,11 +1931,13 @@ export const CrxRecorder: React.FC = ({
   const selectedFlowName = recordingFlowName || '未命名流程';
   const hasFlowContext = hasActiveRecordingFlowContext && (panelStage === 'recording' || panelStage === 'assertion' || panelStage === 'review' || panelStage === 'editRecord');
   const libraryCountText = `共 ${flowRecords.length} 条记录`;
-  const statusTitle = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? `流程 · ${selectedFlowName}` : panelStage === 'review' ? `导出检查 · ${selectedFlowName}` : panelStage === 'recording' ? (recordingFlowName ? '录制中' : '录制 · 未选择流程') : '新建流程';
-  const statusCopy = panelStage === 'library' ? libraryCountText : panelStage === 'recording' ? (recordingFlowName ? `正在写入：${selectedFlowName}` : '先选择或新建流程') : panelStage === 'assertion' ? `正在补充：${selectedFlowName}` : panelStage === 'review' ? `复查 · ${stats.assertionCount} 条断言 · ${stats.missingAssertionCount} 个待补` : panelStage === 'editRecord' ? '正在编辑当前流程记录' : panelStage === 'aiSettings' ? 'AI key 仅本地存储' : panelStage === 'aiUsage' ? '本地用量摘要' : '保存后才能进入录制和断言';
+  const recordingSubject = [flowDraft.flow.module, flowDraft.flow.page].filter(Boolean).join(' / ') || selectedFlowName;
+  const statusTitle = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? `流程 · ${selectedFlowName}` : panelStage === 'review' ? '导出检查' : panelStage === 'recording' ? (recordingFlowName ? `录制中 · ${selectedFlowName}` : '录制 · 未选择流程') : '新建流程';
+  const statusCopy = panelStage === 'library' ? libraryCountText : panelStage === 'recording' ? (recordingFlowName ? `正在录制：${recordingSubject}` : '先选择或新建流程') : panelStage === 'assertion' ? `保存后挂到 ${selectedAssertionStepLabel} 之后` : panelStage === 'review' ? `${stats.missingAssertionCount ? `${stats.missingAssertionCount} 个步骤待补断言` : 'Replay / 导出检查已就绪'}` : panelStage === 'editRecord' ? '正在编辑当前流程记录' : panelStage === 'aiSettings' ? 'AI key 仅本地存储' : panelStage === 'aiUsage' ? '本地用量摘要' : '保存后才能进入录制和断言';
   const statusText = `${statusTitle} ${statusCopy}`;
-  const statusClass = panelStage === 'assertion' ? 'assertion' : panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
+  const statusClass = panelStage === 'assertion' || panelStage === 'review' ? 'assertion' : panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
   const metaLine = [flowDraft.flow.module, flowDraft.flow.role, `${stats.stepCount} 步骤`].filter(Boolean).join(' · ');
+  const usesRefinedFlowStage = activeTab === 'business' && (panelStage === 'recording' || panelStage === 'assertion' || panelStage === 'review');
   const insertAnchorStep = insertRecordingAfterStepId ? flowDraft.steps.find(step => step.id === insertRecordingAfterStepId) : undefined;
   const insertAnchorIndex = insertAnchorStep ? flowDraft.steps.indexOf(insertAnchorStep) : -1;
   const insertNextStep = insertAnchorIndex >= 0 ? flowDraft.steps[insertAnchorIndex + 1] : undefined;
@@ -2013,7 +2015,7 @@ export const CrxRecorder: React.FC = ({
             {hasFlowContext && <button type='button' className={panelStage === 'recording' ? 'active' : ''} onClick={() => {
               setPanelStage('recording');
               setActiveTab('business');
-            }}>录制 · {selectedFlowName}</button>}
+            }}>录制</button>}
             {hasFlowContext && <button type='button' className={panelStage === 'assertion' ? 'active' : ''} onClick={() => {
               if (!editingAssertionStepId && flowDraft.steps[0])
                 beginAddAssertion(flowDraft.steps[0].id);
@@ -2022,9 +2024,9 @@ export const CrxRecorder: React.FC = ({
               setActiveTab('business');
             }}>断言</button>}
             <button type='button' className={panelStage === 'aiSettings' ? 'active' : ''} onClick={() => setPanelStage('aiSettings')}>设置</button>
-            {hasFlowContext && <button type='button' className={activeTab === 'code' ? 'active' : ''} onClick={() => {
+            {hasFlowContext && <button type='button' className={panelStage === 'review' ? 'active' : ''} onClick={() => {
               setPanelStage(flowDraft.steps.length ? 'review' : 'recording');
-              setActiveTab('code');
+              setActiveTab('business');
             }}>导出</button>}
           </nav>
           <div className='panel-body'>
@@ -2131,19 +2133,19 @@ export const CrxRecorder: React.FC = ({
                 <button type='button' onClick={goToLibrary}>取消</button>
               </div>
             </> : <>
-              <button type='button' className='flow-detail-back' onClick={goToLibrary}>← 返回流程库</button>
-              <div className='flow-title-row'>
+              {!usesRefinedFlowStage && <button type='button' className='flow-detail-back' onClick={goToLibrary}>← 返回流程库</button>}
+              {!usesRefinedFlowStage && <div className='flow-title-row'>
                 <div>
                   <h2>{flowDraft.flow.name || '未命名业务流程'}</h2>
                   <div>{metaLine || draftStatus}</div>
                 </div>
                 <button type='button' onClick={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}>编辑</button>
-              </div>
-              <div className='business-tabs'>
+              </div>}
+              {!usesRefinedFlowStage && <div className='business-tabs'>
                 <button type='button' className={activeTab === 'business' ? 'selected' : ''} onClick={() => setActiveTab('business')}>业务流程</button>
                 <button type='button' className={activeTab === 'code' ? 'selected' : ''} onClick={() => setActiveTab('code')}>Playwright 代码</button>
                 <button type='button' className={activeTab === 'log' ? 'selected' : ''} onClick={() => setActiveTab('log')}>运行日志</button>
-              </div>
+              </div>}
               {activeTab === 'business' && aiSettings.enabled && panelStage !== 'assertion' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
                 flow={flowDraft}
                 settings={aiSettings}
@@ -2214,10 +2216,6 @@ export const CrxRecorder: React.FC = ({
                   insertRecordingAfterStepId={insertRecordingAfterStepId}
                   aiPendingStepIds={aiPendingStepIds}
                 />
-                <div className='sticky-export-bar'>
-                  <button type='button' onClick={() => exportBusinessFlow('json')}>导出流程 JSON</button>
-                  <button type='button' onClick={() => exportBusinessFlow('yaml')}>导出紧凑 YAML</button>
-                </div>
               </> : <FlowSelectionGuard
                 onBackToLibrary={goToLibraryNow}
                 onNewFlow={openNewFlowSheet}

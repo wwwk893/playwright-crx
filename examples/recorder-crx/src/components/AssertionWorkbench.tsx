@@ -31,14 +31,7 @@ export const AssertionWorkbench: React.FC<{
   onBackToFlow: () => void;
 }> = ({ step, displayStepId, suggestion, pickedTarget, isPickingTarget, onPickAssertionTarget, onCancelAddAssertion, onSaveAssertion, onChangeAssertions, onBackToFlow }) => {
   return <section className='assertion-workbench'>
-    <div className='assertion-workbench-header'>
-      <button type='button' className='assertion-workbench-back' onClick={onBackToFlow}>← 返回流程</button>
-      <div>
-        <h2>断言 · {displayStepId}</h2>
-        <span>保存后挂到 {displayStepId} 之后</span>
-      </div>
-    </div>
-    <AssertionStepContextCard step={step} displayStepId={displayStepId} suggestion={suggestion} />
+    <AssertionStepContextCard step={step} displayStepId={displayStepId} suggestion={suggestion} onBackToFlow={onBackToFlow} />
     <div className='assertion-workbench-editor'>
       <AssertionEditor
         step={step}

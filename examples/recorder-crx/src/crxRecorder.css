@@ -4517,3 +4517,755 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Refined internal flow stages: recording / assertion / export. */
+.status-strip.assertion .dot {
+  background: var(--bf-warning) !important;
+}
+
+.panel-body:has(.recording-banner),
+.panel-body:has(.assertion-workbench),
+.panel-body:has(.export-stage-panel) {
+  background: var(--bf-surface);
+}
+
+.recording-banner,
+.flow-summary,
+.flow-context-card,
+.intent-card,
+.step-timeline-section,
+.assertion-workbench,
+.export-stage-panel > .section,
+.export-summary-row {
+  margin-left: 16px;
+  margin-right: 16px;
+}
+
+.recording-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in oklab, var(--bf-danger), white 74%);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--bf-danger-soft), white 38%);
+}
+
+.recording-banner strong,
+.flow-summary h2,
+.section-title strong,
+.flow-context-card .ai-compact-head strong,
+.assertion-context-head strong {
+  display: block;
+  overflow: hidden;
+  margin: 0;
+  color: var(--bf-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.recording-banner strong {
+  margin-bottom: 3px;
+  font-size: 14px;
+}
+
+.recording-banner span,
+.flow-context-card span,
+.intent-card span,
+.section-title span,
+.assertion-context-head span,
+.soft-card span,
+.review-card span,
+.state-shelf span {
+  color: var(--bf-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.flow-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface);
+}
+
+.flow-summary h2 {
+  margin-bottom: 4px;
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.flow-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--bf-muted);
+  font-size: 12px;
+}
+
+.recording-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.recording-toolbar button {
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recording-toolbar .danger {
+  border-color: color-mix(in oklab, var(--bf-danger), white 62%);
+  background: var(--bf-danger-soft);
+  color: var(--bf-danger);
+}
+
+.flow-compact-stats,
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: hidden;
+  margin-top: 10px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface);
+}
+
+.flow-compact-stats span,
+.stats-row > div {
+  min-width: 0;
+  padding: 8px 6px;
+  border-right: 1px solid var(--bf-border);
+  text-align: center;
+  color: var(--bf-muted);
+  font-size: 11px;
+}
+
+.flow-compact-stats span:last-child,
+.stats-row > div:last-child {
+  border-right: 0;
+}
+
+.stats-row strong {
+  display: block;
+  overflow: hidden;
+  color: var(--bf-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.stats-row .warning strong {
+  color: var(--bf-warning);
+}
+
+.stats-row .ok strong {
+  color: var(--bf-success);
+}
+
+.flow-context-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface-subtle);
+}
+
+.context-grid,
+.step-context-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.context-grid .recording-context-item,
+.step-context-grid .assertion-step-context-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface);
+}
+
+.context-grid span,
+.step-context-grid span {
+  color: var(--bf-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.context-grid strong,
+.step-context-grid strong {
+  overflow: hidden;
+  color: var(--bf-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.recording-context-state {
+  justify-self: start;
+}
+
+.intent-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface);
+}
+
+.step-timeline-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-bottom: 78px;
+}
+
+.section-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.section-title strong {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.flow-step-list {
+  gap: 12px;
+}
+
+.flow-step-list::before {
+  left: 14px;
+  background: #dbeafe;
+}
+
+.timeline-marker {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #bfdbfe;
+  background: var(--bf-surface);
+  color: var(--bf-fg);
+}
+
+.timeline-row.active .timeline-marker {
+  border-color: var(--bf-primary);
+  background: var(--bf-primary);
+  color: #fff;
+}
+
+.flow-step {
+  border-color: var(--bf-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.timeline-row.active .flow-step {
+  border-color: var(--bf-primary);
+  background: var(--bf-surface);
+  box-shadow: inset 3px 0 0 var(--bf-primary);
+}
+
+.flow-step label {
+  margin-top: 8px;
+}
+
+.flow-step input,
+.flow-step textarea,
+.assertion-drawer input,
+.assertion-drawer select,
+.assertion-drawer textarea,
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--bf-border-strong);
+  border-radius: 6px;
+  background: var(--bf-surface);
+  color: var(--bf-fg);
+  padding: 7px 9px;
+}
+
+.assertion-workbench {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 0 0 82px;
+}
+
+.assertion-step-context-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in oklab, var(--bf-warning), white 68%);
+  border-radius: 8px;
+  background: var(--bf-warning-soft);
+}
+
+.assertion-workbench-editor {
+  display: grid;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.assertion-chip-summary {
+  margin: 0;
+}
+
+.assertion-chip.muted {
+  color: var(--bf-muted);
+  background: var(--bf-surface-subtle);
+}
+
+.assertion-suggestion-card.top-suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid color-mix(in oklab, var(--bf-warning), white 66%);
+  border-radius: 8px;
+  background: var(--bf-warning-soft);
+}
+
+.assertion-suggestion-card .chip-row,
+.chip-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--bf-border);
+  border-radius: 999px;
+  background: var(--bf-surface);
+  color: var(--bf-muted);
+  font-size: 12px;
+}
+
+.chip.ok {
+  border-color: color-mix(in oklab, var(--bf-success), white 70%);
+  background: var(--bf-success-soft);
+  color: var(--bf-success);
+}
+
+.chip.warn {
+  border-color: color-mix(in oklab, var(--bf-warning), white 68%);
+  background: var(--bf-warning-soft);
+  color: var(--bf-warning);
+}
+
+.assertion-drawer {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.assertion-subject-block,
+.assertion-drawer > label,
+.assertion-advanced-match,
+.soft-card {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  color: var(--bf-fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.assertion-object-grid,
+.subject-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.assertion-object-grid button {
+  min-height: 38px;
+  border-color: var(--bf-border);
+  color: var(--bf-muted);
+  font-size: 12px;
+}
+
+.assertion-object-grid button.selected,
+.subject-grid button.active {
+  border-color: var(--bf-primary);
+  background: var(--bf-primary-soft);
+  color: var(--bf-primary-strong);
+  font-weight: 800;
+}
+
+.assertion-inline-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.assertion-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.assertion-candidates > span {
+  color: var(--bf-muted);
+  font-size: 12px;
+}
+
+.assertion-advanced-match {
+  overflow: hidden;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface);
+}
+
+.assertion-advanced-match summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary-title {
+  display: grid;
+  gap: 2px;
+}
+
+.summary-title span {
+  color: var(--bf-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.assertion-advanced-match[open] {
+  padding-bottom: 10px;
+}
+
+.assertion-advanced-match[open] > label,
+.assertion-advanced-match[open] > div {
+  margin: 0 12px 10px;
+}
+
+.assertion-drawer-actions {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 4px -16px -82px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--bf-border);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.export-stage-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 100%;
+  padding: 14px 0 82px;
+}
+
+.export-summary-row {
+  margin-top: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.export-check-section,
+.export-detail-section {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+}
+
+.review-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.review-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface);
+}
+
+.risk {
+  align-self: start;
+  min-width: 34px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  text-align: center;
+  font-family: Inconsolata, ui-monospace, monospace;
+  font-size: 11px !important;
+  font-weight: 800;
+}
+
+.risk.p0 {
+  background: var(--bf-danger-soft);
+  color: var(--bf-danger) !important;
+}
+
+.risk.p1 {
+  background: var(--bf-warning-soft);
+  color: var(--bf-warning) !important;
+}
+
+.risk.ok {
+  background: var(--bf-success-soft);
+  color: var(--bf-success) !important;
+}
+
+.review-card strong,
+.soft-card strong {
+  display: block;
+  color: var(--bf-fg);
+  font-size: 13px;
+}
+
+.review-card div span {
+  display: block;
+  margin-top: 2px;
+}
+
+.state-shelf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.state-shelf span {
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--bf-border);
+  border-radius: 999px;
+  background: var(--bf-surface-subtle);
+}
+
+.export-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.export-tabs button {
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--bf-muted);
+  font-size: 12px;
+}
+
+.export-tabs button.active {
+  border-color: var(--bf-primary);
+  background: var(--bf-primary-soft);
+  color: var(--bf-primary-strong);
+  font-weight: 800;
+}
+
+.export-panel {
+  display: none;
+}
+
+.export-panel.active {
+  display: block;
+}
+
+.field-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  color: var(--bf-fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.soft-card.export-guidance-card,
+.soft-card {
+  padding: 12px;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: var(--bf-surface-subtle);
+}
+
+.code-preview {
+  overflow: hidden;
+  border: 1px solid var(--bf-border);
+  border-radius: 8px;
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.code-preview header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .12);
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.code-preview pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  font-family: Inconsolata, ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.export-stage-footer {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--bf-border);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.export-stage-footer button,
+.assertion-drawer-actions button,
+.sticky-export-bar button {
+  min-height: 36px;
+  font-weight: 800;
+}
+
+@media (max-width: 420px) {
+  .context-grid,
+  .step-context-grid,
+  .flow-compact-stats,
+  .stats-row,
+  .assertion-object-grid,
+  .subject-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-card,
+  .assertion-suggestion-card.top-suggestion {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Internal flow polish pass: keep the refined stages dense, readable and non-overlapping. */
+.step-context-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.step-context-grid .assertion-step-context-row {
+  min-height: 54px;
+}
+
+.step-context-grid .assertion-step-context-row strong {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.assertion-enabled {
+  display: inline-flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: 32px;
+  padding: 0 !important;
+  margin: 0 0 4px !important;
+  color: var(--bf-fg) !important;
+}
+
+.assertion-enabled input {
+  width: 16px !important;
+  min-height: 16px !important;
+  height: 16px !important;
+  margin: 0;
+  padding: 0;
+}
+
+.export-stage-panel {
+  min-height: 100%;
+  padding-bottom: 0;
+}
+
+.export-stage-footer {
+  bottom: 0;
+  margin-top: 0;
+}
+
+.format-secondary-actions {
+  justify-content: start;
+  padding: 0;
+  border: 0;
+}
+
+.format-secondary-actions button {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.recording-banner.recording-context-card {
+  margin-bottom: 0;
+}
+
+/* Refined snapshots keep the content hierarchy primary; jump controls are available in legacy review but hidden in the side panel polish pass. */
+.business-flow-panel .scroll-jump-dock {
+  display: none;
+}
+
+/* Make each refined export stage occupy the first viewport before secondary review details begin. */
+.export-stage-panel {
+  min-height: calc(100vh - 152px);
+  box-sizing: border-box;
+}
+
+.step-context-grid .assertion-step-context-row strong {
+  -webkit-line-clamp: 3;
+  word-break: break-all;
+}

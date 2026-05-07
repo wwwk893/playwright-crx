@@ -22,7 +22,8 @@ export const AssertionStepContextCard: React.FC<{
   step: FlowStep;
   displayStepId: string;
   suggestion?: AssertionEditorSuggestion;
-}> = ({ step, displayStepId, suggestion }) => {
+  onBackToFlow?: () => void;
+}> = ({ step, displayStepId, suggestion, onBackToFlow }) => {
   const action = actionLabel[step.action];
   const subject = summarizeStepSubject(step);
   const page = step.url || step.context?.after?.url || step.context?.before.url || '未知页面';
@@ -30,9 +31,14 @@ export const AssertionStepContextCard: React.FC<{
   const recommendation = suggestion ? `StepList 规则 / ${suggestion.label}` : `StepList 规则 / ${action}后状态确认`;
 
   return <section className='assertion-step-context-card' aria-label={`Step Context：${displayStepId}`}>
-    <div className='assertion-step-context-title'>Step Context：<span>{displayStepId}</span> · {action}</div>
-    <p>这条断言会挂到 {displayStepId} 之后，用来确认{action}动作真的生效。</p>
-    <div className='assertion-step-context-rows'>
+    <div className='ai-compact-head assertion-context-head'>
+      <div>
+        <strong>Step Context：{displayStepId} · {action}</strong>
+        <span>这条断言会挂到 {displayStepId} 之后，用来确认{action}动作真的生效。</span>
+      </div>
+      {onBackToFlow && <button className='mini-button' type='button' onClick={onBackToFlow}>← 返回流程</button>}
+    </div>
+    <div className='step-context-grid'>
       <ContextRow label='原动作' value={`${action}「${subject}」`} />
       <ContextRow label='页面' value={page} />
       <ContextRow label='目标元素' value={target} />

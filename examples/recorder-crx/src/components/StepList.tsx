@@ -47,7 +47,7 @@ export const StepList: React.FC<{
 
   return <section className='step-timeline-section'>
     <ScrollJumpDock />
-    <div className='section-heading'>步骤时间线</div>
+    <div className='section-title'><strong>步骤时间线</strong><span>点击单步进入断言工作台</span></div>
     {steps.length === 0 && <div className='business-flow-empty'>还没有录制到操作。填写流程信息后点击“开始录制”。</div>}
     <div className='flow-step-list' role='list'>
       {steps.map((step, index) => {
