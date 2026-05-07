@@ -64,7 +64,7 @@ export const RecordingFlowContextBar: React.FC<{
           <span>所有新步骤都会写入 {flowName}，切换流程前录制会暂停确认。</span>
         </div>
         <div className='button-group'>
-          <button className='mini-button' type='button' onClick={onSwitchFlow}>切换流程</button>
+          <button className='mini-button' type='button' onClick={onSwitchFlow}>返回流程库</button>
           <button className='mini-button' type='button' onClick={onEditFlow}>编辑流程</button>
           {onSaveDraft && <button className='mini-button' type='button' onClick={onSaveDraft}>保存草稿</button>}
         </div>

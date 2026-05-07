@@ -36,10 +36,12 @@ export const FlowReviewPanel: React.FC<{
   onExportJson: () => void;
   onExportYaml: () => void;
   onOpenReplayCode: () => void;
+  onEditFlow: () => void;
+  onOpenSettings: () => void;
   playwrightCode?: string;
   onSaveRepeatSegment: (segment: FlowRepeatSegment) => void;
   onDeleteRepeatSegment: (segmentId: string) => void;
-}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onOpenReplayCode, playwrightCode, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
+}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onOpenReplayCode, onEditFlow, onOpenSettings, playwrightCode, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
   const stats = flowStats(flow);
   const repeatStats = repeatSegmentStats(flow);
   const [activeInsertStepId, setActiveInsertStepId] = React.useState<string>();
@@ -135,6 +137,10 @@ export const FlowReviewPanel: React.FC<{
       onExportJson={onExportJson}
       onExportYaml={onExportYaml}
       onOpenReplayCode={onOpenReplayCode}
+      onEditFlow={onEditFlow}
+      onContinueRecording={onContinueRecording}
+      onAddAssertion={onAddAssertion}
+      onOpenSettings={onOpenSettings}
     />
     <div className='review-summary-grid'>
       <div><strong>{repeatStats.segmentCount ? repeatStats.rowCount : stats.stepCount}</strong><span>{repeatStats.segmentCount ? '循环次数' : '步骤'}</span></div>

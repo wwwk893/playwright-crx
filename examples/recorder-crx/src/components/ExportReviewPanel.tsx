@@ -27,7 +27,11 @@ export const ExportReviewPanel: React.FC<{
   onExportJson: () => void;
   onExportYaml: () => void;
   onOpenReplayCode: () => void;
-}> = ({ flow, redactionEnabled, playwrightCode, onExportJson, onExportYaml, onOpenReplayCode }) => {
+  onEditFlow: () => void;
+  onContinueRecording: () => void;
+  onAddAssertion: (stepId: string) => void;
+  onOpenSettings: () => void;
+}> = ({ flow, redactionEnabled, playwrightCode, onExportJson, onExportYaml, onOpenReplayCode, onEditFlow, onContinueRecording, onAddAssertion, onOpenSettings }) => {
   const [format, setFormat] = React.useState<ExportFormat>('playwright');
   const [tab, setTab] = React.useState<ExportTab>('formats');
   const stats = flowStats(flow);
@@ -37,8 +41,11 @@ export const ExportReviewPanel: React.FC<{
   const p1Count = risks.filter(item => item.level === 'p1').length;
   const disabledByP0 = p0Count > 0;
   const codeLineCount = playwrightCode ? playwrightCode.split('\n').length : 0;
+  const firstMissingAssertionStep = flow.steps.find(step => !step.assertions.some(assertion => assertion.enabled));
 
   const confirmExport = React.useCallback(() => {
+    if (disabledByP0)
+      return;
     if (format === 'json') {
       onExportJson();
       return;
@@ -48,7 +55,21 @@ export const ExportReviewPanel: React.FC<{
       return;
     }
     onOpenReplayCode();
-  }, [format, onExportJson, onExportYaml, onOpenReplayCode]);
+  }, [disabledByP0, format, onExportJson, onExportYaml, onOpenReplayCode]);
+
+  const riskActionHandler = React.useCallback((item: ExportRiskItem) => {
+    if (item.id === 'missing-flow-name')
+      return onEditFlow;
+    if (item.id === 'empty-steps')
+      return onContinueRecording;
+    if (item.id === 'missing-assertions' && firstMissingAssertionStep)
+      return () => onAddAssertion(firstMissingAssertionStep.id);
+    if (item.id === 'redaction-disabled')
+      return onOpenSettings;
+    if (item.id === 'replay-code-ready')
+      return onOpenReplayCode;
+    return undefined;
+  }, [firstMissingAssertionStep, onAddAssertion, onContinueRecording, onEditFlow, onOpenReplayCode, onOpenSettings]);
 
   return <section className='export-stage-panel export-review-panel' aria-label='导出前检查'>
     <span className='sr-only'>导出前复核：{flow.flow.name}</span>
@@ -68,11 +89,14 @@ export const ExportReviewPanel: React.FC<{
         <span>{p0Count ? 'P0 先处理，P1 导出前确认' : p1Count ? 'P1 导出前确认' : '检查通过，可以导出'}</span>
       </div>
       <div className='review-stack'>
-        {risks.map(item => <div className='review-card' key={item.id}>
-          <span className={`risk ${item.level}`}>{item.level.toUpperCase()}</span>
-          <div><strong>{item.title}</strong><span>{item.detail}</span></div>
-          {item.action ? <button className='mini-button' type='button' onClick={item.id === 'replay-code-ready' ? onOpenReplayCode : undefined}>{item.action}</button> : item.level === 'ok' ? <span className='pill ok'>已开启</span> : null}
-        </div>)}
+        {risks.map(item => {
+          const onRiskAction = riskActionHandler(item);
+          return <div className='review-card' key={item.id}>
+            <span className={`risk ${item.level}`}>{item.level.toUpperCase()}</span>
+            <div><strong>{item.title}</strong><span>{item.detail}</span></div>
+            {item.action && onRiskAction ? <button className='mini-button' type='button' onClick={onRiskAction}>{item.action}</button> : item.level === 'ok' ? <span className='pill ok'>已开启</span> : null}
+          </div>;
+        })}
       </div>
       <div className='state-shelf' aria-label='状态覆盖'>
         <span>Loading</span><span>Empty</span><span>Error</span><span>Populated</span><span>Edge</span>
@@ -96,8 +120,8 @@ export const ExportReviewPanel: React.FC<{
             </select>
           </label>
           <div className='export-format-actions format-secondary-actions'>
-            <button type='button' onClick={onExportJson}>导出流程 JSON</button>
-            <button type='button' onClick={onExportYaml}>导出紧凑 YAML</button>
+            <button type='button' disabled={disabledByP0} onClick={onExportJson}>导出流程 JSON</button>
+            <button type='button' disabled={disabledByP0} onClick={onExportYaml}>导出紧凑 YAML</button>
           </div>
           <div className='soft-card export-guidance-card'>
             <strong>建议流程</strong>
@@ -123,14 +147,14 @@ export const ExportReviewPanel: React.FC<{
           {stats.missingAssertionCount > 0 && <div className='review-card'>
             <span className='risk p1'>P1</span>
             <div><strong>Toast / 结果断言缺失</strong><span>{stats.missingAssertionCount} 个步骤还没有启用断言。</span></div>
-            <button className='mini-button' type='button'>补齐</button>
+            {firstMissingAssertionStep && <button className='mini-button' type='button' onClick={() => onAddAssertion(firstMissingAssertionStep.id)}>补齐</button>}
           </div>}
         </div>
       </div>}
     </div>
 
     <footer className='export-stage-footer'>
-      <button className='quiet-button' type='button' onClick={onOpenReplayCode}>Replay 检查</button>
+      <button className='quiet-button' type='button' aria-label='Playwright 代码' onClick={onOpenReplayCode}>Replay 检查</button>
       <button className='primary-button' type='button' disabled={disabledByP0} onClick={confirmExport}>确认导出</button>
     </footer>
   </section>;
@@ -174,7 +198,7 @@ function buildExportRisks(flow: BusinessFlow, redactionEnabled: boolean): Export
       level: 'p1',
       title: '敏感数据脱敏关闭',
       detail: '导出前不会自动清理 password、token、cookie、authorization 等敏感字段。',
-      action: '查看',
+      action: '查看设置',
     });
   }
   if (repeatStats.segmentCount > 0 && repeatStats.parameterCount === 0) {
@@ -183,7 +207,6 @@ function buildExportRisks(flow: BusinessFlow, redactionEnabled: boolean): Export
       level: 'p1',
       title: '存在循环片段但参数不足',
       detail: '循环仍可导出，但不会形成真正的数据驱动回放。',
-      action: '查看',
     });
   }
 
