@@ -199,7 +199,7 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
     emit(baseEvent);
     window.setTimeout(() => emit({
       ...baseEvent,
-      after: collectAfterContext(),
+      after: collectAfterContext(before.dialog),
     }), 160);
   } else {
     emit(baseEvent);
@@ -226,7 +226,7 @@ function collectPageContext(target: Element) {
   const form = collectForm(target, anchor);
   const section = collectSection(target, anchor);
   const directDialog = collectDialog(target, anchor);
-  const dialog = directDialog ?? (isDropdownLikeTarget(anchor, target) ? collectVisibleOverlay() : undefined);
+  const dialog = directDialog ?? (isDropdownLikeTarget(anchor, target) ? collectTopVisibleOverlay() : undefined);
   if (form?.label && !isDropdownOptionTarget(target, anchor)) {
     rememberDropdownContext({
       fieldLabel: form.label,
@@ -253,13 +253,16 @@ function collectPageContext(target: Element) {
   });
 }
 
-function collectAfterContext() {
+function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>) {
+  const openedDialog = collectOpenedOverlay(beforeDialog);
+  const dialog = openedDialog ?? collectTopVisibleOverlay();
   return compactObject({
     url: safeText(location.href, 180),
     title: safeText(document.title || headingText(document.body), maxTextLength),
     breadcrumb: collectBreadcrumb(),
     activeTab: collectActiveTab(),
-    dialog: collectVisibleOverlay(),
+    dialog,
+    openedDialog,
     toast: textFromFirst('.ant-message-notice-content, .ant-notification-notice-message, .toast, [role="alert"]'),
   });
 }
@@ -371,10 +374,39 @@ function collectDialog(target: Element, anchor = actionAnchorForElement(target))
   return dialogContext(dialog);
 }
 
-function collectVisibleOverlay() {
-  const overlays = Array.from(document.querySelectorAll(overlaySelectors));
-  const overlay = overlays.find(isVisible);
+function visibleOverlays() {
+  return Array.from(document.querySelectorAll(overlaySelectors)).filter(isVisible);
+}
+
+function collectTopVisibleOverlay() {
+  const overlay = visibleOverlays().sort((a, b) => overlayScore(b) - overlayScore(a))[0];
   return overlay ? dialogContext(overlay) : undefined;
+}
+
+function collectOpenedOverlay(beforeDialog?: ReturnType<typeof dialogContext>) {
+  return visibleOverlays()
+      .sort((a, b) => overlayScore(b) - overlayScore(a))
+      .map(dialogContext)
+      .filter(dialog => dialog.type !== 'dropdown')
+      .find(dialog => !sameDialogContext(dialog, beforeDialog));
+}
+
+function sameDialogContext(left?: ReturnType<typeof dialogContext>, right?: ReturnType<typeof dialogContext>) {
+  if (!left || !right)
+    return false;
+  if (left.testId && right.testId)
+    return left.testId === right.testId;
+  return left.type === right.type && !!left.title && left.title === right.title;
+}
+
+function overlayScore(element: Element) {
+  const context = dialogContext(element);
+  const typeScore = context.type === 'popover' ? 400 :
+    context.type === 'drawer' ? 300 :
+      context.type === 'modal' ? 200 :
+        context.type === 'dropdown' ? 100 : 0;
+  const zIndex = Number(getComputedStyle(element).zIndex);
+  return typeScore + (Number.isFinite(zIndex) ? zIndex : 0);
 }
 
 function dialogContext(dialog: Element) {

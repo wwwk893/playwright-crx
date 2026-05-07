@@ -140,11 +140,13 @@ const egressPathOptions = [
 const transportColor: Record<string, string> = {
   private: 'green',
   public: 'blue',
+  internet: 'blue',
 };
 
 const transportShort: Record<string, string> = {
   private: 'Nova专线',
   public: 'Internet',
+  internet: 'HS Internet',
 };
 
 function labelFromOptions(options: Array<{ label: string; value: string }>, value: string) {
@@ -175,18 +177,18 @@ function cascaderLabels(values?: string[]) {
   return labels;
 }
 
-function initialWanConfigs(): WanConfig[] {
+function initialWanConfigs(sharedWanDuplicateEdit = false): WanConfig[] {
   return [
     {
       id: 'wan-1',
       index: 1,
       name: 'WAN1',
-      linkType: '未配置',
+      linkType: sharedWanDuplicateEdit ? 'HS专线' : '未配置',
       connectionType: 'DHCP',
       qosEnabled: true,
       internetEnabled: false,
       desc: '',
-      transports: [],
+      transports: sharedWanDuplicateEdit ? [{ id: 'transport-hs', transport: 'internet', tags: ['default'] }] : [],
     },
     {
       id: 'wan-2',
@@ -215,13 +217,18 @@ function ipPoolOptionLabel(pool: IPv4Pool) {
 }
 
 function AntDProFormFieldsApp() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const duplicateSaveButton = searchParams.has('duplicateSaveButton');
+  const sharedWanDuplicateEdit = searchParams.has('sharedWanDuplicateEdit');
+  const wanRowEditTestId = sharedWanDuplicateEdit ? 'ha-wan-row-edit-action' : undefined;
+  const wanTransportDeleteTestId = sharedWanDuplicateEdit ? 'ha-wan-transport-row-delete-action' : 'wan-transport-row-delete-action';
   const [open, setOpen] = React.useState(false);
   const [ipv4PoolOpen, setIpv4PoolOpen] = React.useState(false);
   const [ipPortPoolOpen, setIpPortPoolOpen] = React.useState(false);
   const [rows, setRows] = React.useState<NetworkResource[]>([]);
   const [ipv4Pools, setIpv4Pools] = React.useState<IPv4Pool[]>([]);
   const [ipPortPools, setIpPortPools] = React.useState<IpPortPool[]>([]);
-  const [wanConfigs, setWanConfigs] = React.useState<WanConfig[]>(initialWanConfigs);
+  const [wanConfigs, setWanConfigs] = React.useState<WanConfig[]>(() => initialWanConfigs(sharedWanDuplicateEdit));
   const [editingWan, setEditingWan] = React.useState<WanConfig | undefined>();
   const [editingWanOpen, setEditingWanOpen] = React.useState(false);
   const [configSaved, setConfigSaved] = React.useState(false);
@@ -229,7 +236,6 @@ function AntDProFormFieldsApp() {
   const [ipv4PoolForm] = Form.useForm();
   const [ipPortPoolForm] = Form.useForm();
   const mappingActionRef = React.useRef<FormListActionType<{ serviceName?: string; listenPort?: number }>>();
-  const duplicateSaveButton = new URLSearchParams(window.location.search).has('duplicateSaveButton');
 
   const ipv4PoolColumns: ProColumns<IPv4Pool>[] = [
     { title: '地址池名称', dataIndex: 'name' },
@@ -299,7 +305,7 @@ function AntDProFormFieldsApp() {
       valueType: 'option',
       width: '10%',
       render: (_, row) => [
-        <a key="edit" data-testid={`wan-edit-${row.index}`} onClick={() => openWanEditor(row)}>
+        <a key="edit" data-testid={wanRowEditTestId || `wan-edit-${row.index}`} onClick={() => openWanEditor(row)}>
           <EditOutlined />
         </a>,
       ],
@@ -378,7 +384,7 @@ function AntDProFormFieldsApp() {
       setEditingWan(undefined);
       setConfigSaved(false);
     };
-    if (!editingWan.transports.length) {
+    if (!editingWan.transports.length && !sharedWanDuplicateEdit) {
       Modal.confirm({
         title: '确定要配置WAN的传输网络？',
         content: 'WAN2 删除最后一条传输网络后会作为未配置传输网络保存。',
@@ -564,7 +570,7 @@ function AntDProFormFieldsApp() {
       </Modal>
 
       <Modal
-        title={editingWan ? `编辑WAN${editingWan.index}` : '编辑WAN'}
+        title={editingWan ? sharedWanDuplicateEdit ? `编辑 ${editingWan.name} 共享 WAN` : `编辑WAN${editingWan.index}` : '编辑WAN'}
         open={editingWanOpen}
         destroyOnClose
         width={760}
@@ -594,7 +600,7 @@ function AntDProFormFieldsApp() {
                 actions={[
                   <a key="edit" data-testid="wan-transport-row-edit-action"><EditOutlined /></a>,
                   <Popconfirm key="delete" title="删除此行？" onConfirm={() => removeWanTransport(item)}>
-                    <a href="#" data-testid="wan-transport-row-delete-action"><DeleteOutlined /></a>
+                    <a href="#" data-testid={wanTransportDeleteTestId}><DeleteOutlined /></a>
                   </Popconfirm>,
                 ]}
               >
