@@ -86,9 +86,11 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await page.waitForTimeout(250);
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(5);
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('create-user-btn');
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('alice');
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('管理员');
+  const recordedSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
+  await expect.poll(recordedSubjects).toContain('create-user-btn');
+  await expect.poll(recordedSubjects).toContain('alice');
+  await expect.poll(recordedSubjects).toContain('管理员');
+  await expect.poll(recordedSubjects, { timeout: 20_000 }).toMatch(/Alice|user-42|编辑/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
@@ -591,9 +593,12 @@ function escapeRegExp(text: string) {
 
 
 async function clickVisibleAntDTreeNode(page: Page, text: string) {
-  const nodes = page
-      .locator('.ant-select-tree-node-content-wrapper')
-      .filter({ hasText: text });
+  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  await expect(dropdown).toBeVisible({ timeout: 10_000 });
+  const exactText = new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`);
+  const nodes = dropdown
+      .locator('.ant-select-tree-node-content-wrapper, .ant-select-tree-title')
+      .filter({ hasText: exactText });
   const node = nodes.first();
   await expect(node).toBeVisible({ timeout: 10_000 });
   await node.click({ timeout: 5_000 }).catch(async () => {

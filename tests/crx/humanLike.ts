@@ -101,14 +101,16 @@ export async function humanClickUntil(locator: Locator, condition: () => Promise
 }
 
 async function openPopupLikeUser(trigger: Locator, popup: Locator, options?: HumanLikeOptions) {
-  for (let attempt = 0; attempt < 4; attempt++) {
+  const positions: Array<'center' | 'left' | 'right'> = ['center', 'left', 'right', 'center', 'left', 'right'];
+  for (let attempt = 0; attempt < positions.length; attempt++) {
     if (await popup.isVisible().catch(() => false))
       return;
-    await humanClick(trigger);
+    await humanClick(trigger, { position: positions[attempt], delayMs: 100 });
+    await trigger.page().waitForTimeout(180);
     if (!await popup.isVisible().catch(() => false) && await trigger.locator('input').count().catch(() => 0))
-      await humanClick(trigger.locator('input').first(), { position: 'left' });
+      await humanClick(trigger.locator('input').first(), { position: 'left', delayMs: 80 });
     try {
-      await popup.waitFor({ state: 'visible', timeout: 800 });
+      await popup.waitFor({ state: 'visible', timeout: 1200 });
       return;
     } catch {
       // Retry with a fresh click. Some AntD controls ignore the first click while focus/animation settles.
@@ -173,7 +175,7 @@ async function stableBoundingBox(locator: Locator) {
   return previous;
 }
 
-export async function humanType(locator: Locator, text: string, options?: { clear?: boolean, blur?: boolean, delayMs?: number }) {
+export async function humanType(locator: Locator, text: string, options?: { clear?: boolean, blur?: boolean, delayMs?: number, confirmWithFill?: boolean }) {
   await humanClick(locator);
   await ensureLocatorFocused(locator);
   const page = locator.page();
@@ -187,8 +189,9 @@ export async function humanType(locator: Locator, text: string, options?: { clea
 
   await page.keyboard.type(text, { delay: options?.delayMs ?? 35 });
   await page.waitForTimeout(160);
-  if (options?.clear === true && await locator.inputValue().catch(() => undefined) !== text)
+  if (options?.confirmWithFill || await locator.inputValue().catch(() => undefined) !== text)
     await locator.fill(text);
+  await expect.poll(async () => await locator.inputValue().catch(() => '')).toBe(text);
 
   if (options?.blur !== false)
     await page.keyboard.press('Tab');

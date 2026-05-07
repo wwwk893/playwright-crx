@@ -1185,27 +1185,6 @@ export const CrxRecorder: React.FC = ({
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [hasUnsavedFlowChanges]);
 
-  const beginNewFlow = React.useCallback(() => {
-    const emptyDraft = createDraft(settings, false);
-    pendingAssertionPickRef.current = undefined;
-    pendingInsertRecordingRef.current = undefined;
-    setInsertRecordingAfterStepId(undefined);
-    setFlowDraft(emptyDraft);
-    setSelectedRecordId(undefined);
-    setRecordedActionCount(0);
-    setSources([]);
-    setLog(new Map());
-    setPickedAssertionTarget(undefined);
-    setPickingAssertionStepId(undefined);
-    setEditingAssertionStepId(undefined);
-    setActiveTab('business');
-    setPanelStage('setup');
-    setDraftStatus('正在创建新流程');
-    window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
-    window.dispatch({ event: 'clear', params: {} }).catch(() => {});
-    window.dispatch({ event: 'businessFlowCodeChanged', params: { code: null } }).catch(() => {});
-  }, [settings]);
-
   const openNewFlowSheet = React.useCallback(() => {
     setFlowFormSheet({ mode: 'new', flow: createDraft(settings, false) });
   }, [settings]);
@@ -1240,9 +1219,9 @@ export const CrxRecorder: React.FC = ({
     const codeForStorage = settings.businessFlowEnabled === false ? normalized.artifacts?.playwrightCode : generateBusinessFlowPlaywrightCode(normalized);
     const flowForStorage = withPlaywrightCodeForStorage(normalized, codeForStorage);
 
-    if (action === 'saveDraft' || action === 'saveAndStart')
+    if (action === 'saveDraft' || action === 'saveAndStart') {
       activateNewFlowDraft(flowForStorage);
-    else {
+    } else {
       setFlowDraft(flowForStorage);
       setSelectedRecordId(flowForStorage.flow.id);
       setSuppressDefaultMeta(true);
@@ -1286,17 +1265,6 @@ export const CrxRecorder: React.FC = ({
     setActiveTab('business');
     setPanelStage(normalized.steps.length ? 'review' : 'editRecord');
     setDraftStatus(`已打开记录 ${new Date(normalized.updatedAt).toLocaleTimeString()}`);
-    window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
-  }, []);
-
-  const editRecord = React.useCallback((flow: BusinessFlow) => {
-    const normalized = normalizeIntentSources(normalizeFlowStepIds(flow));
-    setFlowDraft(normalized);
-    setSelectedRecordId(normalized.flow.id);
-    setSuppressDefaultMeta(true);
-    setActiveTab('business');
-    setPanelStage('editRecord');
-    setDraftStatus(`正在编辑记录 ${new Date(normalized.updatedAt).toLocaleTimeString()}`);
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
   }, []);
 
@@ -1787,7 +1755,7 @@ export const CrxRecorder: React.FC = ({
     setPanelStage('recording');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'recording' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft.flow.id, flowDraft.flow.name, flowDraft.steps.length, recordedActionCount]);
+  }, [appendDiagnosticLog, flowDraft, recordedActionCount]);
 
   const pauseRecording = React.useCallback(() => {
     window.dispatch({ event: 'setMode', params: { mode: mode === 'recording' ? 'standby' : 'recording' } }).catch(() => {});

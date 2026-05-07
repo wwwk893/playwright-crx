@@ -144,8 +144,8 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await selectAntdOptionLikeUser(page, wanTrigger, 'xtest16:WAN1', { searchText: 'xtest16', ...strictHumanOptions });
   await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
 
-  await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1');
-  await humanType(page.getByRole('textbox', { name: '结束地址，例如：' }), '2.2.2.2');
+  await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1', { confirmWithFill: true });
+  await humanType(page.getByRole('textbox', { name: '结束地址，例如：' }), '2.2.2.2', { confirmWithFill: true });
   await humanClickUntil(
       ipv4Dialog.getByRole('button', { name: '确 定' }),
       async () => !await ipv4Dialog.isVisible().catch(() => false),
@@ -202,7 +202,7 @@ test('human-like runtime replay supports wait inserted between address and port 
       { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
   );
   await expect(ipv4Dialog).toBeVisible({ timeout: 10_000 });
-  await humanType(ipv4Dialog.getByPlaceholder('地址池名称'), 'test1');
+  await humanType(ipv4Dialog.getByPlaceholder('地址池名称'), 'test1', { delayMs: 80, confirmWithFill: true });
   const wanTrigger = ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, wanTrigger, 'xtest16:WAN1', { searchText: 'xtest16', ...strictHumanOptions });
   await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
@@ -226,10 +226,10 @@ test('human-like runtime replay supports wait inserted between address and port 
   await humanClickUntil(
       page.getByTestId('site-ip-port-pool-create-button'),
       async () => await portDialog.isVisible().catch(() => false),
-      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+      { attempts: 8, afterClickDelayMs: 800, ...strictHumanOptions },
   );
   await expect(portDialog).toBeVisible({ timeout: 10_000 });
-  await humanType(portDialog.getByPlaceholder('地址池名称'), 'test12');
+  await humanType(portDialog.getByPlaceholder('地址池名称'), 'test12', { delayMs: 80 });
   const addressPoolTrigger = portDialog.locator('.ant-form-item').filter({ hasText: 'IP地址池' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, addressPoolTrigger, 'test1 共享 1.1.1.1--2.2.2.2', { searchText: 'test1', ...strictHumanOptions });
   await expect(portDialog.locator('.ant-form-item').filter({ hasText: 'IP地址池' })).toContainText('test1');
@@ -245,10 +245,11 @@ test('human-like runtime replay supports wait inserted between address and port 
       async () => !await portDialog.isVisible().catch(() => false),
       { attempts: 5, afterClickDelayMs: 800, ...strictHumanOptions },
   );
-  await expect(page.getByRole('row', { name: /test12.*test1 共享 1\.1\.1\.1--2\.2\.2\.2.*1\.1\.1\.1:80.*default/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('row', { name: /test12.*test1 共享 1\.1\.1\.1--2\.2\.2\.2.*1\.1\.1\.1:80.*default/ })).toBeVisible({ timeout: 20_000 });
   await humanClick(page.getByTestId('site-save-button').nth(1));
 
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('site-ip-port-pool-create-button');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('test1');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('default');
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');

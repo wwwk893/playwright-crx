@@ -254,7 +254,16 @@ export default class CrxPlayer extends EventEmitter {
           await mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true });
         });
       }
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true }));
+      const duplicateOrdinalClick = duplicateOrdinalClickTarget(selector);
+      return await innerPerformAction(mainFrame, actionInContext, async callMetadata => {
+        try {
+          await mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true });
+        } catch (error) {
+          if (duplicateOrdinalClick && await dispatchDuplicateOrdinalClick(mainFrame, duplicateOrdinalClick))
+            return;
+          throw error;
+        }
+      });
     }
     if (action.name === 'press') {
       const modifiers = toKeyboardModifiers(action.modifiers);
@@ -328,6 +337,55 @@ export default class CrxPlayer extends EventEmitter {
   }
 }
 
+function duplicateOrdinalClickTarget(selector: string) {
+  const nthMatch = selector.match(/>>\s*nth=(\d+)/);
+  if (!nthMatch)
+    return undefined;
+  const index = Number(nthMatch[1]);
+  if (!Number.isInteger(index) || index < 0)
+    return undefined;
+  const roleMatch = selector.match(/internal:role=([^\[]+)\[name=(?:\\"|")([^"\\]+)(?:\\"|")i\]/);
+  if (roleMatch)
+    return { index, role: roleMatch[1], name: roleMatch[2] };
+  const testIdMatch = selector.match(/internal:testid=\[data-testid=(?:\\"|")([^"\\]+)(?:\\"|")s\]/);
+  if (testIdMatch)
+    return { index, testId: testIdMatch[1] };
+  return undefined;
+}
+
+async function dispatchDuplicateOrdinalClick(mainFrame: Frame, target: { index: number, role?: string, name?: string, testId?: string }) {
+  return await mainFrame.evaluateExpression(String(({ index, role, name, testId }) => {
+    const normalize = (value: string | null | undefined) => (value || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const dispatchClick = (element: Element) => {
+      element.scrollIntoView({ block: 'center', inline: 'center' });
+      element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      (element as HTMLElement).click?.();
+    };
+    let candidates: Element[] = [];
+    if (testId)
+      candidates = Array.from(document.querySelectorAll(`[data-testid="${CSS.escape(testId)}"]`));
+    else if (role === 'button')
+      candidates = Array.from(document.querySelectorAll('button, [role="button"]')).filter(element => normalize(element.textContent).includes(normalize(name)));
+    else if (role)
+      candidates = Array.from(document.querySelectorAll(`[role="${CSS.escape(role)}"]`)).filter(element => normalize(element.textContent).includes(normalize(name)));
+    candidates = candidates.filter(isVisible);
+    const element = candidates[index] || candidates[candidates.length - 1];
+    if (!element)
+      return false;
+    dispatchClick(element);
+    return true;
+  }), { isFunction: true }, target);
+}
+
 function activeAntdOptionClickTarget(selector: string) {
   const optionKind = activeAntdOptionKind(selector);
   if (!optionKind)
@@ -339,11 +397,11 @@ function activeAntdOptionClickTarget(selector: string) {
 }
 
 function activeAntdOptionKind(selector: string) {
-  if (/ant-cascader-menu-item/.test(selector))
+  if (/ant-cascader-dropdown:not\(\.ant-cascader-dropdown-hidden\).*ant-cascader-menu-item/.test(selector))
     return 'cascader';
-  if (/ant-select-tree/.test(selector))
+  if (/ant-select-dropdown:not\(\.ant-select-dropdown-hidden\).*ant-select-tree/.test(selector))
     return 'tree';
-  if (/ant-select-item-option/.test(selector))
+  if (/ant-select-dropdown:not\(\.ant-select-dropdown-hidden\).*ant-select-item-option/.test(selector))
     return 'select';
   return undefined;
 }
@@ -367,6 +425,7 @@ async function dispatchActiveAntdOptionClick(mainFrame: Frame, target: { optionK
       optionKind === 'tree' ?
         '.ant-select-tree-node-content-wrapper:not(.ant-select-tree-node-disabled), .ant-select-tree-title' :
         '.ant-select-item-option:not(.ant-select-item-option-disabled)';
+    const primaryQuery = tokenGroups[0]?.[0] || '';
     const isVisible = (element: Element) => {
       const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
@@ -382,23 +441,58 @@ async function dispatchActiveAntdOptionClick(mainFrame: Frame, target: { optionK
       return !tokenGroups.length || tokenGroups.every(group => text.includes(group[0]) || group.slice(1).every(token => text.includes(token)));
     };
     const findOption = () => [...document.querySelectorAll(selector)].find(element => isVisible(element) && matches(element));
+    const hasVisibleDropdown = () => [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')].some(isVisible);
+    const findLooseOption = () => {
+      const primary = tokenGroups[0]?.[0];
+      if (!primary)
+        return undefined;
+      const candidates = [...document.querySelectorAll(selector)].filter(element => isVisible(element) && textFor(element).includes(primary));
+      return candidates.length === 1 ? candidates[0] : undefined;
+    };
     const dispatchClick = (element: Element) => {
       element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      (element as HTMLElement).click?.();
+    };
+    const setSearchValue = (trigger: Element, value: string) => {
+      const input = trigger.querySelector('input') || (document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined);
+      if (!input || !value)
+        return;
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: value.slice(-1) || 'a' }));
+      input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     };
     const openTriggersAndFindOption = async () => {
-      const preferred = [...document.querySelectorAll('.ant-select-focused .ant-select-selector, .ant-select-open .ant-select-selector')].filter(isVisible);
-      const all = [...document.querySelectorAll('.ant-select-selector')].filter(isVisible);
+      const activeElement = document.activeElement instanceof Element ? document.activeElement : undefined;
+      const activeTrigger = activeElement?.closest('.ant-select')?.querySelector('.ant-select-selector');
+      const visibleDropdown = hasVisibleDropdown();
+      const preferred = [
+        activeTrigger,
+        ...document.querySelectorAll('.ant-select-open .ant-select-selector, .ant-select-focused .ant-select-selector'),
+      ].filter((element): element is Element => !!element && isVisible(element));
+      const all = visibleDropdown ? [] : [...document.querySelectorAll('.ant-modal .ant-select-selector, .ant-drawer .ant-select-selector, [role="dialog"] .ant-select-selector')].filter(isVisible);
       const triggers = [...preferred, ...all].filter((trigger, index, list) => list.indexOf(trigger) === index);
       for (const trigger of triggers) {
-        dispatchClick(trigger);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        const option = findOption();
+        if (!visibleDropdown) {
+          dispatchClick(trigger);
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const option = findOption() || findLooseOption();
         if (option)
           return option;
+        if (primaryQuery) {
+          setSearchValue(trigger, primaryQuery);
+          await new Promise(resolve => setTimeout(resolve, 120));
+          const searchedOption = findOption() || findLooseOption();
+          if (searchedOption)
+            return searchedOption;
+        }
       }
       return undefined;
     };
