@@ -1928,7 +1928,12 @@ export const CrxRecorder: React.FC = ({
   const selectedAssertionStepLabel = stepDisplayLabel(selectedAssertionStep, selectedAssertionStepIndex + 1 || 1);
   const selectedAssertionSuggestion = selectedAssertionStep ? buildSuggestion(flowDraft.steps, selectedAssertionStepIndex) : undefined;
   const recordingFlowName = flowDraft.flow.name.trim();
-  const statusText = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? '设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? '编辑记录' : panelStage === 'review' ? '导出检查' : panelStage === 'recording' ? (recordingFlowName ? `录制 · ${recordingFlowName} · 录制中` : '录制 · 未选择流程') : '新建流程';
+  const selectedFlowName = recordingFlowName || '未命名流程';
+  const hasFlowContext = hasActiveRecordingFlowContext && (panelStage === 'recording' || panelStage === 'assertion' || panelStage === 'review' || panelStage === 'editRecord');
+  const libraryCountText = `共 ${flowRecords.length} 条记录`;
+  const statusTitle = panelStage === 'library' ? '流程库' : panelStage === 'aiSettings' ? 'AI 设置' : panelStage === 'aiUsage' ? 'AI 用量' : panelStage === 'assertion' ? `断言 · ${selectedAssertionStepLabel}` : panelStage === 'editRecord' ? `流程 · ${selectedFlowName}` : panelStage === 'review' ? `导出检查 · ${selectedFlowName}` : panelStage === 'recording' ? (recordingFlowName ? '录制中' : '录制 · 未选择流程') : '新建流程';
+  const statusCopy = panelStage === 'library' ? libraryCountText : panelStage === 'recording' ? (recordingFlowName ? `正在写入：${selectedFlowName}` : '先选择或新建流程') : panelStage === 'assertion' ? `正在补充：${selectedFlowName}` : panelStage === 'review' ? `复查 · ${stats.assertionCount} 条断言 · ${stats.missingAssertionCount} 个待补` : panelStage === 'editRecord' ? '正在编辑当前流程记录' : panelStage === 'aiSettings' ? 'AI key 仅本地存储' : panelStage === 'aiUsage' ? '本地用量摘要' : '保存后才能进入录制和断言';
+  const statusText = `${statusTitle} ${statusCopy}`;
   const statusClass = panelStage === 'assertion' ? 'assertion' : panelStage === 'review' || panelStage === 'library' || panelStage === 'editRecord' || panelStage === 'aiSettings' || panelStage === 'aiUsage' ? 'review' : panelStage === 'recording' ? (hasActiveRecordingFlowContext ? 'recording' : 'setup') : 'setup';
   const metaLine = [flowDraft.flow.module, flowDraft.flow.role, `${stats.stepCount} 步骤`].filter(Boolean).join(' · ');
   const insertAnchorStep = insertRecordingAfterStepId ? flowDraft.steps.find(step => step.id === insertRecordingAfterStepId) : undefined;
@@ -1988,321 +1993,348 @@ export const CrxRecorder: React.FC = ({
         </Toolbar>
       </>}
       <div className='recorder-workspace'>
-        {isBusinessFlowEnabled ? <aside className='business-flow-panel'>
-          <header className='business-flow-header'>
-            <div>
-              <h1>Playwright CRX</h1>
-              <div className='header-subtitle'>业务流程录制器</div>
+        {isBusinessFlowEnabled ? <aside className='business-flow-panel side-panel'>
+          <header className='business-flow-header panel-header'>
+            <div className='brand'>
+              <span className='brand-mark'>PW</span>
+              <div>
+                <h1>Playwright CRX</h1>
+                <div className='header-subtitle'>业务流程录制器</div>
+              </div>
             </div>
-            <button type='button' className='icon-button' onClick={showPreferences} title='偏好设置'>设置</button>
+            <button type='button' className='quiet-button header-settings' onClick={showPreferences} title='偏好设置'>设置</button>
           </header>
-          <div className={`recording-status ${statusClass}`}><span></span>{statusText}</div>
-          {panelStage === 'library' ? <FlowLibraryPanel
-            records={flowRecords}
-            selectedRecordId={selectedRecordId}
-            draftStatus={recordStatus || draftStatus}
-            aiSettings={aiSettings}
-            aiProfiles={aiProfiles}
-            activeAiProfile={activeAiProfile}
-            aiUsageRecords={aiUsageRecords}
-            onNewFlow={openNewFlowSheet}
-            onOpenRecord={openRecord}
-            onEditRecord={openEditFlowSheet}
-            onDuplicateRecord={duplicateRecord}
-            onDeleteRecord={deleteRecord}
-            onRestoreRecord={restoreRecord}
-            onImportJson={importRecord}
-            onExportAll={exportAllRecords}
-            onAiSettingsChange={updateAiSettings}
-            onOpenAiSettings={() => setPanelStage('aiSettings')}
-            onOpenAiUsage={() => setAiUsageSheetOpen(true)}
-          /> : panelStage === 'aiSettings' ? <AiIntentSettingsPanel
-            settings={aiSettings}
-            profiles={aiProfiles}
-            activeProfile={activeAiProfile}
-            apiKey={activeAiApiKey}
-            crxSettings={settings}
-            status={aiStatus}
-            generating={aiGenerating}
-            onBack={() => setPanelStage('library')}
-            onSettingsChange={updateAiSettings}
-            onProfilesChange={updateAiProfiles}
-            onApiKeyChange={updateActiveAiApiKey}
-            onCrxSettingsChange={updateCrxSettings}
-            onTestConnection={testAiConnection}
-            onGenerate={() => runAiGeneration()}
-            onOpenUsage={() => setAiUsageSheetOpen(true)}
-          /> : panelStage === 'aiUsage' ? <AiUsagePanel
-            records={aiUsageRecords}
-            activeProfile={activeAiProfile}
-            onBack={() => setPanelStage('library')}
-            onOpenSettings={() => setPanelStage('aiSettings')}
-            onExport={exportAiUsage}
-            onClear={clearAiUsage}
-          /> : panelStage === 'setup' ? <>
-            <button type='button' className='back-to-library' onClick={goToLibrary}>← 返回流程库</button>
-            <div className='setup-title'>新建业务流程</div>
-            <FlowMetaPanel flow={flowDraft} onChange={updateFlowDraft} />
-            <div className='template-chips'>
-              <span>从模板开始</span>
-              {['站点配置', 'WAN 配置', 'QoS 策略'].map(template => <button
-                type='button'
-                key={template}
-                onClick={() => updateFlowDraft({
-                  ...flowDraft,
-                  flow: {
-                    ...flowDraft.flow,
-                    module: flowDraft.flow.module || template.replace(' 配置', ''),
-                    page: flowDraft.flow.page || template,
-                  },
-                  updatedAt: new Date().toISOString(),
-                })}
-              >{template}</button>)}
-            </div>
-            <div className='setup-actions'>
-              <button type='button' className='primary' onClick={startRecording}>创建并开始录制</button>
-              <button type='button' onClick={saveDraftNow}>保存为草稿</button>
-              <button type='button' onClick={goToLibrary}>取消</button>
-              <button type='button' className='link-danger' onClick={restoreDraft}>恢复最近草稿</button>
-            </div>
-          </> : panelStage === 'editRecord' ? <>
-            <button type='button' className='back-to-library' onClick={goToLibrary}>← 返回流程库</button>
-            <div className='edit-record-title'>
-              <div>
-                <h2>编辑业务流程</h2>
-                <span>{flowDraft.flow.name || '未命名业务流程'}</span>
-              </div>
-              <span className='status-badge done'>已完成</span>
-            </div>
-            <FlowMetaPanel flow={flowDraft} onChange={updateFlowDraft} compact />
-            <div className='record-asset-card'>
-              <div className='section-heading'>步骤资产</div>
-              <div className='record-asset-grid'>
-                <div><strong>{stats.stepCount}</strong><span>步骤</span></div>
-                <div><strong>{stats.assertionCount}</strong><span>断言</span></div>
-                <div><strong>{formatLastSaved(flowDraft.updatedAt)}</strong><span>最后保存</span></div>
-              </div>
-              <div className='record-asset-links'>
-                <button type='button' onClick={() => setPanelStage(flowDraft.steps.length ? 'review' : 'recording')}>查看步骤 →</button>
-                <button type='button' onClick={() => {
-                  setPanelStage(flowDraft.steps.length ? 'review' : 'recording');
-                  setActiveTab('code');
-                }}>查看代码 →</button>
-              </div>
-            </div>
-            <div className='edit-record-actions'>
-              <button type='button' className='primary' onClick={() => saveCurrentRecord()}>保存修改</button>
-              <button type='button' onClick={() => duplicateRecord(flowDraft)}>另存为新流程</button>
-              <button type='button' className='danger-outline' onClick={() => {
-                if (selectedRecordId && window.confirm(`删除 ${flowDraft.flow.name || '未命名业务流程'}？`))
-                  deleteRecord(flowDraft);
-              }}>删除记录</button>
-              <button type='button' onClick={goToLibrary}>取消</button>
-            </div>
-          </> : <>
-            <button type='button' className='flow-detail-back' onClick={goToLibrary}>← 返回流程库</button>
-            <div className='flow-title-row'>
-              <div>
-                <h2>{flowDraft.flow.name || '未命名业务流程'}</h2>
-                <div>{metaLine || draftStatus}</div>
-              </div>
-              <button type='button' onClick={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}>编辑</button>
-            </div>
-            <div className='business-tabs'>
-              <button type='button' className={activeTab === 'business' ? 'selected' : ''} onClick={() => setActiveTab('business')}>业务流程</button>
-              <button type='button' className={activeTab === 'code' ? 'selected' : ''} onClick={() => setActiveTab('code')}>Playwright 代码</button>
-              <button type='button' className={activeTab === 'log' ? 'selected' : ''} onClick={() => setActiveTab('log')}>运行日志</button>
-            </div>
-            {activeTab === 'business' && aiSettings.enabled && panelStage !== 'assertion' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
-              flow={flowDraft}
+          <div className={`recording-status status-strip ${statusClass}`} aria-label={statusText}>
+            <div className='status-left'><span className='dot'></span><strong>{statusTitle}</strong><span>{statusCopy}</span></div>
+            <div className='status-right'><span className='pill ok'>本地记录</span></div>
+          </div>
+          <nav className='side-panel-nav segmented' aria-label={hasFlowContext ? `当前流程：${selectedFlowName}` : '全局流程库'}>
+            <button type='button' className={panelStage === 'library' ? 'active' : ''} onClick={goToLibrary}>流程库</button>
+            {hasFlowContext && <button type='button' className={panelStage === 'recording' ? 'active' : ''} onClick={() => {
+              setPanelStage('recording');
+              setActiveTab('business');
+            }}>录制 · {selectedFlowName}</button>}
+            {hasFlowContext && <button type='button' className={panelStage === 'assertion' ? 'active' : ''} onClick={() => {
+              if (!editingAssertionStepId && flowDraft.steps[0])
+                beginAddAssertion(flowDraft.steps[0].id);
+              else
+                setPanelStage('assertion');
+              setActiveTab('business');
+            }}>断言</button>}
+            <button type='button' className={panelStage === 'aiSettings' ? 'active' : ''} onClick={() => setPanelStage('aiSettings')}>设置</button>
+            {hasFlowContext && <button type='button' className={activeTab === 'code' ? 'active' : ''} onClick={() => {
+              setPanelStage(flowDraft.steps.length ? 'review' : 'recording');
+              setActiveTab('code');
+            }}>导出</button>}
+          </nav>
+          <div className='panel-body'>
+            {panelStage === 'library' ? <FlowLibraryPanel
+              records={flowRecords}
+              selectedRecordId={selectedRecordId}
+              draftStatus={recordStatus || draftStatus}
+              aiSettings={aiSettings}
+              aiProfiles={aiProfiles}
+              activeAiProfile={activeAiProfile}
+              aiUsageRecords={aiUsageRecords}
+              onNewFlow={openNewFlowSheet}
+              onOpenRecord={openRecord}
+              onEditRecord={openEditFlowSheet}
+              onDuplicateRecord={duplicateRecord}
+              onDeleteRecord={deleteRecord}
+              onRestoreRecord={restoreRecord}
+              onImportJson={importRecord}
+              onExportAll={exportAllRecords}
+              onAiSettingsChange={updateAiSettings}
+              onOpenAiSettings={() => setPanelStage('aiSettings')}
+              onOpenAiUsage={() => setAiUsageSheetOpen(true)}
+            /> : panelStage === 'aiSettings' ? <AiIntentSettingsPanel
               settings={aiSettings}
+              profiles={aiProfiles}
               activeProfile={activeAiProfile}
-              effectiveEnabled={effectiveAiIntentEnabled}
+              apiKey={activeAiApiKey}
+              crxSettings={settings}
+              status={aiStatus}
               generating={aiGenerating}
-              onOverrideChange={updateFlowAiIntentOverride}
+              onBack={() => setPanelStage('library')}
+              onSettingsChange={updateAiSettings}
+              onProfilesChange={updateAiProfiles}
+              onApiKeyChange={updateActiveAiApiKey}
+              onCrxSettingsChange={updateCrxSettings}
+              onTestConnection={testAiConnection}
               onGenerate={() => runAiGeneration()}
               onOpenUsage={() => setAiUsageSheetOpen(true)}
-            />}
-            {activeTab === 'business' && panelStage === 'assertion' && (selectedAssertionStep ? <AssertionWorkbench
-              step={selectedAssertionStep}
-              displayStepId={selectedAssertionStepLabel}
-              suggestion={selectedAssertionSuggestion}
-              pickedTarget={pickedAssertionTarget}
-              isPickingTarget={pickingAssertionStepId === selectedAssertionStep.id}
-              onPickAssertionTarget={startAssertionPick}
-              onCancelAddAssertion={backToAssertionReturnStage}
-              onSaveAssertion={addAssertion}
-              onChangeAssertions={(stepId, assertions) => updateStep(stepId, { assertions })}
-              onBackToFlow={backToAssertionReturnStage}
-            /> : <div className='assertion-workbench assertion-empty-state'>
-              <div className='business-flow-empty'>没有选中的步骤，无法添加断言。</div>
-              <button type='button' className='assertion-workbench-back' onClick={backToAssertionReturnStage}>← 返回流程</button>
-            </div>)}
-            {activeTab === 'business' && panelStage === 'recording' && (hasActiveRecordingFlowContext ? <>
-              <RecordingFlowContextBar
-                flow={flowDraft}
-                selectedRecordId={selectedRecordId}
-                draftStatus={draftStatus}
-                nextStepLabel={nextRecordingStepLabel}
-                insertAfterStepLabel={insertAfterStepLabel}
-                onSwitchFlow={goToLibrary}
-                onEditFlow={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}
-                onSaveDraft={saveDraftNow}
-              />
-              <div className={insertRecordingAfterStepId ? 'recording-toolbar inserting' : 'recording-toolbar'}>
-                <button type='button' onClick={pauseRecording}>{mode === 'recording' ? '暂停' : '继续'}</button>
-                <button type='button' className='danger' onClick={stopRecording}>停止录制</button>
-                {insertRecordingAfterStepId ? <button type='button' onClick={exitInsertRecording}>退出插入</button> : <button type='button' onClick={() => exportBusinessFlow('json')}>导出</button>}
+            /> : panelStage === 'aiUsage' ? <AiUsagePanel
+              records={aiUsageRecords}
+              activeProfile={activeAiProfile}
+              onBack={() => setPanelStage('library')}
+              onOpenSettings={() => setPanelStage('aiSettings')}
+              onExport={exportAiUsage}
+              onClear={clearAiUsage}
+            /> : panelStage === 'setup' ? <>
+              <button type='button' className='back-to-library' onClick={goToLibrary}>← 返回流程库</button>
+              <div className='setup-title'>新建业务流程</div>
+              <FlowMetaPanel flow={flowDraft} onChange={updateFlowDraft} />
+              <div className='template-chips'>
+                <span>从模板开始</span>
+                {['站点配置', 'WAN 配置', 'QoS 策略'].map(template => <button
+                  type='button'
+                  key={template}
+                  onClick={() => updateFlowDraft({
+                    ...flowDraft,
+                    flow: {
+                      ...flowDraft.flow,
+                      module: flowDraft.flow.module || template.replace(' 配置', ''),
+                      page: flowDraft.flow.page || template,
+                    },
+                    updatedAt: new Date().toISOString(),
+                  })}
+                >{template}</button>)}
               </div>
-              {insertAnchorStep && <div className='insert-recording-banner'>
+              <div className='setup-actions'>
+                <button type='button' className='primary' onClick={startRecording}>创建并开始录制</button>
+                <button type='button' onClick={saveDraftNow}>保存为草稿</button>
+                <button type='button' onClick={goToLibrary}>取消</button>
+                <button type='button' className='link-danger' onClick={restoreDraft}>恢复最近草稿</button>
+              </div>
+            </> : panelStage === 'editRecord' ? <>
+              <button type='button' className='back-to-library' onClick={goToLibrary}>← 返回流程库</button>
+              <div className='edit-record-title'>
                 <div>
-                  <strong>正在插入操作</strong>
-                  <span>新录到的步骤会插入到 {insertAnchorStep.id}{insertNextStep ? ` 与 ${insertNextStep.id}` : ' 之后'} 之间</span>
+                  <h2>编辑业务流程</h2>
+                  <span>{flowDraft.flow.name || '未命名业务流程'}</span>
                 </div>
-                <button type='button' onClick={exitInsertRecording}>改为追加到末尾</button>
-              </div>}
-              <div className='flow-compact-stats'>
-                <span>{stats.stepCount} 步骤</span>
-                <span>{recordedActionCount} 操作</span>
-                <span>{stats.assertionCount} 断言</span>
-                <span>{stats.missingAssertionCount} 缺少断言</span>
-                <span>{draftStatus}</span>
+                <span className='status-badge done'>已完成</span>
               </div>
-              <StepList
-                steps={flowDraft.steps}
-                editingAssertionStepId={editingAssertionStepId}
-                onUpdateStep={updateStep}
-                onBeginAddAssertion={beginAddAssertion}
-                onCancelAddAssertion={() => setEditingAssertionStepId(undefined)}
-                onSaveAssertion={addAssertion}
-                onDeleteStep={deleteStep}
-                onRegenerateIntent={effectiveAiIntentEnabled ? stepId => runAiGeneration([stepId], 'single') : undefined}
-                onPickAssertionTarget={startAssertionPick}
+              <FlowMetaPanel flow={flowDraft} onChange={updateFlowDraft} compact />
+              <div className='record-asset-card'>
+                <div className='section-heading'>步骤资产</div>
+                <div className='record-asset-grid'>
+                  <div><strong>{stats.stepCount}</strong><span>步骤</span></div>
+                  <div><strong>{stats.assertionCount}</strong><span>断言</span></div>
+                  <div><strong>{formatLastSaved(flowDraft.updatedAt)}</strong><span>最后保存</span></div>
+                </div>
+                <div className='record-asset-links'>
+                  <button type='button' onClick={() => setPanelStage(flowDraft.steps.length ? 'review' : 'recording')}>查看步骤 →</button>
+                  <button type='button' onClick={() => {
+                    setPanelStage(flowDraft.steps.length ? 'review' : 'recording');
+                    setActiveTab('code');
+                  }}>查看代码 →</button>
+                </div>
+              </div>
+              <div className='edit-record-actions'>
+                <button type='button' className='primary' onClick={() => saveCurrentRecord()}>保存修改</button>
+                <button type='button' onClick={() => duplicateRecord(flowDraft)}>另存为新流程</button>
+                <button type='button' className='danger-outline' onClick={() => {
+                  if (selectedRecordId && window.confirm(`删除 ${flowDraft.flow.name || '未命名业务流程'}？`))
+                    deleteRecord(flowDraft);
+                }}>删除记录</button>
+                <button type='button' onClick={goToLibrary}>取消</button>
+              </div>
+            </> : <>
+              <button type='button' className='flow-detail-back' onClick={goToLibrary}>← 返回流程库</button>
+              <div className='flow-title-row'>
+                <div>
+                  <h2>{flowDraft.flow.name || '未命名业务流程'}</h2>
+                  <div>{metaLine || draftStatus}</div>
+                </div>
+                <button type='button' onClick={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}>编辑</button>
+              </div>
+              <div className='business-tabs'>
+                <button type='button' className={activeTab === 'business' ? 'selected' : ''} onClick={() => setActiveTab('business')}>业务流程</button>
+                <button type='button' className={activeTab === 'code' ? 'selected' : ''} onClick={() => setActiveTab('code')}>Playwright 代码</button>
+                <button type='button' className={activeTab === 'log' ? 'selected' : ''} onClick={() => setActiveTab('log')}>运行日志</button>
+              </div>
+              {activeTab === 'business' && aiSettings.enabled && panelStage !== 'assertion' && (panelStage !== 'recording' || hasActiveRecordingFlowContext) && <FlowAiIntentControl
+                flow={flowDraft}
+                settings={aiSettings}
+                activeProfile={activeAiProfile}
+                effectiveEnabled={effectiveAiIntentEnabled}
+                generating={aiGenerating}
+                onOverrideChange={updateFlowAiIntentOverride}
+                onGenerate={() => runAiGeneration()}
+                onOpenUsage={() => setAiUsageSheetOpen(true)}
+              />}
+              {activeTab === 'business' && panelStage === 'assertion' && (selectedAssertionStep ? <AssertionWorkbench
+                step={selectedAssertionStep}
+                displayStepId={selectedAssertionStepLabel}
+                suggestion={selectedAssertionSuggestion}
                 pickedTarget={pickedAssertionTarget}
-                pickingStepId={pickingAssertionStepId}
-                insertRecordingAfterStepId={insertRecordingAfterStepId}
-                aiPendingStepIds={aiPendingStepIds}
-              />
-              <div className='sticky-export-bar'>
-                <button type='button' onClick={() => exportBusinessFlow('json')}>导出流程 JSON</button>
-                <button type='button' onClick={() => exportBusinessFlow('yaml')}>导出紧凑 YAML</button>
-              </div>
-            </> : <FlowSelectionGuard
-              onBackToLibrary={goToLibraryNow}
-              onNewFlow={openNewFlowSheet}
-            />)}
-            {activeTab === 'business' && panelStage === 'review' && <FlowReviewPanel
-              flow={flowDraft}
-              redactionEnabled={settings.redactSensitiveData !== false}
-              onAddAssertion={beginAddAssertion}
-              onDeleteStep={deleteStep}
-              onDeleteSteps={deleteSteps}
-              onContinueRecording={continueRecording}
-              onContinueRecordingFrom={continueRecordingFrom}
-              onInsertEmptyStep={insertEmptyStep}
-              onInsertWaitStep={insertWaitStep}
-              onSaveRecord={() => {
-                saveCurrentRecord().then(saved => {
-                  if (saved)
-                    goToLibraryNow();
-                });
-              }}
-              onClearSteps={() => {
-                if (window.confirm('确定清空当前流程的所有步骤吗？流程名称、应用、目标等信息会保留。'))
-                  clearSteps();
-              }}
-              onExportJson={() => exportBusinessFlow('json')}
-              onExportYaml={() => exportBusinessFlow('yaml')}
-              onOpenReplayCode={() => setActiveTab('code')}
-              playwrightCode={businessFlowPlaybackCode}
-              onSaveRepeatSegment={saveRepeatSegment}
-              onDeleteRepeatSegment={removeRepeatSegment}
-            />}
-            {activeTab === 'code' && <div className='embedded-recorder'>
-              {settings.experimental && <div className='code-actions'>
-                <button type='button' onClick={saveCode}>保存代码</button>
-                <button type='button' onClick={requestStorageState}>下载 storage state</button>
-              </div>}
-              <Recorder sources={generatedBusinessSources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
-            </div>}
-            {activeTab === 'log' && <div className='run-log-panel'>
-              <details className='diagnostic-dev-panel runtime-log-panel' open>
-                <summary>
-                  <div>
-                    <strong>Playwright 运行事件</strong>
-                    <span>{runtimeLogs.length ? `${runtimeLogs.length} 条 runtime 事件，显示最近 80 条` : '暂无 runtime 事件'}</span>
-                  </div>
-                </summary>
-                <div className='diagnostic-dev-actions'>
-                  <button type='button' onClick={() => setExpandedRuntimeLogIds(new Set(runtimeLogs.map(entry => entry.id)))} disabled={!runtimeLogs.length}>全部展开</button>
-                  <button type='button' onClick={() => setExpandedRuntimeLogIds(new Set())} disabled={!runtimeLogs.length}>全部收起</button>
-                  <button type='button' onClick={() => downloadText(`playwright-runtime-${generateDatetimeSuffix()}.jsonl`, runtimeLogsToJsonl(diagnosticLogs), 'application/jsonl')} disabled={!runtimeLogs.length}>导出 JSONL</button>
-                  <button type='button' onClick={() => setDiagnosticLogs(logs => {
-                    const next = logs.filter(log => !log.type.startsWith('runtime.'));
-                    exposeDiagnosticLogs(next);
-                    setExpandedRuntimeLogIds(new Set());
-                    return next;
-                  })} disabled={!runtimeLogs.length}>清空</button>
-                  <span>只清理 runtime.*，开发诊断仍保留。</span>
-                </div>
-                {runtimeLogs.length === 0 && <div className='business-flow-empty compact'>点击 Play 后，这里会显示代码解析、action 数量、开始/结束和报错信息。</div>}
-                {runtimeLogs.slice().reverse().map(entry => <details
-                  className={`runtime-log-row ${entry.level === 'warn' ? 'warn' : ''}`}
-                  key={entry.id}
-                  open={isRuntimeLogExpanded(entry, expandedRuntimeLogIds)}
-                  onToggle={event => {
-                    const open = event.currentTarget.open;
-                    setExpandedRuntimeLogIds(ids => {
-                      const next = new Set(ids);
-                      if (open)
-                        next.add(entry.id);
-                      else
-                        next.delete(entry.id);
-                      return next;
-                    });
-                  }}
-                >
-                  <summary>
-                    <span>{new Date(entry.time).toLocaleTimeString()}</span>
-                    <strong>{entry.message}</strong>
-                    <em>{entry.type}</em>
-                  </summary>
-                  {entry.data && <pre>{formatDiagnosticData(entry.data)}</pre>}
-                </details>)}
-              </details>
-              <details className='diagnostic-dev-panel'>
-                <summary>
-                  <div>
-                    <strong>开发诊断</strong>
-                    <span>{diagnosticLogs.length ? `${diagnosticLogs.length} / ${maxDiagnosticLogEntries} 条 recorder/merge 事件，已持久化` : '暂无 recorder/merge 事件'}</span>
-                  </div>
-                </summary>
-                <div className='diagnostic-dev-actions'>
-                  <button type='button' onClick={() => downloadText(`recorder-diagnostics-${generateDatetimeSuffix()}.jsonl`, diagnosticLogsToJsonl(diagnosticLogs), 'application/jsonl')} disabled={!diagnosticLogs.length}>导出 JSONL</button>
-                  <button type='button' onClick={() => setDiagnosticLogs(() => {
-                    const next: RecorderDiagnosticLog[] = [];
-                    exposeDiagnosticLogs(next);
-                    return next;
-                  })} disabled={!diagnosticLogs.length}>清空</button>
-                  <span>刷新后保留；DevTools: window.__playwrightCrxRecorderDiagnostics</span>
-                </div>
-                {diagnosticLogs.length === 0 && <div className='business-flow-empty compact'>暂无诊断日志。</div>}
-                {diagnosticLogs.slice().reverse().map(entry => <details className={`diagnostic-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id}>
-                  <summary>
-                    <span>{new Date(entry.time).toLocaleTimeString()}</span>
-                    <strong>{entry.message}</strong>
-                    <em>{entry.type}</em>
-                  </summary>
-                  {entry.data && <pre>{formatDiagnosticData(entry.data)}</pre>}
-                </details>)}
-              </details>
-              {[...log.values()].length === 0 && <div className='business-flow-empty'>暂无运行日志。</div>}
-              {[...log.values()].map(callLog => <div className={`log-row ${callLog.status}`} key={callLog.id}>
-                <strong>{callLog.title}</strong>
-                <span>{callLog.status}</span>
+                isPickingTarget={pickingAssertionStepId === selectedAssertionStep.id}
+                onPickAssertionTarget={startAssertionPick}
+                onCancelAddAssertion={backToAssertionReturnStage}
+                onSaveAssertion={addAssertion}
+                onChangeAssertions={(stepId, assertions) => updateStep(stepId, { assertions })}
+                onBackToFlow={backToAssertionReturnStage}
+              /> : <div className='assertion-workbench assertion-empty-state'>
+                <div className='business-flow-empty'>没有选中的步骤，无法添加断言。</div>
+                <button type='button' className='assertion-workbench-back' onClick={backToAssertionReturnStage}>← 返回流程</button>
               </div>)}
-            </div>}
-          </>}
+              {activeTab === 'business' && panelStage === 'recording' && (hasActiveRecordingFlowContext ? <>
+                <RecordingFlowContextBar
+                  flow={flowDraft}
+                  selectedRecordId={selectedRecordId}
+                  draftStatus={draftStatus}
+                  nextStepLabel={nextRecordingStepLabel}
+                  insertAfterStepLabel={insertAfterStepLabel}
+                  onSwitchFlow={goToLibrary}
+                  onEditFlow={() => setFlowFormSheet({ mode: selectedRecordId ? 'edit' : 'new', flow: flowDraft })}
+                  onSaveDraft={saveDraftNow}
+                />
+                <div className={insertRecordingAfterStepId ? 'recording-toolbar inserting' : 'recording-toolbar'}>
+                  <button type='button' onClick={pauseRecording}>{mode === 'recording' ? '暂停' : '继续'}</button>
+                  <button type='button' className='danger' onClick={stopRecording}>停止录制</button>
+                  {insertRecordingAfterStepId ? <button type='button' onClick={exitInsertRecording}>退出插入</button> : <button type='button' onClick={() => exportBusinessFlow('json')}>导出</button>}
+                </div>
+                {insertAnchorStep && <div className='insert-recording-banner'>
+                  <div>
+                    <strong>正在插入操作</strong>
+                    <span>新录到的步骤会插入到 {insertAnchorStep.id}{insertNextStep ? ` 与 ${insertNextStep.id}` : ' 之后'} 之间</span>
+                  </div>
+                  <button type='button' onClick={exitInsertRecording}>改为追加到末尾</button>
+                </div>}
+                <div className='flow-compact-stats'>
+                  <span>{stats.stepCount} 步骤</span>
+                  <span>{recordedActionCount} 操作</span>
+                  <span>{stats.assertionCount} 断言</span>
+                  <span>{stats.missingAssertionCount} 缺少断言</span>
+                  <span>{draftStatus}</span>
+                </div>
+                <StepList
+                  steps={flowDraft.steps}
+                  editingAssertionStepId={editingAssertionStepId}
+                  onUpdateStep={updateStep}
+                  onBeginAddAssertion={beginAddAssertion}
+                  onCancelAddAssertion={() => setEditingAssertionStepId(undefined)}
+                  onSaveAssertion={addAssertion}
+                  onDeleteStep={deleteStep}
+                  onRegenerateIntent={effectiveAiIntentEnabled ? stepId => runAiGeneration([stepId], 'single') : undefined}
+                  onPickAssertionTarget={startAssertionPick}
+                  pickedTarget={pickedAssertionTarget}
+                  pickingStepId={pickingAssertionStepId}
+                  insertRecordingAfterStepId={insertRecordingAfterStepId}
+                  aiPendingStepIds={aiPendingStepIds}
+                />
+                <div className='sticky-export-bar'>
+                  <button type='button' onClick={() => exportBusinessFlow('json')}>导出流程 JSON</button>
+                  <button type='button' onClick={() => exportBusinessFlow('yaml')}>导出紧凑 YAML</button>
+                </div>
+              </> : <FlowSelectionGuard
+                onBackToLibrary={goToLibraryNow}
+                onNewFlow={openNewFlowSheet}
+              />)}
+              {activeTab === 'business' && panelStage === 'review' && <FlowReviewPanel
+                flow={flowDraft}
+                redactionEnabled={settings.redactSensitiveData !== false}
+                onAddAssertion={beginAddAssertion}
+                onDeleteStep={deleteStep}
+                onDeleteSteps={deleteSteps}
+                onContinueRecording={continueRecording}
+                onContinueRecordingFrom={continueRecordingFrom}
+                onInsertEmptyStep={insertEmptyStep}
+                onInsertWaitStep={insertWaitStep}
+                onSaveRecord={() => {
+                  saveCurrentRecord().then(saved => {
+                    if (saved)
+                      goToLibraryNow();
+                  });
+                }}
+                onClearSteps={() => {
+                  if (window.confirm('确定清空当前流程的所有步骤吗？流程名称、应用、目标等信息会保留。'))
+                    clearSteps();
+                }}
+                onExportJson={() => exportBusinessFlow('json')}
+                onExportYaml={() => exportBusinessFlow('yaml')}
+                onOpenReplayCode={() => setActiveTab('code')}
+                playwrightCode={businessFlowPlaybackCode}
+                onSaveRepeatSegment={saveRepeatSegment}
+                onDeleteRepeatSegment={removeRepeatSegment}
+              />}
+              {activeTab === 'code' && <div className='embedded-recorder'>
+                {settings.experimental && <div className='code-actions'>
+                  <button type='button' onClick={saveCode}>保存代码</button>
+                  <button type='button' onClick={requestStorageState}>下载 storage state</button>
+                </div>}
+                <Recorder sources={generatedBusinessSources} paused={paused} log={log} mode={mode} onEditedCode={dispatchEditedCode} onCursorActivity={dispatchCursorActivity} />
+              </div>}
+              {activeTab === 'log' && <div className='run-log-panel'>
+                <details className='diagnostic-dev-panel runtime-log-panel' open>
+                  <summary>
+                    <div>
+                      <strong>Playwright 运行事件</strong>
+                      <span>{runtimeLogs.length ? `${runtimeLogs.length} 条 runtime 事件，显示最近 80 条` : '暂无 runtime 事件'}</span>
+                    </div>
+                  </summary>
+                  <div className='diagnostic-dev-actions'>
+                    <button type='button' onClick={() => setExpandedRuntimeLogIds(new Set(runtimeLogs.map(entry => entry.id)))} disabled={!runtimeLogs.length}>全部展开</button>
+                    <button type='button' onClick={() => setExpandedRuntimeLogIds(new Set())} disabled={!runtimeLogs.length}>全部收起</button>
+                    <button type='button' onClick={() => downloadText(`playwright-runtime-${generateDatetimeSuffix()}.jsonl`, runtimeLogsToJsonl(diagnosticLogs), 'application/jsonl')} disabled={!runtimeLogs.length}>导出 JSONL</button>
+                    <button type='button' onClick={() => setDiagnosticLogs(logs => {
+                      const next = logs.filter(log => !log.type.startsWith('runtime.'));
+                      exposeDiagnosticLogs(next);
+                      setExpandedRuntimeLogIds(new Set());
+                      return next;
+                    })} disabled={!runtimeLogs.length}>清空</button>
+                    <span>只清理 runtime.*，开发诊断仍保留。</span>
+                  </div>
+                  {runtimeLogs.length === 0 && <div className='business-flow-empty compact'>点击 Play 后，这里会显示代码解析、action 数量、开始/结束和报错信息。</div>}
+                  {runtimeLogs.slice().reverse().map(entry => <details
+                    className={`runtime-log-row ${entry.level === 'warn' ? 'warn' : ''}`}
+                    key={entry.id}
+                    open={isRuntimeLogExpanded(entry, expandedRuntimeLogIds)}
+                    onToggle={event => {
+                      const open = event.currentTarget.open;
+                      setExpandedRuntimeLogIds(ids => {
+                        const next = new Set(ids);
+                        if (open)
+                          next.add(entry.id);
+                        else
+                          next.delete(entry.id);
+                        return next;
+                      });
+                    }}
+                  >
+                    <summary>
+                      <span>{new Date(entry.time).toLocaleTimeString()}</span>
+                      <strong>{entry.message}</strong>
+                      <em>{entry.type}</em>
+                    </summary>
+                    {entry.data && <pre>{formatDiagnosticData(entry.data)}</pre>}
+                  </details>)}
+                </details>
+                <details className='diagnostic-dev-panel'>
+                  <summary>
+                    <div>
+                      <strong>开发诊断</strong>
+                      <span>{diagnosticLogs.length ? `${diagnosticLogs.length} / ${maxDiagnosticLogEntries} 条 recorder/merge 事件，已持久化` : '暂无 recorder/merge 事件'}</span>
+                    </div>
+                  </summary>
+                  <div className='diagnostic-dev-actions'>
+                    <button type='button' onClick={() => downloadText(`recorder-diagnostics-${generateDatetimeSuffix()}.jsonl`, diagnosticLogsToJsonl(diagnosticLogs), 'application/jsonl')} disabled={!diagnosticLogs.length}>导出 JSONL</button>
+                    <button type='button' onClick={() => setDiagnosticLogs(() => {
+                      const next: RecorderDiagnosticLog[] = [];
+                      exposeDiagnosticLogs(next);
+                      return next;
+                    })} disabled={!diagnosticLogs.length}>清空</button>
+                    <span>刷新后保留；DevTools: window.__playwrightCrxRecorderDiagnostics</span>
+                  </div>
+                  {diagnosticLogs.length === 0 && <div className='business-flow-empty compact'>暂无诊断日志。</div>}
+                  {diagnosticLogs.slice().reverse().map(entry => <details className={`diagnostic-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id}>
+                    <summary>
+                      <span>{new Date(entry.time).toLocaleTimeString()}</span>
+                      <strong>{entry.message}</strong>
+                      <em>{entry.type}</em>
+                    </summary>
+                    {entry.data && <pre>{formatDiagnosticData(entry.data)}</pre>}
+                  </details>)}
+                </details>
+                {[...log.values()].length === 0 && <div className='business-flow-empty'>暂无运行日志。</div>}
+                {[...log.values()].map(callLog => <div className={`log-row ${callLog.status}`} key={callLog.id}>
+                  <strong>{callLog.title}</strong>
+                  <span>{callLog.status}</span>
+                </div>)}
+              </div>}
+            </>}
+          </div>
           {flowFormSheet && <FlowFormSheet
             mode={flowFormSheet.mode}
             flow={flowFormSheet.flow}

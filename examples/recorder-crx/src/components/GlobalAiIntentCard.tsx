@@ -15,50 +15,46 @@ export const GlobalAiIntentCard: React.FC<{
   onSettingsChange: (settings: AiIntentSettings) => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
-}> = ({ settings, profiles, activeProfile, records, onSettingsChange, onOpenSettings, onOpenUsage }) => {
+}> = ({ settings, profiles, activeProfile, records, onOpenSettings, onOpenUsage }) => {
   const summary = React.useMemo(() => summarizeUsage(records), [records]);
   const currency = records[records.length - 1]?.cost.currency || activeProfile?.pricing.currency || 'USD';
-  return <details className='global-ai-card' open>
-    <summary className='global-ai-title'>
+  return <section className='global-ai-card ai-compact-card'>
+    <div className='global-ai-title ai-compact-head'>
       <div>
-        <span className='eyebrow'>AI Intent</span>
-        <strong>全局配置</strong>
+        <strong>AI Intent 全局配置</strong>
+        <span>默认不抢占流程库，只展示当前可决策状态。</span>
       </div>
-      <span className={settings.enabled ? 'global-ai-state enabled' : 'global-ai-state'}>{settings.enabled ? '已启用' : '未启用'}</span>
-      <span className='global-ai-chevron'>⌄</span>
-    </summary>
-    <div className='global-ai-body'>
-      <div className='global-ai-grid'>
-        <div>
-          <span>状态</span>
-          <label className='ai-switch-row'>
-            <input type='checkbox' checked={settings.enabled} onChange={e => onSettingsChange({ ...settings, enabled: e.target.checked })} />
-            {settings.enabled ? '已启用' : '未启用'}
-          </label>
-        </div>
-        <label>
-          Provider
-          <select value={settings.activeProfileId || ''} onChange={e => onSettingsChange({ ...settings, activeProfileId: e.target.value })}>
-            {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          </select>
-        </label>
-        <label>
-          模式
-          <select value={settings.mode} onChange={e => onSettingsChange({ ...settings, mode: e.target.value as AiIntentSettings['mode'] })}>
-            <option value='ai-first'>AI 优先</option>
-            <option value='rule-fallback'>规则优先，AI 兜底</option>
-            <option value='manual'>仅手动</option>
-          </select>
-        </label>
-        <div>
-          <span>今日费用</span>
-          <strong>{currency} {summary.todayCost.toFixed(6)}</strong>
-        </div>
+      <span className='pill'>AI</span>
+    </div>
+    <div className='global-ai-grid compact-metrics' aria-label='AI Intent 配置摘要'>
+      <div>
+        <span>状态</span>
+        <strong>{settings.enabled ? '已启用' : '未启用'}</strong>
       </div>
-      <div className='global-ai-actions'>
-        <button type='button' onClick={onOpenSettings}>设置</button>
-        <button type='button' onClick={onOpenUsage}>用量</button>
+      <div>
+        <span>Provider</span>
+        <strong>{activeProfile?.name || profiles[0]?.name || '未配置'}</strong>
+      </div>
+      <div>
+        <span>模式</span>
+        <strong>{modeLabel(settings.mode)}</strong>
+      </div>
+      <div>
+        <span>今日费用</span>
+        <strong>{currency} {summary.todayCost.toFixed(6)}</strong>
       </div>
     </div>
-  </details>;
+    <div className='global-ai-actions button-group'>
+      <button type='button' className='mini-button' onClick={onOpenSettings}>设置</button>
+      <button type='button' className='mini-button' onClick={onOpenUsage}>用量</button>
+    </div>
+  </section>;
 };
+
+function modeLabel(mode: AiIntentSettings['mode']) {
+  if (mode === 'rule-fallback')
+    return '规则优先';
+  if (mode === 'manual')
+    return '仅手动';
+  return 'AI 优先';
+}

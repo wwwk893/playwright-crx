@@ -32,4 +32,7 @@ test('explicit business-flow recorder mode opens the business flow surface', asy
 
   await expect(recorderPage.locator('.business-flow-panel')).toBeVisible();
   await expect(recorderPage.getByRole('button', { name: /新建流程/ })).toBeVisible();
+  await expect(recorderPage.locator('.side-panel-nav')).toBeVisible();
+  await expect(recorderPage.locator('.side-panel-nav').getByRole('button', { name: /录制/ })).toHaveCount(0);
+  await expect(recorderPage.locator('.side-panel-nav').getByRole('button', { name: /^断言$/ })).toHaveCount(0);
 });
