@@ -6,22 +6,29 @@
 import React from 'react';
 import { createBlankProfile } from '../aiIntent/settings';
 import type { AiIntentSettings, AiProviderProfile } from '../aiIntent/types';
+import type { CrxSettings } from '../settings';
 
 export const AiIntentSettingsPanel: React.FC<{
   settings: AiIntentSettings;
   profiles: AiProviderProfile[];
   activeProfile?: AiProviderProfile;
   apiKey: string;
+  crxSettings: CrxSettings;
   status?: string;
   generating?: boolean;
   onBack?: () => void;
   onSettingsChange: (settings: AiIntentSettings) => void;
   onProfilesChange: (profiles: AiProviderProfile[]) => void;
   onApiKeyChange: (apiKey: string) => void;
+  onCrxSettingsChange: (settings: CrxSettings) => void;
   onTestConnection: () => void;
   onGenerate: () => void;
   onOpenUsage: () => void;
-}> = ({ settings, profiles, activeProfile, apiKey, status, generating, onBack, onSettingsChange, onProfilesChange, onApiKeyChange, onTestConnection, onGenerate, onOpenUsage }) => {
+}> = ({ settings, profiles, activeProfile, apiKey, crxSettings, status, generating, onBack, onSettingsChange, onProfilesChange, onApiKeyChange, onCrxSettingsChange, onTestConnection, onGenerate, onOpenUsage }) => {
+  const updateCrxSettings = React.useCallback((patch: Partial<CrxSettings>) => {
+    onCrxSettingsChange({ ...crxSettings, ...patch });
+  }, [crxSettings, onCrxSettingsChange]);
+
   const updateProfile = React.useCallback((patch: Partial<AiProviderProfile>) => {
     if (!activeProfile)
       return;
@@ -54,12 +61,59 @@ export const AiIntentSettingsPanel: React.FC<{
     onSettingsChange({ ...settings, activeProfileId: nextProfiles[0]?.id });
   }, [activeProfile, onProfilesChange, onSettingsChange, profiles, settings]);
 
-  return <section className='ai-intent-panel global-settings'>
+  return <section className='settings-accordion-panel global-settings'>
     {onBack && <button type='button' className='back-to-library' onClick={onBack}>← 返回流程库</button>}
-    <details open>
+    <div className='settings-panel-title'>
+      <div>
+        <span className='eyebrow'>设置</span>
+        <h2>录制偏好与导出安全</h2>
+      </div>
+      <button type='button' onClick={onOpenUsage}>查看用量</button>
+    </div>
+
+    <details className='settings-section' open>
       <summary>
-        <span>AI Intent 全局配置</span>
-        <span>{settings.enabled ? '已启用' : '未启用'}</span>
+        <span>高频录制偏好</span>
+        <em>默认展开</em>
+      </summary>
+      <div className='settings-grid'>
+        <label className='checkbox-row'>
+          <input type='checkbox' checked={crxSettings.businessFlowEnabled !== false} onChange={e => updateCrxSettings({ businessFlowEnabled: e.target.checked })} />
+          启用业务流程录制
+        </label>
+        <label>
+          目标语言
+          <select value={crxSettings.targetLanguage} onChange={e => updateCrxSettings({ targetLanguage: e.target.value })}>
+            <option value='playwright-test'>Playwright Test</option>
+            <option value='javascript'>Node.js Library</option>
+            <option value='python-pytest'>Python Pytest</option>
+            <option value='java-junit'>Java JUnit</option>
+            <option value='csharp-mstest'>C# MSTest</option>
+          </select>
+        </label>
+        <label>
+          TestID 属性
+          <input value={crxSettings.testIdAttributeName} pattern='[a-zA-Z][\w\-]*' onChange={e => updateCrxSettings({ testIdAttributeName: e.target.value })} />
+        </label>
+        <label>
+          默认应用
+          <input value={crxSettings.defaultApp ?? ''} onChange={e => updateCrxSettings({ defaultApp: e.target.value })} />
+        </label>
+        <label>
+          默认仓库
+          <input value={crxSettings.defaultRepo ?? ''} onChange={e => updateCrxSettings({ defaultRepo: e.target.value })} />
+        </label>
+        <label>
+          默认角色
+          <input value={crxSettings.defaultRole ?? ''} onChange={e => updateCrxSettings({ defaultRole: e.target.value })} />
+        </label>
+      </div>
+    </details>
+
+    <details className='settings-section'>
+      <summary>
+        <span>AI Intent 细节</span>
+        <em>{settings.enabled ? '已启用' : '未启用'}</em>
       </summary>
       <div className='ai-settings-grid'>
         <label className='checkbox-row'>
@@ -95,10 +149,7 @@ export const AiIntentSettingsPanel: React.FC<{
           <span>{activeProfile.protocol}</span>
         </div>
         <div className='ai-settings-grid'>
-          <label>
-            名称
-            <input value={activeProfile.name} onChange={e => updateProfile({ name: e.target.value })} />
-          </label>
+          <label>名称<input value={activeProfile.name} onChange={e => updateProfile({ name: e.target.value })} /></label>
           <label>
             协议
             <select value={activeProfile.protocol} onChange={e => updateProfile({ protocol: e.target.value as AiProviderProfile['protocol'] })}>
@@ -106,18 +157,9 @@ export const AiIntentSettingsPanel: React.FC<{
               <option value='anthropic-compatible'>Anthropic-compatible</option>
             </select>
           </label>
-          <label>
-            Base URL
-            <input value={activeProfile.baseUrl} onChange={e => updateProfile({ baseUrl: e.target.value })} />
-          </label>
-          <label>
-            Model
-            <input value={activeProfile.model} onChange={e => updateProfile({ model: e.target.value })} />
-          </label>
-          <label>
-            API Key
-            <input type='password' value={apiKey} placeholder={activeProfile.apiKeyPreview || '输入 API key'} onChange={e => onApiKeyChange(e.target.value)} />
-          </label>
+          <label>Base URL<input value={activeProfile.baseUrl} onChange={e => updateProfile({ baseUrl: e.target.value })} /></label>
+          <label>Model<input value={activeProfile.model} onChange={e => updateProfile({ model: e.target.value })} /></label>
+          <label>API Key<input type='password' value={apiKey} placeholder={activeProfile.apiKeyPreview || '输入 API key'} onChange={e => onApiKeyChange(e.target.value)} /></label>
           <label>
             Response mode
             <select value={activeProfile.responseMode} onChange={e => updateProfile({ responseMode: e.target.value as AiProviderProfile['responseMode'] })}>
@@ -134,18 +176,9 @@ export const AiIntentSettingsPanel: React.FC<{
               <option value='omit'>omit</option>
             </select>
           </label>
-          <label>
-            Temperature
-            <input type='number' step='0.1' value={activeProfile.temperature ?? 0.1} onChange={e => updateProfile({ temperature: Number(e.target.value) })} />
-          </label>
-          <label>
-            Max tokens
-            <input type='number' value={activeProfile.maxTokens ?? 400} onChange={e => updateProfile({ maxTokens: Number(e.target.value) })} />
-          </label>
-          <label>
-            Timeout ms
-            <input type='number' value={activeProfile.timeoutMs ?? 15000} onChange={e => updateProfile({ timeoutMs: Number(e.target.value) })} />
-          </label>
+          <label>Temperature<input type='number' step='0.1' value={activeProfile.temperature ?? 0.1} onChange={e => updateProfile({ temperature: Number(e.target.value) })} /></label>
+          <label>Max tokens<input type='number' value={activeProfile.maxTokens ?? 400} onChange={e => updateProfile({ maxTokens: Number(e.target.value) })} /></label>
+          <label>Timeout ms<input type='number' value={activeProfile.timeoutMs ?? 15000} onChange={e => updateProfile({ timeoutMs: Number(e.target.value) })} /></label>
         </div>
         <div className='section-heading'>价格 / 1M tokens</div>
         <div className='ai-settings-grid price-grid'>
@@ -170,8 +203,33 @@ export const AiIntentSettingsPanel: React.FC<{
         <button type='button' className='primary' onClick={onGenerate} disabled={generating}>{generating ? 'AI 生成中...' : 'Generate AI Intents'}</button>
         <button type='button' onClick={onOpenUsage}>Open Usage</button>
       </div>
-      <div className='ai-privacy-note'>AI Intent 会发送当前步骤的局部页面语义摘要，不会发送完整 DOM、cookie、token、password、authorization、完整接口响应或 API key。</div>
       {status && <div className='ai-status'>{status}</div>}
+    </details>
+
+    <details className='settings-section'>
+      <summary>
+        <span>隐私与导出</span>
+        <em>{crxSettings.redactSensitiveData !== false ? '脱敏开启' : '脱敏关闭'}</em>
+      </summary>
+      <div className='settings-grid'>
+        <label className='checkbox-row'>
+          <input type='checkbox' checked={crxSettings.redactSensitiveData !== false} onChange={e => updateCrxSettings({ redactSensitiveData: e.target.checked })} />
+          导出前脱敏
+        </label>
+        <label className='checkbox-row'>
+          <input type='checkbox' checked={!!crxSettings.sidepanel} onChange={e => updateCrxSettings({ sidepanel: e.target.checked })} />
+          默认打开 Side Panel
+        </label>
+        <label className='checkbox-row'>
+          <input type='checkbox' checked={!!crxSettings.playInIncognito} onChange={e => updateCrxSettings({ playInIncognito: e.target.checked })} />
+          Replay 使用无痕窗口
+        </label>
+        <label className='checkbox-row'>
+          <input type='checkbox' checked={!!crxSettings.experimental} onChange={e => updateCrxSettings({ experimental: e.target.checked })} />
+          允许实验功能
+        </label>
+      </div>
+      <div className='ai-privacy-note'>AI Intent 只发送步骤局部页面语义摘要，不发送完整 DOM、cookie、token、password、authorization、完整接口响应或 API key。导出检查页会单独展示 P0/P1 风险。</div>
     </details>
   </section>;
 };

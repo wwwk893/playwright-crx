@@ -16,7 +16,7 @@
 import React from 'react';
 import { AssertionEditor, type AssertionEditorSuggestion, type AssertionPickedTarget } from './AssertionEditor';
 import { AiIntentBadge } from './AiIntentBadge';
-import { actionLabel, summarizeStepSubject } from '../flow/display';
+import { actionLabel, assertionSubjectLabel, summarizeAssertion, summarizeStepSubject } from '../flow/display';
 import type { FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowStep } from '../flow/types';
 
 export const StepEditor: React.FC<{
@@ -40,6 +40,13 @@ export const StepEditor: React.FC<{
   const updateAssertions = React.useCallback((assertions: FlowAssertion[]) => {
     onUpdateStep(step.id, { assertions });
   }, [step.id, onUpdateStep]);
+
+  const removeAssertion = React.useCallback((assertionId: string) => {
+    updateAssertions(step.assertions.filter(assertion => assertion.id !== assertionId));
+  }, [step.assertions, updateAssertions]);
+
+  const enabledAssertions = step.assertions.filter(assertion => assertion.enabled);
+  const suggestedAssertions = step.assertions.filter(assertion => !assertion.enabled);
 
   const deleteStep = React.useCallback(() => {
     onDeleteStep(step.id);
@@ -85,7 +92,7 @@ export const StepEditor: React.FC<{
         备注
         <textarea rows={2} value={step.comment ?? ''} onChange={e => onUpdateStep(step.id, { comment: e.target.value })} />
       </label>
-      <AssertionEditor
+      {isEditingAssertion ? <AssertionEditor
         step={step}
         isEditing={isEditingAssertion}
         suggestion={suggestion}
@@ -96,7 +103,24 @@ export const StepEditor: React.FC<{
         onCancelAddAssertion={onCancelAddAssertion}
         onSaveAssertion={(type, patch) => onSaveAssertion(step.id, type, patch)}
         onChange={updateAssertions}
-      />
+      /> : <div className='assertion-editor assertion-summary-only'>
+        <div className='assertion-heading'>断言（{enabledAssertions.length}）</div>
+        <div className='assertion-chip-row'>
+          {enabledAssertions.map(assertion => <span className='assertion-chip enabled' key={assertion.id}>
+            <span className='chip-dot'>✓</span>
+            {summarizeAssertion(assertion)}
+            <button type='button' aria-label='删除断言' onClick={() => removeAssertion(assertion.id)}>×</button>
+          </span>)}
+          {suggestedAssertions.map(assertion => <span className='assertion-chip suggested' key={assertion.id}>
+            建议 {summarizeAssertion(assertion)}
+          </span>)}
+          {!enabledAssertions.length && !suggestedAssertions.length && suggestion && <span className='assertion-chip suggested'>
+            建议 {assertionSubjectLabel[suggestion.subject]}：{suggestion.label}
+          </span>}
+          <button className='add-assertion-button' type='button' onClick={() => onBeginAddAssertion(step.id)}>+ 添加断言</button>
+        </div>
+        {!step.assertions.length && <div className='business-flow-empty'>这一步还没有断言。</div>}
+      </div>}
     </article>
   </div>;
 };

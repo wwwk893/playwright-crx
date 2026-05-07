@@ -97,21 +97,17 @@ export const test = crxTest.extend<{
         attachRecorder: async ({ extensionServiceWorker, extensionId, context }, run) => {
           await run(async (page: Page, options: AttachRecorderOptions = {}) => {
             const mode = options.mode ?? 'legacy';
+            const extensionOrigin = `chrome-extension://${extensionId}`;
+            const expectedSurface = mode === 'legacy' ? '.recorder-editor' : '.business-flow-panel';
             await extensionServiceWorker.evaluate(async mode => {
               await chrome.storage.sync.set({ businessFlowEnabled: mode === 'business-flow' });
             }, mode);
 
-            let recorderPage = context.pages().find(p => p.url().startsWith(`chrome-extension://${extensionId}`));
-            const recorderPagePromise = recorderPage ? undefined : context.waitForEvent('page');
-            if (recorderPage) {
-              const expectedSurface = mode === 'legacy' ? '.recorder-editor' : '.business-flow-panel';
-              const hasExpectedSurface = await recorderPage.locator(expectedSurface).count().then(count => count > 0).catch(() => false);
-              if (!hasExpectedSurface)
-                await recorderPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-            }
-
-            await page.bringToFront();
+            let didAttachCurrentTab = false;
             const attachCurrentTab = async () => {
+              if (page.isClosed())
+                throw new Error('Cannot attach recorder because the target page was closed');
+              await page.bringToFront();
               await extensionServiceWorker.evaluate(async () => {
                 // ensure we're in test mode
                 _setUnderTest();
@@ -119,42 +115,47 @@ export const test = crxTest.extend<{
                 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
                 await attach(tab);
               });
+              didAttachCurrentTab = true;
             };
-            await attachCurrentTab();
 
-            recorderPage = recorderPage ?? (await recorderPagePromise)!;
-
-            await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
-            let recorderSurface = mode === 'legacy'
-              ? recorderPage.locator('.recorder-editor')
-              : recorderPage.locator('.business-flow-panel');
-            try {
-              await expect(recorderSurface).toBeAttached({ timeout: 15000 });
-            } catch {
-              await recorderPage.close().catch(() => {});
-              const freshRecorderPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => undefined);
-              await page.bringToFront();
-              await attachCurrentTab();
-              let freshRecorderPage = await freshRecorderPagePromise;
-              if (!freshRecorderPage)
-                freshRecorderPage = context.pages().find(p => !p.isClosed() && p.url().startsWith(`chrome-extension://${extensionId}`));
-              if (!freshRecorderPage) {
-                const retryRecorderPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => undefined);
-                await page.bringToFront();
-                await attachCurrentTab();
-                freshRecorderPage = await retryRecorderPagePromise;
+            const extensionPages = () => context.pages().filter(p => !p.isClosed() && p.url().startsWith(extensionOrigin));
+            const hasExpectedSurface = async (candidate: Page, timeout = 2500) => {
+              await candidate.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+              return await candidate.locator(expectedSurface).waitFor({ state: 'attached', timeout }).then(() => true).catch(() => false);
+            };
+            const usableExistingPage = async () => {
+              for (const candidate of extensionPages()) {
+                if (await hasExpectedSurface(candidate, 1000))
+                  return candidate;
               }
-              if (!freshRecorderPage)
-                freshRecorderPage = context.pages().find(p => !p.isClosed() && p.url().startsWith(`chrome-extension://${extensionId}`));
-              if (!freshRecorderPage)
-                throw new Error(`Recorder surface ${mode} did not recover after closing stale extension page`);
-              recorderPage = freshRecorderPage;
-              await recorderPage.waitForLoadState('domcontentloaded').catch(() => {});
-              recorderSurface = mode === 'legacy'
-                ? recorderPage.locator('.recorder-editor')
-                : recorderPage.locator('.business-flow-panel');
-              await expect(recorderSurface).toBeAttached({ timeout: 15000 });
+            };
+
+            let recorderPage = await usableExistingPage();
+            if (!recorderPage) {
+              for (const stalePage of extensionPages())
+                await stalePage.close().catch(() => {});
+
+              for (let attempt = 0; attempt < 3 && !recorderPage; attempt++) {
+                const openedPagePromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => undefined);
+                await attachCurrentTab();
+                const openedPage = await openedPagePromise;
+                const candidates = [...new Set([openedPage, ...extensionPages()].filter(Boolean) as Page[])];
+                for (const candidate of candidates) {
+                  if (await hasExpectedSurface(candidate, 5000)) {
+                    recorderPage = candidate;
+                    break;
+                  }
+                }
+                if (!recorderPage) {
+                  for (const candidate of candidates)
+                    await candidate.close().catch(() => {});
+                }
+              }
             }
+            if (!recorderPage)
+              throw new Error(`Recorder surface ${mode} did not attach after retrying stale extension pages`);
+            if (!didAttachCurrentTab)
+              await attachCurrentTab();
 
             const locator = page.locator('x-pw-glass').first();
             try {

@@ -20,30 +20,39 @@ export const FlowAiIntentControl: React.FC<{
   onOpenUsage: () => void;
 }> = ({ flow, settings, activeProfile, effectiveEnabled, generating, onOverrideChange, onGenerate, onOpenUsage }) => {
   const override = flow.artifacts?.aiIntent?.override ?? 'inherit';
-  return <section className='flow-ai-control'>
-    <div className='flow-ai-status-line'>
-      <label>
-        <span>AI Intent：</span>
-        <select value={override} onChange={e => onOverrideChange(e.target.value as FlowAiIntentOverride)}>
-          <option value='inherit'>继承全局设置</option>
-          <option value='enabled'>本流程启用</option>
-          <option value='disabled'>本流程关闭</option>
-        </select>
-      </label>
+  return <details className='flow-ai-control' open>
+    <summary className='flow-ai-summary'>
+      <div>
+        <span className='eyebrow'>AI Intent</span>
+        <strong>业务意图辅助</strong>
+      </div>
       <span className={effectiveEnabled ? 'flow-ai-enabled' : 'flow-ai-disabled'}>{effectiveEnabled ? '已启用' : '未启用'}</span>
-      <span>Provider：{activeProfile?.name || '--'}</span>
-      <span>模式：{modeLabel(settings.mode)}</span>
+      <span className='flow-ai-chevron'>⌄</span>
+    </summary>
+    <div className='flow-ai-body'>
+      <div className='flow-ai-status-line'>
+        <label>
+          <span>策略</span>
+          <select value={override} onChange={e => onOverrideChange(e.target.value as FlowAiIntentOverride)}>
+            <option value='inherit'>继承全局设置</option>
+            <option value='enabled'>本流程启用</option>
+            <option value='disabled'>本流程关闭</option>
+          </select>
+        </label>
+        <span>Provider：{activeProfile?.name || '--'}</span>
+        <span>模式：{modeLabel(settings.mode)}</span>
+      </div>
+      <div className='flow-ai-actions'>
+        {effectiveEnabled && <button type='button' className='primary' onClick={onGenerate} disabled={generating}>
+          {generating ? 'AI 生成中...' : '生成业务意图'}
+        </button>}
+        <button type='button' onClick={onOpenUsage}>查看用量</button>
+      </div>
+      <div className='flow-ai-hint'>
+        {effectiveEnabled ? '录制后自动生成，人工修改不会覆盖。' : override === 'disabled' ? '本流程已关闭 AI Intent。' : '全局 AI Intent 已启用，但当前流程或配置尚不可生成。'}
+      </div>
     </div>
-    <div className='flow-ai-actions'>
-      <button type='button' className='primary' onClick={onGenerate} disabled={!effectiveEnabled || generating}>
-        {generating ? 'AI 生成中...' : 'Generate AI Intents'}
-      </button>
-      <button type='button' onClick={onOpenUsage}>查看用量</button>
-    </div>
-    <div className='flow-ai-hint'>
-      {effectiveEnabled ? '录制后自动生成，人工修改不会覆盖。' : override === 'disabled' ? '本流程已关闭 AI Intent。' : '全局 AI Intent 未启用或缺少可用配置。'}
-    </div>
-  </section>;
+  </details>;
 };
 
 function modeLabel(mode: AiIntentSettings['mode']) {

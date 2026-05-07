@@ -17,6 +17,7 @@ import React from 'react';
 import { actionLabel, flowStats, summarizeStepSubject } from '../flow/display';
 import { createRepeatSegment, repeatSegmentStats } from '../flow/repeatSegments';
 import type { BusinessFlow, FlowRepeatSegment } from '../flow/types';
+import { ExportReviewPanel } from './ExportReviewPanel';
 import { RepeatSegmentEditor } from './RepeatSegmentEditor';
 import { ScrollJumpDock } from './ScrollJumpDock';
 
@@ -34,9 +35,11 @@ export const FlowReviewPanel: React.FC<{
   onClearSteps: () => void;
   onExportJson: () => void;
   onExportYaml: () => void;
+  onOpenReplayCode: () => void;
+  playwrightCode?: string;
   onSaveRepeatSegment: (segment: FlowRepeatSegment) => void;
   onDeleteRepeatSegment: (segmentId: string) => void;
-}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
+}> = ({ flow, redactionEnabled, onAddAssertion, onDeleteStep, onDeleteSteps, onContinueRecording, onContinueRecordingFrom, onInsertEmptyStep, onInsertWaitStep, onSaveRecord, onClearSteps, onExportJson, onExportYaml, onOpenReplayCode, playwrightCode, onSaveRepeatSegment, onDeleteRepeatSegment }) => {
   const stats = flowStats(flow);
   const repeatStats = repeatSegmentStats(flow);
   const [activeInsertStepId, setActiveInsertStepId] = React.useState<string>();
@@ -125,6 +128,14 @@ export const FlowReviewPanel: React.FC<{
 
   return <div className='review-panel'>
     <ScrollJumpDock />
+    <ExportReviewPanel
+      flow={flow}
+      redactionEnabled={redactionEnabled}
+      playwrightCode={playwrightCode}
+      onExportJson={onExportJson}
+      onExportYaml={onExportYaml}
+      onOpenReplayCode={onOpenReplayCode}
+    />
     <div className='review-toolbar'>
       <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
       <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
@@ -205,14 +216,6 @@ export const FlowReviewPanel: React.FC<{
           </div>}
         </React.Fragment>;
       })}
-    </div>
-    <div className='review-export'>
-      <div className='section-heading'>导出</div>
-      <div className='review-export-actions'>
-        <button type='button' onClick={onExportJson}>导出流程 JSON</button>
-        <button type='button' onClick={onExportYaml}>导出紧凑 YAML</button>
-      </div>
-      <div className='review-ready'>{stats.missingAssertionCount ? '已准备导出。建议先补齐缺少断言的步骤。' : '已准备导出。所有步骤已捕获，建议复查后导出。'}</div>
     </div>
   </div>;
 };

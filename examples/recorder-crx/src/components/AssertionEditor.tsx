@@ -64,7 +64,8 @@ export const AssertionEditor: React.FC<{
   onCancelAddAssertion: () => void;
   onSaveAssertion: (type: FlowAssertionType, patch: Partial<FlowAssertion>) => void;
   onChange: (assertions: FlowAssertion[]) => void;
-}> = ({ step, isEditing, suggestion, pickedTarget, isPickingTarget, onPickTarget, onBeginAddAssertion, onCancelAddAssertion, onSaveAssertion, onChange }) => {
+  saveButtonLabel?: string;
+}> = ({ step, isEditing, suggestion, pickedTarget, isPickingTarget, onPickTarget, onBeginAddAssertion, onCancelAddAssertion, onSaveAssertion, onChange, saveButtonLabel }) => {
   const tableInputRef = React.useRef<HTMLInputElement>(null);
   const [subject, setSubject] = React.useState<FlowAssertionSubject>('element');
   const [type, setType] = React.useState<FlowAssertionType>('visible');
@@ -351,7 +352,7 @@ export const AssertionEditor: React.FC<{
         启用
       </label>
       <div className='assertion-drawer-actions'>
-        <button type='button' className='primary' onClick={save}>保存断言</button>
+        <button type='button' className='primary assertion-save-button' onClick={save}>{saveButtonLabel ?? '保存断言'}</button>
         <button type='button' onClick={onCancelAddAssertion}>取消</button>
       </div>
     </div>}

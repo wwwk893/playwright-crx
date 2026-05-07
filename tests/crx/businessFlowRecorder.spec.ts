@@ -23,6 +23,33 @@ import { test, expect } from './crxRecorderTest';
 
 test.describe.configure({ mode: 'serial' });
 
+test('shows grouped settings accordion from the flow library', async ({ page, attachRecorder, baseURL }) => {
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
+
+  await expect(recorderPage.locator('.flow-library')).toContainText('业务流程记录');
+  await recorderPage.locator('.global-ai-card').getByRole('button', { name: '设置' }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('设置');
+  await expect(recorderPage.locator('.settings-accordion-panel')).toContainText('录制偏好与导出安全');
+
+  const highFrequency = recorderPage.locator('.settings-section').filter({ hasText: '高频录制偏好' });
+  const aiDetails = recorderPage.locator('.settings-section').filter({ hasText: 'AI Intent 细节' });
+  const privacyExport = recorderPage.locator('.settings-section').filter({ hasText: '隐私与导出' });
+  await expect(highFrequency).toHaveJSProperty('open', true);
+  await expect(aiDetails).toHaveJSProperty('open', false);
+  await expect(privacyExport).toHaveJSProperty('open', false);
+
+  await privacyExport.locator('summary').click();
+  await expect(privacyExport).toHaveJSProperty('open', true);
+  await expect(privacyExport).toContainText('导出前脱敏');
+  await expect(privacyExport).toContainText('导出检查页会单独展示 P0/P1 风险');
+
+  await aiDetails.locator('summary').click();
+  await expect(aiDetails).toHaveJSProperty('open', true);
+  await expect(aiDetails).toContainText('API Key');
+  await expect(aiDetails.locator('input[type="password"]')).toBeVisible();
+});
+
 test('records a real AntD user business flow through the plugin UI, exports it, and replays generated Playwright code @smoke', async ({ context, page, attachRecorder, baseURL }) => {
   test.setTimeout(120_000);
 
@@ -36,9 +63,10 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await fillFlowMeta(recorderPage, '模块', '用户管理');
   await fillFlowMeta(recorderPage, '页面', '用户列表');
   await fillFlowMeta(recorderPage, '角色', '运营');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+  await expect(recorderPage.locator('.recording-context-card')).toContainText('不是全局录制');
 
   await page.goto(`${baseURL}/antd-users-real.html`);
   await expect(page.getByTestId('create-user-btn')).toBeVisible();
@@ -58,12 +86,25 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await page.waitForTimeout(250);
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(5);
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('create-user-btn');
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('alice');
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('Alice 管理员 编辑');
+  const recordedSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
+  await expect.poll(recordedSubjects).toContain('create-user-btn');
+  await expect.poll(recordedSubjects).toContain('alice');
+  await expect.poll(recordedSubjects).toContain('管理员');
+  await expect.poll(recordedSubjects, { timeout: 20_000 }).toMatch(/Alice|user-42|编辑/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
+  await recorderPage.getByRole('button', { name: /添加断言/ }).first().click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('断言 ·');
+  await expect(recorderPage.locator('.assertion-step-context-card')).toContainText('Step Context：');
+  await expect(recorderPage.locator('.assertion-workbench')).toContainText(/保存到 step-\d{3}/);
+  await recorderPage.getByRole('button', { name: '← 返回流程', exact: true }).click();
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('导出前复核：AntD 用户流程 E2E');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('Replay CTA');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('P1');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText('脱敏开启');
+  await expect(recorderPage.locator('.export-code-preview')).toContainText('代码预览');
 
   const exportedJson = await downloadTextAfterClick(
       recorderPage,
@@ -104,7 +145,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await fillFlowMeta(recorderPage, '模块', '条目管理');
   await fillFlowMeta(recorderPage, '页面', '真实组件页');
   await fillFlowMeta(recorderPage, '角色', '运营');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
@@ -128,7 +169,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('下方表单使用条目');
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   const exportedJson = await downloadTextAfterClick(
       recorderPage,
@@ -167,7 +208,7 @@ test('records real ProFormField network configuration fields and replays generat
   await fillFlowMeta(recorderPage, '模块', '网络配置');
   await fillFlowMeta(recorderPage, '页面', '资源配置');
   await fillFlowMeta(recorderPage, '角色', '网络管理员');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
@@ -224,7 +265,7 @@ test('records real ProFormField network configuration fields and replays generat
   await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|network-resource-wan-select/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   const flow = await exportBusinessFlowJson(recorderPage);
   writeGeneratedReplayDiagnostic(test.info(), 'proform-fields', flow);
@@ -291,7 +332,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await fillFlowMeta(recorderPage, '模块', '站点配置');
   await fillFlowMeta(recorderPage, '页面', '全局配置');
   await fillFlowMeta(recorderPage, '角色', 'admin');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
@@ -337,7 +378,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|xtest16:WAN1/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   let flow = await exportBusinessFlowJson(recorderPage);
   expect(flow.flow.name).toBe('地址池');
@@ -405,7 +446,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await fillFlowMeta(recorderPage, '模块', '稳定性编辑');
   await fillFlowMeta(recorderPage, '页面', '循环与插入');
   await fillFlowMeta(recorderPage, '角色', '测试');
-  await recorderPage.getByRole('button', { name: '创建并开始录制' }).click();
+  await recorderPage.getByRole('button', { name: '保存并开始录制' }).click();
 
   await page.goto(`${baseURL}/antd-business-flow-stability.html`);
   await expect(page.getByText('业务流程稳定性测试页')).toBeVisible();
@@ -418,7 +459,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   let flow = await exportBusinessFlowJson(recorderPage);
   const addStepId = flow.steps.find((step: any) => step.target?.testId === 'site-ip-add')?.id || requiredStepId(flow, (step: any) => step.action === 'navigate', 'initial anchor step');
@@ -432,7 +473,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await page.getByTestId('site-ip-validate').click();
   await expect(page.getByTestId('event-log')).toContainText('validate');
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 
   flow = await exportBusinessFlowJson(recorderPage);
   const validateStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-validate', 'inserted validate step');
@@ -472,7 +513,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await expect(page.getByTestId('event-log')).toContainText('post-save');
   await page.waitForTimeout(1200);
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
   await recorderPage.getByRole('button', { name: '保存记录' }).click();
 
   await openSavedRecord(recorderPage, flowName);
@@ -502,22 +543,33 @@ async function beginNewFlowFromLibrary(recorderPage: Page) {
   }
   await expect(newFlowButton).toBeVisible({ timeout: 10_000 });
   await newFlowButton.click();
-  await expect(recorderPage.locator('.flow-meta-panel')).toBeVisible({ timeout: 10_000 });
+  await expect(recorderPage.locator('.flow-form-sheet')).toBeVisible({ timeout: 10_000 });
+  await expect(recorderPage.locator('.flow-form-sheet')).toContainText('新建流程');
 }
 
 async function fillFlowMeta(recorderPage: Page, label: string, value: string) {
-  await recorderPage.locator('.flow-meta-panel label').filter({ hasText: label }).locator('input, textarea').first().fill(value);
+  const sheetLabel = label === '应用' ? '应用 / 模块 · 应用' :
+    label === '模块' ? '应用 / 模块 · 模块' :
+    label === '页面' ? '起始 URL / 页面 · 页面' :
+    label;
+  await recorderPage.locator('.flow-form-sheet label').filter({ hasText: sheetLabel }).locator('input, textarea, select').first().fill(value);
 }
 
 async function clickVisibleAntDOption(page: Page, text: string) {
-  const options = page
-      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-      .last()
-      .locator('.ant-select-item-option')
-      .filter({ hasText: text });
+  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  const exactText = new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`);
+  const options = dropdown.locator('.ant-select-item-option').filter({ hasText: exactText });
   const option = options.first();
   await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.click({ timeout: 5_000 }).catch(async () => {
+  await option.scrollIntoViewIfNeeded();
+  await option.click({ timeout: 5_000, force: true }).catch(async () => {
+    const box = await option.boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.up();
+      return;
+    }
     await options.evaluateAll((elements, expectedText) => {
       const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
       const expected = normalize(expectedText);
@@ -535,11 +587,18 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
 }
 
+function escapeRegExp(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 
 async function clickVisibleAntDTreeNode(page: Page, text: string) {
-  const nodes = page
-      .locator('.ant-select-tree-node-content-wrapper')
-      .filter({ hasText: text });
+  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  await expect(dropdown).toBeVisible({ timeout: 10_000 });
+  const exactText = new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`);
+  const nodes = dropdown
+      .locator('.ant-select-tree-node-content-wrapper, .ant-select-tree-title')
+      .filter({ hasText: exactText });
   const node = nodes.first();
   await expect(node).toBeVisible({ timeout: 10_000 });
   await node.click({ timeout: 5_000 }).catch(async () => {
@@ -613,7 +672,7 @@ async function openSavedRecord(recorderPage: Page, flowName: string) {
   const card = recorderPage.locator('.library-card').filter({ hasText: flowName }).first();
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.getByRole('button', { name: '打开' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
 }
 
 async function downloadTextAfterClick(recorderPage: Page, trigger: ReturnType<Page['locator']>) {
