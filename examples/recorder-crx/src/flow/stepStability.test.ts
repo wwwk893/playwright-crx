@@ -4863,6 +4863,31 @@ test('demo', async ({ page }) => {
         ...flow,
         steps: flow.steps.map(step => ({
           ...step,
+          target: {
+            ...step.target,
+            raw: {
+              target: { tag: 'button', text: '保存' },
+              ui: {
+                ...semanticUi({
+                  library: 'pro-components',
+                  component: 'pro-table',
+                  recipe: 'table-row-action',
+                  tableTitle: '用户管理',
+                  rowKey: 'user-42',
+                  columnTitle: '操作',
+                  targetText: '保存',
+                }),
+                table: {
+                  title: '用户管理',
+                  rowKey: 'user-42',
+                  rowText: 'user-42 李四 owner@example.com 编辑 删除',
+                  columnTitle: '操作',
+                },
+                overlay: { type: 'popover', title: '确认保存', text: 'target raw 内部诊断长文案', visible: true },
+                option: { text: '管理员', value: 'target-raw-internal-role-admin' },
+              },
+            },
+          },
           context: {
             eventId: 'ctx-export-ui',
             capturedAt: Date.now(),
@@ -4915,6 +4940,13 @@ test('demo', async ({ page }) => {
       assert(!exportedUiJson.includes('内部诊断长文案'), 'exported flow should strip overlay text internals');
       assert(!exportedUiJson.includes('admin@example.com'), 'exported flow should strip table row text internals');
       assert(!exportedUiJson.includes('internal-role-admin'), 'exported flow should strip option internal values');
+      const exportedTargetRawJson = JSON.stringify(exportFlow.steps[0].target?.raw);
+      assert(exportedTargetRawJson.includes('用户管理'), 'export target raw should keep compact useful UI context');
+      assert(!exportedTargetRawJson.includes('locatorHints'), 'exported target raw should strip UI locator hints');
+      assert(!exportedTargetRawJson.includes('test fixture'), 'exported target raw should strip UI diagnostic reasons');
+      assert(!exportedTargetRawJson.includes('target raw 内部诊断长文案'), 'exported target raw should strip overlay text internals');
+      assert(!exportedTargetRawJson.includes('owner@example.com'), 'exported target raw should strip table row text internals');
+      assert(!exportedTargetRawJson.includes('target-raw-internal-role-admin'), 'exported target raw should strip option internal values');
 
       const yaml = toCompactFlow(exportFlow);
       assert(!yaml.includes('actionLog'), 'compact yaml should not include actionLog');

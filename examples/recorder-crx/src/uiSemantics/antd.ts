@@ -19,7 +19,7 @@ export function collectAntdSemanticContext(target: Element, document: Document):
   const targetText = safeText(anchor.getAttribute('aria-label')) || option?.text || elementText(anchor) || safeText(anchor.getAttribute('title'));
   const targetTestId = testIdOf(anchor);
   const targetRole = roleFor(anchor, component);
-  const library: UiLibrary = component === 'unknown' && !componentPath.length ? 'unknown' : 'antd';
+  const library: UiLibrary = component === 'unknown' ? 'unknown' : 'antd';
   const reasons = collectReasons({ component, componentPath, overlay, form, table, option, targetTestId, targetText });
   const locatorHints = buildLocatorHints(anchor, { component, targetText, targetTestId, targetRole, form, table, overlay });
   const weak = component === 'unknown' || component === 'popover' || component === 'tooltip';

@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import type { StepContextSnapshot } from './pageContextTypes';
-import type { BusinessFlow } from './types';
+import type { BusinessFlow, FlowTarget } from './types';
 import type { UiSemanticContext } from '../uiSemantics/types';
 
 export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string): BusinessFlow {
@@ -20,6 +20,7 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
     ...flow,
     steps: flow.steps.map(step => ({
       ...step,
+      target: sanitizeFlowTarget(step.target),
       context: sanitizeStepContext(step.context),
     })),
     artifacts: {
@@ -27,6 +28,27 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
       playwrightCode: code,
     },
     updatedAt: new Date().toISOString(),
+  };
+}
+
+function sanitizeFlowTarget(target?: FlowTarget): FlowTarget | undefined {
+  if (!target)
+    return undefined;
+  return {
+    ...target,
+    raw: sanitizeRawTarget(target.raw),
+  };
+}
+
+function sanitizeRawTarget(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return raw;
+  if (!('ui' in raw))
+    return raw;
+  const rawRecord = raw as Record<string, unknown>;
+  return {
+    ...rawRecord,
+    ui: sanitizeUiSemanticContext(rawRecord.ui as UiSemanticContext | undefined),
   };
 }
 

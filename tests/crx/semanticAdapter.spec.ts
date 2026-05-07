@@ -111,6 +111,15 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
       expect(ui?.confidence, `${testCase.name} should include confidence`).toBeGreaterThan(0);
     }
   });
+
+  test('marks unmatched DOM targets as unknown library', async ({ page }) => {
+    await installSidecarFixture(page);
+    const event = await captureAfterSequence(page, ['#plain-status']);
+    const ui = event.before?.ui;
+    expect(ui?.component).toBe('unknown');
+    expect(ui?.library).toBe('unknown');
+    expect(ui?.weak).toBe(true);
+  });
 });
 
 async function installSidecarFixture(page: Page) {
@@ -203,6 +212,7 @@ body { font-family: sans-serif; }
 .ant-table-row, tr { height:32px; }
 </style></head><body>
 <section class="ant-pro-page-container" data-testid="tenant-page"><h1>租户中心</h1><button id="page-action">刷新页面</button></section>
+<span id="plain-status">普通状态文本</span>
 <form class="ant-form" name="basicForm"><div class="ant-form-item ant-form-item-required"><div class="ant-form-item-label"><label for="username-input">用户名</label></div><div class="ant-form-item-control"><input id="username-input" name="username" placeholder="请输入用户名" /></div></div><button id="form-submit" class="ant-btn ant-btn-primary">提交</button><button id="form-reset" class="ant-btn">重置</button></form>
 <div class="ant-form-item"><div class="ant-form-item-label"><label>角色</label></div><div id="role-select" class="ant-select"><div class="ant-select-selector" role="combobox" aria-label="角色"><span>请选择角色</span></div></div></div>
 <div class="ant-select-dropdown"><div id="role-admin" class="ant-select-item-option" role="option" title="管理员"><div>管理员</div></div></div>
