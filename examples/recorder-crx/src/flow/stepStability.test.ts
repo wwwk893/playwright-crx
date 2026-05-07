@@ -1523,7 +1523,7 @@ test('demo', async ({ page }) => {
       };
       const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(scoped), 's001');
 
-      assert(firstStep.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible")'), 'popconfirm should start from visible AntD popover scope');
+      assert(firstStep.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)")'), 'popconfirm should start from visible AntD popover scope');
       assert(firstStep.includes('filter({ hasText: "删除此行？" })'), 'popconfirm should filter by its title');
       assert(firstStep.includes('getByRole("button", { name: "确定" })') || firstStep.includes('getByRole("button", { name: "确 定" })'), 'popconfirm should click the confirm button');
       assert(!firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]")'), 'popconfirm should not be scoped to modal/drawer');
@@ -1592,11 +1592,11 @@ test('demo', async ({ page }) => {
 
       assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'delete action should click the row delete control inside the dialog instead of using a page-level nth');
       assert(!code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();'), 'dialog-owned delete action should not keep a page-level duplicate ordinal');
-      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'delete action should confirm the visible AntD popconfirm with the captured confirm label');
-      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});'), 'delete action should wait for the AntD popconfirm to close before the next step');
+      assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'delete action should confirm the visible AntD popconfirm with the captured confirm label');
+      assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});'), 'delete action should wait for the AntD popconfirm to close before the next step');
       assertEqual((code.match(/page\.getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
       assert(playbackCode.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'runtime playback should keep the dialog-scoped delete click');
-      assert(playbackCode.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'runtime playback should still confirm the visible AntD popconfirm');
+      assert(playbackCode.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'runtime playback should still confirm the visible AntD popconfirm');
       assert(!playbackCode.includes('.catch('), 'runtime playback should not include unsupported catch continuations');
     },
   },
@@ -1622,7 +1622,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
 
       assert(code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();') || code.includes('page.getByTestId("wan-transport-row-delete-action").click();'), 'delete action should still replay the recorded delete click');
-      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'captured AntD popconfirm title should synthesize the zh-CN ok click even if the recorder missed the button label');
+      assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'captured AntD popconfirm title should synthesize the zh-CN ok click even if the recorder missed the button label');
     },
   },
   {
@@ -1670,7 +1670,7 @@ test('demo', async ({ page }) => {
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
 
-      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'AntD row delete should use the captured opened popover to confirm');
+      assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'AntD row delete should use the captured opened popover to confirm');
     },
   },
   {
@@ -2229,6 +2229,106 @@ test('demo', async ({ page }) => {
       assertEqual(rerecorded.steps.map(step => step.id), ['s001', 's004', 's003']);
       assertEqual(rerecorded.steps.map(step => step.value), [undefined, 'good-value', undefined]);
       assert(!rerecorded.steps.some(step => step.value === 'bad-value'), 'deleted wrong action should not revive when rerecording in the middle');
+    },
+  },
+  {
+    name: 'select trigger with active dropdown context is not replayed as a dropdown option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            label: '关联VRF',
+            text: '选择一个VRF',
+            name: '选择一个VRF',
+            displayName: '选择一个VRF',
+          },
+          context: {
+            eventId: 'ctx-vrf-trigger',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', visible: true },
+              form: { label: '关联VRF', name: 'vrf' },
+              target: {
+                tag: 'div',
+                text: '选择一个VRF',
+                normalizedText: '选择一个VRF',
+                framework: 'procomponents',
+                controlType: 'select',
+              },
+            },
+          },
+          rawAction: {
+            syntheticContextEventId: 'ctx-vrf-trigger',
+            syntheticContextEventSignature: '选择一个VRF|div',
+          },
+          assertions: [],
+        }],
+      };
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(!code.includes('.ant-select-item-option'), 'select trigger placeholder must not be treated as an option');
+      assert(!code.includes('AntD Select virtual dropdown replay workaround'), 'select trigger should not use option replay workaround');
+      assert(code.includes('.locator(".ant-select-selector").first().click();') || code.includes("getByRole('combobox'"), 'select trigger should replay as opening the field');
+    },
+  },
+  {
+    name: 'tree option without captured trigger reopens its field from toast context',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: '华东生产区',
+            name: '华东生产区',
+            displayName: '华东生产区',
+            raw: {
+              framework: 'antd',
+              controlType: 'tree-select-option',
+              optionPath: ['华东生产区'],
+            },
+          },
+          context: {
+            eventId: 'ctx-scope-option',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', title: '全国站点', visible: true },
+              target: {
+                tag: 'div',
+                text: '华东生产区',
+                normalizedText: '华东生产区',
+                framework: 'antd',
+                controlType: 'tree-select-option',
+                optionPath: ['华东生产区'],
+              },
+            },
+            after: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              toast: '选择发布范围',
+            },
+          },
+          rawAction: {
+            syntheticContextEventId: 'ctx-scope-option',
+            syntheticContextEventSignature: '华东生产区|div',
+          },
+          assertions: [],
+        }],
+      };
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(code.includes('filter({ hasText: "发布范围" })'), 'tree option should infer the field from toast context');
+      assert(code.includes('.locator(".ant-select-selector, .ant-cascader-picker, .ant-cascader").first().click();'), 'tree option should reopen the scoped AntD field before clicking');
+      assert(code.includes('.ant-select-tree-node-content-wrapper'), 'tree option should still click the active tree dropdown option');
     },
   },
   {

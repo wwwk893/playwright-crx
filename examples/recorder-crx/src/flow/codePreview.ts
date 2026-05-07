@@ -875,13 +875,13 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;
       const treeOption = antdTreeSelectOptionLocator(step);
       if (treeOption)
-        return options.parserSafe ? `await ${parserSafeLocator(treeOption)}.click();` : antdPopupOptionDispatchSource(treeOption, popupOptionName(step));
+        return options.parserSafe ? `await ${parserSafeLocator(treeOption)}.click();` : antdPopupOptionClickSource(step, treeOption);
       const cascaderOption = antdCascaderOptionLocator(step);
       if (cascaderOption)
-        return options.parserSafe ? `await ${parserSafeLocator(cascaderOption)}.click();\nawait page.waitForTimeout(120);` : antdPopupOptionDispatchSource(cascaderOption, popupOptionName(step), { stabilizeAfterClickMs: 120 });
+        return options.parserSafe ? `await ${parserSafeLocator(cascaderOption)}.click();\nawait page.waitForTimeout(120);` : antdPopupOptionClickSource(step, cascaderOption, { stabilizeAfterClickMs: 120 });
       const activePopupOption = activeDropdownOptionLocator(step);
       if (activePopupOption)
-        return options.parserSafe ? `await ${parserSafeLocator(activePopupOption)}.click();` : antdPopupOptionDispatchSource(activePopupOption, popupOptionName(step));
+        return options.parserSafe ? `await ${parserSafeLocator(activePopupOption)}.click();` : antdPopupOptionClickSource(step, activePopupOption);
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -961,33 +961,6 @@ function isDeleteOrRemoveTestId(testId: string) {
   return /(^|[-_])(delete|remove)([-_]|$)/i.test(testId);
 }
 
-function inferredPopconfirmTitle(step: FlowStep) {
-  const label = popconfirmConfirmButtonName(step);
-  return /^(确定|确认|确 定)$/.test(label || '') ? '删除此行？' : undefined;
-}
-
-function popconfirmConfirmButtonName(step: FlowStep) {
-  const testId = normalizeGeneratedText(step.target?.testId || step.context?.before.target?.testId);
-  const candidates = [
-    step.target?.name,
-    step.target?.text,
-    step.target?.displayName,
-    step.target?.label,
-    step.context?.before.target?.text,
-    step.context?.before.target?.normalizedText,
-    step.context?.before.target?.ariaLabel,
-    step.context?.before.target?.title,
-  ];
-  for (const candidate of candidates) {
-    const label = normalizeGeneratedText(candidate);
-    if (!label || label === testId || (testId && label.includes(testId)))
-      continue;
-    if (isLikelyPopconfirmConfirmButton(label))
-      return label;
-  }
-  return undefined;
-}
-
 function isExplicitPopoverConfirmStep(step: FlowStep | undefined, title: string) {
   if (!step || step.action !== 'click')
     return false;
@@ -1002,12 +975,6 @@ function isExplicitPopoverConfirmStep(step: FlowStep | undefined, title: string)
 
 function isLikelyPopconfirmConfirmButton(label: string) {
   return /^(确定|确认|是|好的|删除|移除|保存|提交|继续|ok|yes|delete|remove|save|submit|continue)$/i.test(label);
-}
-
-function buttonNameExpression(label: string) {
-  if (label === '确定')
-    return '/^(确定|确 定)$/';
-  return stringLiteral(label);
 }
 
 function isDuplicateSyntheticEchoClick(step: FlowStep, previous?: FlowStep) {
@@ -1085,6 +1052,9 @@ function isAntdSelectOptionStep(step: FlowStep) {
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   const framework = contextTarget?.framework;
   const controlType = contextTarget?.controlType;
+  const role = step.target?.role || contextTarget?.role || '';
+  if (/^(select|tree-select|cascader)$/.test(controlType || '') && role !== 'option')
+    return false;
   const hasAntdSelector = /\.ant-select-item-option|\.ant-select-dropdown/.test(selector);
   const hasRawTitle = !!rawSelectOptionTitle(step);
   const fieldLabel = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label;
@@ -1150,6 +1120,9 @@ function activeDropdownOptionLocator(step: FlowStep) {
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   const dropdown = step.context?.before.dialog || step.target?.scope?.dialog;
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  if (/^(select|tree-select|cascader)$/.test(controlType) && role !== 'option')
+    return undefined;
   const framework = step.context?.before.target?.framework || String((step.target?.raw as { framework?: unknown } | undefined)?.framework || '');
   const looksLikeActivePopupOption = dropdown?.type === 'dropdown' || (/option/.test(controlType) && /^(antd|procomponents)$/.test(framework)) || /ant-select|ant-cascader/.test(selector);
   if (!looksLikeActivePopupOption)
@@ -1379,6 +1352,42 @@ function selectTriggerDialog(step: FlowStep) {
   if ((after?.title || after?.testId) && after.type !== 'dropdown')
     return after;
   return undefined;
+}
+
+function antdPopupOptionClickSource(step: FlowStep, locator: string, options: { stabilizeAfterClickMs?: number } = {}) {
+  const optionName = popupOptionName(step);
+  const triggerLocator = popupOptionTriggerLocator(step);
+  const opener = triggerLocator ? [
+    `if (!await ${locator}.first().isVisible().catch(() => false))`,
+    `  await ${triggerLocator}.click();`,
+  ].join('\n') : undefined;
+  return [
+    opener,
+    antdPopupOptionDispatchSource(locator, optionName, options),
+  ].filter(Boolean).join('\n');
+}
+
+function popupOptionTriggerLocator(step: FlowStep) {
+  return antdSelectFieldLocator(step) || popupOptionTriggerLocatorFromHint(step);
+}
+
+function popupOptionTriggerLocatorFromHint(step: FlowStep) {
+  const hint = popupTriggerHint(step);
+  if (!hint)
+    return undefined;
+  const root = dialogRootLocator(selectTriggerDialog(step));
+  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(hint)} }).locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-cascader')}).first()`;
+}
+
+function popupTriggerHint(step: FlowStep) {
+  const direct = generatedTextCandidate(step.context?.before.form?.label, step.target?.scope?.form?.label, step.target?.label);
+  if (direct)
+    return direct;
+  const toast = generatedTextCandidate(step.context?.after?.toast);
+  if (!toast)
+    return undefined;
+  const stripped = toast.replace(/^请?选择(?:一个)?/, '').trim();
+  return stripped || toast;
 }
 
 function antdPopupOptionDispatchSource(locator: string, optionName?: string, options: { stabilizeAfterClickMs?: number } = {}) {
@@ -1639,7 +1648,7 @@ function dialogScopedLocator(step: FlowStep) {
 
 function dialogRootSelector(dialog?: FlowDialogScope) {
   if (dialog?.type === 'popover')
-    return '.ant-popover:visible, [role="tooltip"]:visible';
+    return '.ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)';
   if (dialog?.type === 'dropdown')
     return '.ant-dropdown, .ant-select-dropdown, .ant-cascader-dropdown, [role="listbox"], [role="menu"]';
   if (dialog?.type === 'drawer')

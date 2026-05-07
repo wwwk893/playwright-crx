@@ -17,7 +17,7 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { BrowserContext, Page } from 'playwright-core';
+import type { BrowserContext, Locator, Page } from 'playwright-core';
 import type { TestInfo } from '@playwright/test';
 import { test, expect } from './crxRecorderTest';
 import {
@@ -36,6 +36,38 @@ import {
 } from './humanLike';
 
 test.describe.configure({ mode: 'serial' });
+
+function deletePopconfirm(page: Page) {
+  return page.locator('.ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)').filter({ hasText: '删除此行？' }).last();
+}
+
+function popconfirmConfirmButton(popconfirm: Locator) {
+  return popconfirm.getByRole('button', { name: /^(确定|确 定)$/ }).last();
+}
+
+async function isActionablePopconfirm(popconfirm: Locator) {
+  if (!await popconfirm.count().catch(() => 0))
+    return false;
+  return await popconfirm.evaluate(element => {
+    const root = element as HTMLElement;
+    const button = root.querySelector('.ant-popconfirm-buttons .ant-btn-primary') as HTMLElement | null;
+    if (!button)
+      return false;
+    const rootStyle = getComputedStyle(root);
+    const buttonStyle = getComputedStyle(button);
+    const rect = button.getBoundingClientRect();
+    return !root.classList.contains('ant-zoom-big-leave') &&
+      !root.classList.contains('ant-zoom-big-leave-active') &&
+      rootStyle.display !== 'none' &&
+      rootStyle.visibility !== 'hidden' &&
+      rootStyle.pointerEvents !== 'none' &&
+      buttonStyle.display !== 'none' &&
+      buttonStyle.visibility !== 'hidden' &&
+      buttonStyle.pointerEvents !== 'none' &&
+      rect.width > 0 &&
+      rect.height > 0;
+  }).catch(() => false);
+}
 
 test('human-like recorder warns before leaving an unsaved recording @human-smoke', async ({ page, attachRecorder, baseURL }) => {
   test.setTimeout(60_000);
@@ -132,24 +164,27 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   await expectWanConfigPage(page);
   await expect(page.getByTestId('site-save-button')).toHaveCount(2);
 
+  const wan2Row = page.getByTestId('wan-config-table').locator('[data-row-key="2"]').first();
+  await expect(wan2Row).toContainText('WAN2');
+
   const wanDialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '编辑WAN2' });
   await humanClickUntil(
-      page.getByTestId('wan-edit-2'),
+      wan2Row.getByTestId('wan-edit-2'),
       async () => await wanDialog.isVisible().catch(() => false),
       { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
   );
   await expect(wanDialog).toBeVisible({ timeout: 10_000 });
   await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('Nova专线');
 
-  const popconfirm = page.locator('.ant-popover:visible, [role="tooltip"]:visible').filter({ hasText: '删除此行？' }).last();
+  const popconfirm = deletePopconfirm(page);
   await humanClickUntil(
       wanDialog.getByTestId('wan-transport-row-delete-action'),
-      async () => await popconfirm.isVisible().catch(() => false),
+      async () => await isActionablePopconfirm(popconfirm),
       { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
   );
-  await expect(popconfirm).toBeVisible({ timeout: 10_000 });
+  await expect.poll(() => isActionablePopconfirm(popconfirm), { timeout: 10_000 }).toBeTruthy();
   await humanClickUntil(
-      popconfirm.getByRole('button', { name: '确 定' }),
+      popconfirmConfirmButton(popconfirm),
       async () => await wanDialog.getByText('暂无数据').isVisible().catch(() => false),
       { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
   );
@@ -246,15 +281,15 @@ test('human-like records shared WAN duplicate row edit action and replays stably
   await expect(wanDialog).toBeVisible({ timeout: 10_000 });
   await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('HS Internet');
 
-  const popconfirm = page.locator('.ant-popover:visible, [role="tooltip"]:visible').filter({ hasText: '删除此行？' }).last();
+  const popconfirm = deletePopconfirm(page);
   await humanClickUntil(
       wanDialog.getByTestId('ha-wan-transport-row-delete-action'),
-      async () => await popconfirm.isVisible().catch(() => false),
+      async () => await isActionablePopconfirm(popconfirm),
       { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
   );
-  await expect(popconfirm).toBeVisible({ timeout: 10_000 });
+  await expect.poll(() => isActionablePopconfirm(popconfirm), { timeout: 10_000 }).toBeTruthy();
   await humanClickUntil(
-      popconfirm.getByRole('button', { name: '确 定' }),
+      popconfirmConfirmButton(popconfirm),
       async () => await wanDialog.getByText('暂无数据').isVisible().catch(() => false),
       { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
   );
