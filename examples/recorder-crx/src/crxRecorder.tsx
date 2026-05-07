@@ -2244,7 +2244,7 @@ export const CrxRecorder: React.FC = ({
                 onExportYaml={() => exportBusinessFlow('yaml')}
                 onOpenReplayCode={() => setActiveTab('code')}
                 onEditFlow={() => openEditFlowSheet(flowDraft)}
-                onOpenSettings={() => setPanelStage('setup')}
+                onOpenSettings={() => setPanelStage('aiSettings')}
                 playwrightCode={businessFlowPlaybackCode}
                 onSaveRepeatSegment={saveRepeatSegment}
                 onDeleteRepeatSegment={removeRepeatSegment}
