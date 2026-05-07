@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { compactUiSemanticContext } from '../uiSemantics';
 import type { BusinessFlow, FlowNetworkEvent, FlowStep } from './types';
 import type { StepContextSnapshot } from './pageContextTypes';
 
@@ -68,6 +69,7 @@ function compactStep(step: FlowStep) {
     suggestionConfidence: step.intentSuggestion?.confidence,
     action: step.action,
     target: summarizeTarget(step.target),
+    ui: compactUiSemanticContext(step.context?.before.ui, step.uiRecipe),
     context: compactContext(step.context),
     url: step.url,
     value: step.value,

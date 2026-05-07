@@ -13,6 +13,7 @@
  */
 import type { PageContextEvent, IntentProvenance, IntentSuggestion, StepContextSnapshot } from './pageContextTypes';
 import type { FlowStep } from './types';
+import type { UiActionRecipe } from '../uiSemantics/types';
 
 export function suggestBasicIntent(step: FlowStep): IntentSuggestion | undefined {
   const targetText = firstText(step.target?.displayName, step.target?.name, step.target?.label, step.target?.placeholder, step.target?.text, step.target?.testId);
@@ -43,13 +44,17 @@ export function suggestWaitIntent(previousStep?: FlowStep): IntentSuggestion {
 export function suggestIntent(step: FlowStep, context: StepContextSnapshot): IntentSuggestion | undefined {
   const before = context.before;
   const after = context.after;
-  const targetText = firstText(before.target?.text, before.target?.title, before.target?.ariaLabel, before.target?.placeholder, step.target?.name, step.target?.text, step.target?.testId);
-  const dialogTitle = firstText(before.dialog?.title, after?.dialog?.title);
-  const tableTitle = before.table?.title;
-  const rowKey = firstText(before.table?.rowKey, compactRowText(before.table?.rowText));
+  const uiRecipe = step.uiRecipe || before.ui?.recipe;
+  const uiIntent = suggestUiIntent(uiRecipe);
+  if (uiIntent)
+    return uiIntent;
+  const targetText = firstText(before.ui?.recipe?.targetText, before.ui?.targetText, before.target?.text, before.target?.title, before.target?.ariaLabel, before.target?.placeholder, step.target?.name, step.target?.text, step.target?.testId);
+  const dialogTitle = firstText(before.ui?.recipe?.overlayTitle, before.dialog?.title, after?.dialog?.title);
+  const tableTitle = before.ui?.recipe?.tableTitle || before.table?.title;
+  const rowKey = firstText(before.ui?.recipe?.rowKey, before.table?.rowKey, compactRowText(before.table?.rowText));
   const sectionTitle = before.section?.title;
-  const fieldLabel = firstText(before.form?.label, before.target?.placeholder, step.target?.label);
-  const selectedOption = firstText(before.target?.selectedOption, targetText, step.value);
+  const fieldLabel = firstText(before.ui?.recipe?.fieldLabel, before.form?.label, before.target?.placeholder, step.target?.label);
+  const selectedOption = firstText(before.ui?.recipe?.optionText, before.target?.selectedOption, targetText, step.value);
   const isDropdownSelection = step.action === 'click' && !!selectedOption && before.dialog?.type === 'dropdown';
   const resultDialogTitle = !isDropdownSelection && after?.dialog?.title && after.dialog.title !== before.dialog?.title ? after.dialog.title : undefined;
   const entity = entityName(dialogTitle, rowKey, tableTitle, sectionTitle);
@@ -124,6 +129,81 @@ export function stepContextFromEvent(event: PageContextEvent, actionIndex?: numb
     before: event.before,
     after: event.after,
   };
+}
+
+function suggestUiIntent(recipe?: UiActionRecipe): IntentSuggestion | undefined {
+  if (!recipe)
+    return undefined;
+  const field = recipe.fieldLabel || recipe.fieldName;
+  const option = recipe.optionText;
+  const table = recipe.tableTitle;
+  const row = recipe.rowKey;
+  const overlay = recipe.overlayTitle;
+  const target = recipe.targetText;
+  switch (recipe.kind) {
+    case 'select-option':
+      return field && option ? makeSuggestion(`选择${option}为${field}`, 0.88, 'ui.select-option', provenance('field', field, 'selectedOption', option, 'component', recipe.component)) : undefined;
+    case 'fill-form-field':
+      return field ? makeSuggestion(`填写${field}`, 0.86, 'ui.fill-field', provenance('field', field, 'component', recipe.component, 'formKind', recipe.formKind)) : undefined;
+    case 'toggle-control':
+      return field ? makeSuggestion(`切换${field}`, 0.82, 'ui.toggle-control', provenance('field', field, 'component', recipe.component)) : undefined;
+    case 'pick-date':
+      return field ? makeSuggestion(`选择${field}日期`, 0.82, 'ui.pick-date', provenance('field', field, 'component', recipe.component)) : undefined;
+    case 'pick-range':
+      return field ? makeSuggestion(`选择${field}范围`, 0.82, 'ui.pick-range', provenance('field', field, 'component', recipe.component)) : undefined;
+    case 'pick-time':
+      return field ? makeSuggestion(`选择${field}时间`, 0.82, 'ui.pick-time', provenance('field', field, 'component', recipe.component)) : undefined;
+    case 'upload-file':
+      return makeSuggestion(`上传${field || target || '文件'}`, 0.78, 'ui.upload-file', provenance('field', field, 'target', target));
+    case 'protable-search':
+      return makeSuggestion(`查询${table || '列表'}`, 0.84, 'ui.protable-search', provenance('table', table, 'field', field));
+    case 'protable-reset-search':
+      return makeSuggestion(`重置${table || '列表'}查询条件`, 0.8, 'ui.protable-reset-search', provenance('table', table, 'field', field));
+    case 'protable-toolbar-action':
+      return makeSuggestion(`在${table || '列表'}中${target || '执行工具栏操作'}`, 0.8, 'ui.protable-toolbar', provenance('table', table, 'target', target));
+    case 'table-row-action':
+      return makeSuggestion(`${target || '操作'}${row || table || '当前记录'}`, 0.84, 'ui.table-row-action', provenance('table', table, 'row', row, 'target', target));
+    case 'table-batch-action':
+      return makeSuggestion(`批量${target || '操作'}${table || '列表'}`, 0.8, 'ui.table-batch-action', provenance('table', table, 'target', target));
+    case 'editable-table-cell':
+      return makeSuggestion(`编辑${[row, recipe.columnTitle || field || table].filter(Boolean).join(' ') || '表格单元格'}`, 0.82, 'ui.editable-table-cell', provenance('table', table, 'row', row, 'column', recipe.columnTitle));
+    case 'editable-table-save-row':
+      return makeSuggestion(`保存${row || table || '编辑行'}`, 0.82, 'ui.editable-table-save-row', provenance('table', table, 'row', row, 'target', target));
+    case 'editable-table-cancel-row':
+      return makeSuggestion(`取消编辑${row || table || '当前行'}`, 0.78, 'ui.editable-table-cancel-row', provenance('table', table, 'row', row, 'target', target));
+    case 'submit-form':
+      return makeSuggestion(`提交${overlay || recipe.formKind || '表单'}`, 0.84, 'ui.submit-form', provenance('dialog', overlay, 'formKind', recipe.formKind));
+    case 'reset-form':
+      return makeSuggestion(`重置${overlay || recipe.formKind || '表单'}`, 0.78, 'ui.reset-form', provenance('dialog', overlay, 'formKind', recipe.formKind));
+    case 'modal-action':
+      return makeSuggestion(`${target || '确认'}${overlay || '弹窗'}`, 0.78, 'ui.modal-action', provenance('dialog', overlay, 'target', target));
+    case 'drawer-action':
+      return makeSuggestion(`${target || '确认'}${overlay || '抽屉'}`, 0.78, 'ui.drawer-action', provenance('dialog', overlay, 'target', target));
+    case 'confirm-popconfirm':
+      return makeSuggestion(`确认${overlay || target || '操作'}`, 0.82, 'ui.popconfirm', provenance('dialog', overlay, 'target', target));
+    case 'dropdown-menu-action':
+      return makeSuggestion(`选择菜单项${option || target || ''}`.trim(), 0.78, 'ui.dropdown-menu', provenance('option', option, 'target', target));
+    case 'show-tooltip':
+      return makeSuggestion(`查看${overlay || target || '提示'}`, 0.7, 'ui.show-tooltip', provenance('dialog', overlay, 'target', target));
+    case 'paginate':
+      return makeSuggestion(`切换${table || '列表'}分页`, 0.74, 'ui.paginate', provenance('table', table, 'target', target));
+    case 'sort-table':
+      return makeSuggestion(`按${recipe.columnTitle || target || '列'}排序${table || '列表'}`, 0.74, 'ui.sort-table', provenance('table', table, 'column', recipe.columnTitle));
+    case 'filter-table':
+      return makeSuggestion(`筛选${table || '列表'}${recipe.columnTitle || target || ''}`.trim(), 0.74, 'ui.filter-table', provenance('table', table, 'column', recipe.columnTitle, 'target', target));
+    case 'switch-tab':
+      return makeSuggestion(`切换到${target || '目标'}页签`, 0.78, 'ui.switch-tab', provenance('target', target));
+    case 'switch-step':
+      return makeSuggestion(`进入${target || '下一'}步骤`, 0.78, 'ui.switch-step', provenance('target', target));
+    case 'assert-description-field':
+      return makeSuggestion(`查看${target || field || '详情字段'}`, 0.72, 'ui.description-field', provenance('target', target, 'field', field));
+    case 'click-button':
+      return makeSuggestion(`点击${target || field || '按钮'}`, 0.72, 'ui.click-button', provenance('target', target, 'field', field, 'component', recipe.component));
+    case 'raw-dom-action':
+      return makeSuggestion(`操作${target || field || recipe.component}`, 0.55, 'ui.raw-dom-action', provenance('target', target, 'field', field, 'component', recipe.component));
+    default:
+      return undefined;
+  }
 }
 
 function makeSuggestion(text: string, confidence: number, rule: string, provenance: IntentProvenance[]): IntentSuggestion {

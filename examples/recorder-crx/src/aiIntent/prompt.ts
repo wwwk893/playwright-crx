@@ -3,6 +3,7 @@
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import { compactUiSemanticContext } from '../uiSemantics';
 import type { BusinessFlow, FlowStep } from '../flow/types';
 import type { AiIntentInput, AiIntentStepInput } from './types';
 import { redactAiIntentInput } from './redactForModel';
@@ -64,6 +65,7 @@ function compactStep(step: FlowStep): AiIntentStepInput {
       ariaLabel: before?.target?.ariaLabel,
       placeholder: step.target?.placeholder || before?.target?.placeholder,
     },
+    ui: compactUiSemanticContext(before?.ui, step.uiRecipe),
     before: {
       page: before?.title,
       url: before?.url,

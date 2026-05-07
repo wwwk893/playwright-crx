@@ -4,11 +4,14 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  */
+import { buildAiIntentInput } from '../aiIntent/prompt';
+import type { UiActionRecipe, UiComponentKind } from '../uiSemantics/types';
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { mergePageContextIntoFlow } from './flowContextMerger';
+import { suggestIntent } from './intentRules';
 import { createRepeatSegment } from './repeatSegments';
 import { redactBusinessFlow } from './redactor';
 import type { PageContextEvent, ElementContext } from './pageContextTypes';
@@ -4657,6 +4660,185 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'compact flow yaml exports compact UI semantic annotation',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          intent: '编辑 Alice 用户',
+          target: { role: 'button', name: '编辑' },
+          context: {
+            eventId: 'ctx-ui-table-edit',
+            capturedAt: Date.now(),
+            before: {
+              title: '用户中心',
+              target: { tag: 'button', role: 'button', text: '编辑' },
+              table: { title: '用户管理', rowKey: 'user-42', columnName: '操作' },
+              ui: semanticUi({
+                library: 'pro-components',
+                component: 'pro-table',
+                recipe: 'table-row-action',
+                tableTitle: '用户管理',
+                rowKey: 'user-42',
+                columnTitle: '操作',
+                targetText: '编辑',
+              }),
+            } as any,
+          },
+          uiRecipe: semanticUi({
+            library: 'pro-components',
+            component: 'pro-table',
+            recipe: 'table-row-action',
+            tableTitle: '用户管理',
+            rowKey: 'user-42',
+            columnTitle: '操作',
+            targetText: '编辑',
+          }).recipe,
+          rawAction: { action: { name: 'click', selector: '.ant-table-row .ant-btn' } },
+          assertions: [],
+        }],
+      };
+
+      const yaml = toCompactFlow(flow);
+      assert(yaml.includes('ui:'), 'compact yaml should include ui block');
+      assert(yaml.includes('library: pro-components'), 'compact ui should include library');
+      assert(yaml.includes('component: pro-table'), 'compact ui should include component');
+      assert(yaml.includes('recipe: table-row-action'), 'compact ui should include recipe');
+      assert(yaml.includes('table: "用户管理"'), 'compact ui should include table title');
+      assert(yaml.includes('row: user-42'), 'compact ui should include row key');
+      assert(!yaml.includes('locatorHints'), 'compact ui should not dump full locator hints');
+      assert(!yaml.includes('rawAction'), 'compact yaml should not leak raw action internals');
+    },
+  },
+  {
+    name: 'AI intent input contains compact UI semantic annotation without raw internals',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        flow: { ...createNamedFlow().flow, id: 'flow-ui-ai', name: 'AI UI 语义测试' },
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: { role: 'option', text: '管理员' },
+          context: {
+            eventId: 'ctx-ui-select-option',
+            capturedAt: Date.now(),
+            before: {
+              target: { tag: 'div', role: 'option', text: '管理员', title: '管理员' },
+              form: { label: '角色', name: 'role' },
+              dialog: { type: 'dropdown', title: '角色', visible: true },
+              ui: semanticUi({
+                library: 'antd',
+                component: 'select',
+                recipe: 'select-option',
+                fieldLabel: '角色',
+                optionText: '管理员',
+                overlayTitle: '角色',
+              }),
+            } as any,
+          },
+          uiRecipe: semanticUi({
+            library: 'antd',
+            component: 'select',
+            recipe: 'select-option',
+            fieldLabel: '角色',
+            optionText: '管理员',
+            overlayTitle: '角色',
+          }).recipe,
+          rawAction: { action: { name: 'click', selector: '.ant-select-item-option >> internal:text="管理员"' } },
+          assertions: [],
+        }],
+      };
+
+      const input = buildAiIntentInput(flow, flow.steps) as any;
+      assertEqual(input.steps[0].ui?.component, 'select');
+      assertEqual(input.steps[0].ui?.recipe, 'select-option');
+      assertEqual(input.steps[0].ui?.field, '角色');
+      assertEqual(input.steps[0].ui?.option, '管理员');
+      assert(!JSON.stringify(input).includes('rawAction'), 'AI input should not contain rawAction');
+      assert(!JSON.stringify(input).includes('locatorHints'), 'AI input should not contain full locator hints');
+      assert(!JSON.stringify(input).includes('.ant-select-item-option'), 'AI input should not leak AntD class selectors');
+    },
+  },
+  {
+    name: 'UI semantic intent rules cover every recipe emitted by adapter',
+    run: () => {
+      const recipeKinds: UiActionRecipe['kind'][] = [
+        'click-button',
+        'fill-form-field',
+        'select-option',
+        'pick-date',
+        'pick-range',
+        'pick-time',
+        'toggle-control',
+        'upload-file',
+        'submit-form',
+        'reset-form',
+        'protable-search',
+        'protable-reset-search',
+        'protable-toolbar-action',
+        'table-row-action',
+        'table-batch-action',
+        'editable-table-cell',
+        'editable-table-save-row',
+        'editable-table-cancel-row',
+        'paginate',
+        'sort-table',
+        'filter-table',
+        'modal-action',
+        'drawer-action',
+        'confirm-popconfirm',
+        'dropdown-menu-action',
+        'show-tooltip',
+        'switch-tab',
+        'switch-step',
+        'assert-description-field',
+        'raw-dom-action',
+      ];
+
+      for (const recipe of recipeKinds) {
+        const ui = semanticUi({
+          library: recipe.startsWith('protable') || recipe.startsWith('editable') ? 'pro-components' : 'antd',
+          component: recipe.startsWith('protable') ? 'pro-table' : recipe.startsWith('editable') ? 'editable-pro-table' : 'button',
+          recipe,
+          fieldLabel: '关键字',
+          optionText: '管理员',
+          tableTitle: '用户管理',
+          rowKey: 'user-42',
+          columnTitle: '操作',
+          overlayTitle: '配置弹窗',
+          targetText: '保存',
+        });
+        const step: FlowStep = {
+          id: `s-${recipe}`,
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: { text: '保存' },
+          context: {
+            eventId: `ctx-${recipe}`,
+            capturedAt: Date.now(),
+            before: {
+              target: { tag: 'button', text: '保存' },
+              ui,
+            } as any,
+          },
+          uiRecipe: ui.recipe,
+          assertions: [],
+        };
+        const suggestion = suggestIntent(step, step.context!);
+        assert(suggestion?.ruleHint?.startsWith('ui.'), `${recipe} should produce a UI semantic intent suggestion`);
+      }
+    },
+  },
+  {
     name: 'redaction preserves full generated playwright code while still masking secrets',
     run: () => {
       const longCode = `await page.goto("/start");\n${'await page.getByRole("button", { name: "保存" }).click();\n'.repeat(80)}await page.getByRole("button", { name: "完成" }).click();`;
@@ -4677,8 +4859,65 @@ test('demo', async ({ page }) => {
     name: 'export sanitization strips recorder internals and compact yaml does not leak artifacts',
     run: () => {
       const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('保存')], [], {});
-      const exportFlow = prepareBusinessFlowForExport({
+      const flowWithUiInternals: BusinessFlow = {
         ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            raw: {
+              target: { tag: 'button', text: '保存' },
+              ui: {
+                ...semanticUi({
+                  library: 'pro-components',
+                  component: 'pro-table',
+                  recipe: 'table-row-action',
+                  tableTitle: '用户管理',
+                  rowKey: 'user-42',
+                  columnTitle: '操作',
+                  targetText: '保存',
+                }),
+                table: {
+                  title: '用户管理',
+                  rowKey: 'user-42',
+                  rowText: 'user-42 李四 owner@example.com 编辑 删除',
+                  columnTitle: '操作',
+                },
+                overlay: { type: 'popover', title: '确认保存', text: 'target raw 内部诊断长文案', visible: true },
+                option: { text: '管理员', value: 'target-raw-internal-role-admin' },
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-export-ui',
+            capturedAt: Date.now(),
+            before: {
+              target: { tag: 'button', text: '保存' },
+              ui: {
+                ...semanticUi({
+                  library: 'pro-components',
+                  component: 'pro-table',
+                  recipe: 'table-row-action',
+                  tableTitle: '用户管理',
+                  rowKey: 'user-42',
+                  columnTitle: '操作',
+                  targetText: '保存',
+                }),
+                table: {
+                  title: '用户管理',
+                  rowKey: 'user-42',
+                  rowText: 'user-42 张三 admin@example.com 编辑 删除',
+                  columnTitle: '操作',
+                },
+                overlay: { type: 'popover', title: '确认保存', text: '内部诊断长文案', visible: true },
+                option: { text: '管理员', value: 'internal-role-admin' },
+              },
+            } as any,
+          },
+        })),
+      };
+      const exportFlow = prepareBusinessFlowForExport({
+        ...flowWithUiInternals,
         artifacts: {
           ...flow.artifacts,
           deletedActionIndexes: [0],
@@ -4694,6 +4933,20 @@ test('demo', async ({ page }) => {
       assert(!exportFlow.artifacts?.stepActionIndexes, 'export should remove stepActionIndexes');
       assert(!exportFlow.artifacts?.stepMergedActionIndexes, 'export should remove stepMergedActionIndexes');
       assertEqual(exportFlow.artifacts?.playwrightCode, 'await page.getByRole("button", { name: "保存" }).click();');
+      const exportedUiJson = JSON.stringify(exportFlow.steps[0].context?.before.ui);
+      assert(exportedUiJson.includes('用户管理'), 'export should keep compact useful UI context');
+      assert(!exportedUiJson.includes('locatorHints'), 'exported flow should strip UI locator hints');
+      assert(!exportedUiJson.includes('test fixture'), 'exported flow should strip UI diagnostic reasons');
+      assert(!exportedUiJson.includes('内部诊断长文案'), 'exported flow should strip overlay text internals');
+      assert(!exportedUiJson.includes('admin@example.com'), 'exported flow should strip table row text internals');
+      assert(!exportedUiJson.includes('internal-role-admin'), 'exported flow should strip option internal values');
+      const exportedTargetRawJson = JSON.stringify(exportFlow.steps[0].target?.raw);
+      assert(exportedTargetRawJson.includes('用户管理'), 'export target raw should keep compact useful UI context');
+      assert(!exportedTargetRawJson.includes('locatorHints'), 'exported target raw should strip UI locator hints');
+      assert(!exportedTargetRawJson.includes('test fixture'), 'exported target raw should strip UI diagnostic reasons');
+      assert(!exportedTargetRawJson.includes('target raw 内部诊断长文案'), 'exported target raw should strip overlay text internals');
+      assert(!exportedTargetRawJson.includes('owner@example.com'), 'exported target raw should strip table row text internals');
+      assert(!exportedTargetRawJson.includes('target-raw-internal-role-admin'), 'exported target raw should strip option internal values');
 
       const yaml = toCompactFlow(exportFlow);
       assert(!yaml.includes('actionLog'), 'compact yaml should not include actionLog');
@@ -4853,6 +5106,45 @@ function stepCodeBlock(code: string, stepId: string) {
   assert(start >= 0, `${stepId} block should exist`);
   const next = code.indexOf('\n  // s', start + 1);
   return code.slice(start, next === -1 ? undefined : next);
+}
+
+function semanticUi(options: {
+  library: 'antd' | 'pro-components' | 'unknown';
+  component: UiComponentKind;
+  recipe: UiActionRecipe['kind'];
+  fieldLabel?: string;
+  optionText?: string;
+  tableTitle?: string;
+  rowKey?: string;
+  columnTitle?: string;
+  overlayTitle?: string;
+  targetText?: string;
+}) {
+  return {
+    library: options.library,
+    component: options.component,
+    componentPath: [options.component],
+    targetText: options.targetText,
+    form: options.fieldLabel ? { label: options.fieldLabel } : undefined,
+    table: options.tableTitle ? { title: options.tableTitle, rowKey: options.rowKey, columnTitle: options.columnTitle } : undefined,
+    overlay: options.overlayTitle ? { title: options.overlayTitle } : undefined,
+    option: options.optionText ? { text: options.optionText } : undefined,
+    recipe: {
+      kind: options.recipe,
+      library: options.library,
+      component: options.component,
+      fieldLabel: options.fieldLabel,
+      optionText: options.optionText,
+      tableTitle: options.tableTitle,
+      rowKey: options.rowKey,
+      columnTitle: options.columnTitle,
+      overlayTitle: options.overlayTitle,
+      targetText: options.targetText,
+    },
+    locatorHints: [{ kind: 'testid', value: 'semantic-test', score: 0.9, reason: 'test fixture' }],
+    confidence: 0.9,
+    reasons: ['test fixture'],
+  };
 }
 
 function assert(value: unknown, message: string): asserts value {

@@ -8,6 +8,7 @@ import type { Source } from '@recorder/recorderTypes';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import type { BusinessFlow, FlowActionType, FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowRecorderState, FlowRepeatSegment, FlowStep, FlowTarget, RecordedActionEntry, RecordingSession } from './types';
 import type { ElementContext, PageContextEvent } from './pageContextTypes';
+import type { UiSemanticContext } from '../uiSemantics/types';
 import { suggestBasicIntent, suggestWaitIntent } from './intentRules';
 import { createEmptyBusinessFlow, flowAssertionId } from './types';
 import { migrateFlowToStableStepModel } from './flowMigration';
@@ -320,11 +321,12 @@ function dropdownRecordedOptionStepIndexForEvent(steps: FlowStep[], event: PageC
 }
 
 function upgradeRecordedDropdownOptionStep(step: FlowStep, event: PageContextEvent): FlowStep {
-  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label);
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label, event.before.ui);
   const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
   return {
     ...step,
     target,
+    uiRecipe: event.before.ui?.recipe || step.uiRecipe,
     context: {
       ...step.context,
       eventId: event.id,
@@ -840,7 +842,7 @@ function isWeakPageContextClickTarget(target?: ElementContext) {
 }
 
 function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContextEvent): FlowStep {
-  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label);
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label, event.before.ui);
   const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
   return {
     id: nextStableStepId(recorder),
@@ -849,6 +851,7 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
     sourceActionIds: [],
     action: 'click',
     intent: '',
+    uiRecipe: event.before.ui?.recipe,
     comment: syntheticPageClickComment,
     context: {
       eventId: event.id,
@@ -867,19 +870,20 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
   };
 }
 
-function flowTargetFromPageContext(target?: ElementContext, formLabel?: string): FlowTarget | undefined {
-  if (!target)
+function flowTargetFromPageContext(target?: ElementContext, formLabel?: string, ui?: UiSemanticContext): FlowTarget | undefined {
+  if (!target && !ui)
     return undefined;
-  const contextText = stableElementText(target);
+  const contextText = target ? stableElementText(target) : undefined;
+  const bestHint = ui?.locatorHints?.slice().sort((a, b) => b.score - a.score)[0];
   return {
-    testId: target.testId,
-    role: target.role,
-    name: target.ariaLabel || contextText || target.title,
-    displayName: contextText || target.ariaLabel || target.placeholder || target.testId || formLabel,
-    label: formLabel,
-    placeholder: target.placeholder,
-    text: contextText,
-    raw: target,
+    testId: ui?.targetTestId || (bestHint?.kind === 'testid' ? bestHint.value : undefined) || target?.testId,
+    role: target?.role,
+    name: target?.ariaLabel || ui?.targetText || contextText || target?.title,
+    displayName: ui?.recipe?.optionText || ui?.recipe?.targetText || ui?.targetText || contextText || target?.ariaLabel || target?.placeholder || target?.testId || formLabel,
+    label: ui?.form?.label || formLabel,
+    placeholder: ui?.form?.placeholder || target?.placeholder,
+    text: ui?.option?.text || ui?.targetText || contextText,
+    raw: { target, ui },
   };
 }
 
@@ -896,7 +900,7 @@ function stableElementText(target: ElementContext) {
 function syntheticClickSourceCode(target: FlowTarget | undefined, fallback: string) {
   if (target?.testId)
     return `await ${testIdLocatorFromTarget(target)}.click();`;
-  const rawControlType = typeof target?.raw === 'object' && target.raw ? String((target.raw as { controlType?: unknown }).controlType || '') : '';
+  const rawControlType = rawTargetControlType(target?.raw);
   const choiceText = target?.text || target?.name || target?.displayName;
   if (/^(checkbox|radio|switch)$/.test(rawControlType) && choiceText)
     return `await page.locator('label').filter({ hasText: ${stringLiteral(choiceText)} }).click();`;
@@ -907,9 +911,32 @@ function syntheticClickSourceCode(target: FlowTarget | undefined, fallback: stri
   return `await page.getByText(${stringLiteral(target?.text || target?.name || fallback)}).click();`;
 }
 
+type RawTargetRecord = {
+  controlType?: unknown;
+  uniqueness?: { pageCount?: number; pageIndex?: number };
+  pageContext?: { controlType?: unknown; uniqueness?: { pageCount?: number; pageIndex?: number } };
+  target?: { controlType?: unknown; uniqueness?: { pageCount?: number; pageIndex?: number } };
+  synthetic?: RawTargetRecord;
+  recorder?: RawTargetRecord;
+};
+
+function rawTargetControlType(raw: unknown) {
+  if (!raw || typeof raw !== 'object')
+    return '';
+  const record = raw as RawTargetRecord;
+  return String(record.controlType || record.pageContext?.controlType || record.target?.controlType || record.synthetic?.controlType || record.synthetic?.pageContext?.controlType || record.synthetic?.target?.controlType || '');
+}
+
+function rawTargetUniqueness(raw: unknown): { pageCount?: number; pageIndex?: number } | undefined {
+  if (!raw || typeof raw !== 'object')
+    return undefined;
+  const record = raw as RawTargetRecord;
+  return record.uniqueness || record.pageContext?.uniqueness || record.target?.uniqueness || record.synthetic?.uniqueness || record.synthetic?.pageContext?.uniqueness || record.synthetic?.target?.uniqueness || record.recorder?.uniqueness;
+}
+
 function testIdLocatorFromTarget(target: FlowTarget) {
   const locator = `page.getByTestId(${stringLiteral(target.testId)})`;
-  const uniqueness = typeof target.raw === 'object' && target.raw ? (target.raw as { uniqueness?: { pageCount?: number; pageIndex?: number } }).uniqueness : undefined;
+  const uniqueness = rawTargetUniqueness(target.raw);
   const pageCount = Number(uniqueness?.pageCount);
   const pageIndex = Number(uniqueness?.pageIndex);
   if (Number.isInteger(pageIndex) && pageIndex >= 0 && Number.isFinite(pageCount) && pageCount > 1)
