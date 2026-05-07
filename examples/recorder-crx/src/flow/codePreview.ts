@@ -883,9 +883,12 @@ function antdPopoverConfirmAfterClickSource(step: FlowStep) {
   const title = afterDialog?.type === 'popover' && afterDialog.title ? afterDialog.title : inferredPopconfirmTitle(step);
   if (!title)
     return undefined;
+  const buttonName = popconfirmConfirmButtonName(step);
+  if (!buttonName)
+    return undefined;
   const root = dialogRootLocator({ type: 'popover', title, visible: true });
   return [
-    `await ${root}.getByRole("button", { name: "确 定" }).click();`,
+    `await ${root}.getByRole("button", { name: ${buttonNameExpression(buttonName)} }).click();`,
     `await ${root}.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});`,
   ].join('\n');
 }
@@ -895,8 +898,40 @@ function isDeleteOrRemoveTestId(testId: string) {
 }
 
 function inferredPopconfirmTitle(step: FlowStep) {
-  const label = normalizeGeneratedText(step.target?.displayName || step.target?.text || step.target?.name || step.target?.label);
+  const label = popconfirmConfirmButtonName(step);
   return /^(确定|确认|确 定)$/.test(label || '') ? '删除此行？' : undefined;
+}
+
+function popconfirmConfirmButtonName(step: FlowStep) {
+  const testId = normalizeGeneratedText(step.target?.testId || step.context?.before.target?.testId);
+  const candidates = [
+    step.target?.name,
+    step.target?.text,
+    step.target?.displayName,
+    step.target?.label,
+    step.context?.before.target?.text,
+    step.context?.before.target?.normalizedText,
+    step.context?.before.target?.ariaLabel,
+    step.context?.before.target?.title,
+  ];
+  for (const candidate of candidates) {
+    const label = normalizeGeneratedText(candidate);
+    if (!label || label === testId || (testId && label.includes(testId)))
+      continue;
+    if (isLikelyPopconfirmConfirmButton(label))
+      return label;
+  }
+  return undefined;
+}
+
+function isLikelyPopconfirmConfirmButton(label: string) {
+  return /^(确定|确认|是|好的|删除|移除|保存|提交|继续|ok|yes|delete|remove|save|submit|continue)$/i.test(label);
+}
+
+function buttonNameExpression(label: string) {
+  if (label === '确定')
+    return '/^(确定|确 定)$/';
+  return stringLiteral(label);
 }
 
 function isDuplicateSyntheticEchoClick(step: FlowStep, previous?: FlowStep) {

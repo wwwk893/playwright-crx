@@ -1541,7 +1541,7 @@ test('demo', async ({ page }) => {
             action: 'click',
             target: {
               testId: 'wan-transport-row-delete-action',
-              displayName: 'wan-transport-row-delete-action',
+              displayName: '确 定',
               raw: { uniqueness: { pageCount: 2, pageIndex: 1 } },
             },
             context: {
@@ -1591,9 +1591,35 @@ test('demo', async ({ page }) => {
 
       assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'delete action should click the row delete control inside the dialog instead of using a page-level nth');
       assert(!code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();'), 'dialog-owned delete action should not keep a page-level duplicate ordinal');
-      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: "确 定" }).click();'), 'delete action should confirm the visible AntD popconfirm');
+      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'delete action should confirm the visible AntD popconfirm with the captured confirm label');
       assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});'), 'delete action should wait for the AntD popconfirm to close before the next step');
       assertEqual((code.match(/page\.getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
+    },
+  },
+  {
+    name: 'AntD delete test id does not synthesize popconfirm confirmation without captured confirm label',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: { testId: 'wan-transport-row-delete-action', displayName: 'wan-transport-row-delete-action' },
+          context: {
+            eventId: 'ctx-delete',
+            capturedAt: 1000,
+            before: { target: { tag: 'a', testId: 'wan-transport-row-delete-action', framework: 'antd', controlType: 'link' } },
+            after: { dialog: { type: 'popover', title: '删除此行？', visible: true } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();') || code.includes('page.getByTestId("wan-transport-row-delete-action").click();'), 'delete action should still replay the recorded delete click');
+      assert(!code.includes('getByRole("button", { name: "确 定" })'), 'unknown Popconfirm ok label should not be hard-coded');
+      assert(!code.includes('getByRole("button", { name: /^(确定|确 定)$/ })'), 'unknown Popconfirm ok label should not be guessed');
     },
   },
   {
