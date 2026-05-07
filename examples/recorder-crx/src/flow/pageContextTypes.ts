@@ -41,6 +41,7 @@ export interface PageContextAfterSnapshot {
   breadcrumb?: string[];
   activeTab?: TabContext;
   dialog?: DialogContext;
+  openedDialog?: DialogContext;
   toast?: string;
 }
 
