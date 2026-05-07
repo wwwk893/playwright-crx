@@ -37,6 +37,8 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]))
       continue;
+    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]))
+      continue;
 
     emitStep(lines, step, '  ');
   }
@@ -64,6 +66,8 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
     if (emittedRepeatStepIds.has(step.id))
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]))
+      continue;
+    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]))
       continue;
 
     emitStep(lines, step, '  ', undefined, undefined, { parserSafe: true });
@@ -93,6 +97,8 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     if (emittedRepeatStepIds.has(step.id))
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]))
+      continue;
+    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]))
       continue;
 
     count += countStepActions(step, { parserSafe: true });
@@ -580,8 +586,11 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       return action.url || step.url ? `await page.goto(${stringLiteral(action.url || step.url)});` : undefined;
     case 'click': {
       const testIdLocator = globalTestIdLocator(step);
-      if (testIdLocator)
-        return `await ${testIdLocator}.click();`;
+      if (testIdLocator) {
+        const clickSource = `await ${testIdLocator}.click();`;
+        const popconfirmSource = antdPopoverConfirmAfterClickSource(step);
+        return popconfirmSource ? `${clickSource}\n${popconfirmSource}` : clickSource;
+      }
       const selectOption = hasPageContextAntdOption(step) ? antdSelectOptionLocator(step) : undefined;
       if (selectOption)
         return options.parserSafe ? `await ${parserSafeLocator(selectOption)}.click();` : antdSelectOptionClickSource(step, selectOption);
@@ -634,6 +643,27 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     default:
       return undefined;
   }
+}
+
+function antdPopoverConfirmAfterClickSource(step: FlowStep) {
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  const afterDialog = step.context?.after?.dialog;
+  if (!/(^|[-_])(delete|remove)([-_]|$)/i.test(testId))
+    return undefined;
+  if (afterDialog?.type !== 'popover' || !afterDialog.title)
+    return undefined;
+  return `await ${dialogRootLocator(afterDialog)}.getByRole("button", { name: "确 定" }).click();`;
+}
+
+function isDuplicateSyntheticEchoClick(step: FlowStep, previous?: FlowStep) {
+  if (!previous || step.action !== 'click' || previous.action !== 'click')
+    return false;
+  const testId = step.target?.testId || step.context?.before.target?.testId;
+  const previousTestId = previous.target?.testId || previous.context?.before.target?.testId;
+  if (!testId || testId !== previousTestId)
+    return false;
+  const label = normalizeGeneratedText(step.target?.displayName || step.target?.text || step.target?.name || step.target?.label);
+  return !label || label === `testId ${testId}`;
 }
 
 function waitMilliseconds(value: unknown) {
@@ -911,7 +941,7 @@ function dialogRootLocator(dialog?: FlowDialogScope) {
   if (dialog?.testId)
     return `page.getByTestId(${stringLiteral(dialog.testId)})`;
   if (dialog?.title)
-    return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).filter({ hasText: ${stringLiteral(dialog.title)} })`;
+    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).filter({ hasText: ${stringLiteral(dialog.title)} })`;
   return 'page';
 }
 
@@ -1070,14 +1100,24 @@ function dialogScopedLocator(step: FlowStep) {
   const targetName = targetNameForLocator(step);
   if (!dialog || !targetName)
     return undefined;
-  const role = step.target?.role || 'button';
+  const role = dialog.type === 'popover' && step.target?.role === 'tooltip' ? 'button' : step.target?.role || 'button';
   if (dialog.testId)
     return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
   if (!dialog.title)
     return undefined;
-  return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')})` +
+  return `page.locator(${stringLiteral(dialogRootSelector(dialog))})` +
     `.filter({ hasText: ${stringLiteral(dialog.title)} })` +
     `.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+}
+
+function dialogRootSelector(dialog?: FlowDialogScope) {
+  if (dialog?.type === 'popover')
+    return '.ant-popover, [role="tooltip"]';
+  if (dialog?.type === 'dropdown')
+    return '.ant-dropdown, .ant-select-dropdown, .ant-cascader-dropdown, [role="listbox"], [role="menu"]';
+  if (dialog?.type === 'drawer')
+    return '.ant-drawer, [role="dialog"]';
+  return '.ant-modal, .ant-drawer, [role="dialog"]';
 }
 
 function sectionScopedLocator(step: FlowStep) {

@@ -1452,6 +1452,89 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'AntD popconfirm button code preview uses popover scope instead of modal scope',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:role=tooltip[name="确 定"i]')], [], {});
+      const scoped: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            role: 'tooltip',
+            text: '确 定',
+            displayName: '确 定',
+            scope: {
+              dialog: {
+                type: 'popover',
+                title: '删除此行？',
+                visible: true,
+              },
+            },
+          },
+        })),
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(scoped), 's001');
+
+      assert(firstStep.includes('page.locator(".ant-popover, [role=\\"tooltip\\"]")'), 'popconfirm should start from AntD popover scope');
+      assert(firstStep.includes('filter({ hasText: "删除此行？" })'), 'popconfirm should filter by its title');
+      assert(firstStep.includes('getByRole("button", { name: "确定" })') || firstStep.includes('getByRole("button", { name: "确 定" })'), 'popconfirm should click the confirm button');
+      assert(!firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]")'), 'popconfirm should not be scoped to modal/drawer');
+    },
+  },
+  {
+    name: 'AntD delete test id synthesizes popconfirm confirmation and drops synthetic echo click',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'wan-transport-row-delete-action', displayName: 'wan-transport-row-delete-action' },
+            context: {
+              eventId: 'ctx-delete',
+              capturedAt: 1000,
+              before: { target: { tag: 'a', testId: 'wan-transport-row-delete-action', framework: 'antd', controlType: 'link' } },
+              after: { dialog: { type: 'popover', title: '删除此行？', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: { testId: 'wan-config-confirm', displayName: '确定' },
+            context: {
+              eventId: 'ctx-confirm',
+              capturedAt: 2000,
+              before: { target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'wan-config-confirm', displayName: 'testId wan-config-confirm' },
+            context: {
+              eventId: 'ctx-confirm-echo',
+              capturedAt: 2050,
+              before: { target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.getByTestId("wan-transport-row-delete-action").click();'), 'delete action should still click the row delete control');
+      assert(code.includes('page.locator(".ant-popover, [role=\\"tooltip\\"]").filter({ hasText: "删除此行？" }).getByRole("button", { name: "确 定" }).click();'), 'delete action should confirm the AntD popconfirm');
+      assertEqual((code.match(/page\.getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
+    },
+  },
+  {
     name: 'section button code preview uses section scope when no test id and repeated button text',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:has-text="新建"i >> nth=3')], [], {});

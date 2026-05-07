@@ -111,6 +111,110 @@ test('human-like recorder preserves nth for duplicate test id save button @human
   expect(replayRuntimeLogs.filter(log => log.type.includes('error') || log.level === 'warn')).toEqual([]);
 });
 
+test('human-like records SD-WAN WAN2 transport delete flow and replays through AntD popconfirm @human-smoke', async ({ context, page, attachRecorder, baseURL }, testInfo) => {
+  test.setTimeout(180_000);
+  const strictHumanOptions = { allowFallback: false as const };
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
+  recorderPage.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('5') : dialog.accept());
+
+  await beginNewFlowFromLibraryLikeUser(recorderPage);
+  await fillFlowMetaLikeUser(recorderPage, '流程名称', 'SD-WAN WAN2 传输网络删除回放');
+  await fillFlowMetaLikeUser(recorderPage, '应用', 'Nova SD-WAN');
+  await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
+  await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置-WAN');
+  await fillFlowMetaLikeUser(recorderPage, '角色', '租户管理员');
+  await humanClick(recorderPage.getByRole('button', { name: '创建并开始录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await expectWanConfigPage(page);
+  await expect(page.getByTestId('site-save-button')).toHaveCount(2);
+
+  const wanDialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '编辑WAN2' });
+  await humanClickUntil(
+      page.getByTestId('wan-edit-2'),
+      async () => await wanDialog.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  await expect(wanDialog).toBeVisible({ timeout: 10_000 });
+  await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('Nova专线');
+
+  const popconfirm = page.locator('.ant-popover, [role="tooltip"]').filter({ hasText: '删除此行？' }).last();
+  await humanClickUntil(
+      wanDialog.getByTestId('wan-transport-row-delete-action'),
+      async () => await popconfirm.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
+  );
+  await expect(popconfirm).toBeVisible({ timeout: 10_000 });
+  await humanClickUntil(
+      popconfirm.getByRole('button', { name: '确 定' }),
+      async () => await wanDialog.getByText('暂无数据').isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  await expect(wanDialog.getByText('暂无数据')).toBeVisible({ timeout: 10_000 });
+
+  const transportConfirm = page.locator('.ant-modal-confirm, [role="dialog"]').filter({ hasText: '确定要配置WAN的传输网络？' }).last();
+  await humanClickUntil(
+      wanDialog.getByRole('button', { name: '确 定' }),
+      async () => await transportConfirm.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  await expect(transportConfirm).toBeVisible({ timeout: 10_000 });
+  await humanClickUntil(
+      transportConfirm.getByRole('button', { name: '确 定' }),
+      async () => !await wanDialog.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 800, ...strictHumanOptions },
+  );
+  await expect(wanDialog).toBeHidden({ timeout: 10_000 });
+
+  await humanClickUntil(
+      page.getByTestId('site-save-button').nth(1),
+      async () => await page.getByText('配置已保存').isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
+  );
+  await expect(page.getByText('配置已保存')).toBeVisible();
+
+  await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('wan-edit-2');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('wan-transport-row-delete-action');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('site-save-button');
+
+  await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('复查');
+
+  const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
+  await attachRecorderEvidence(testInfo, page, recorderPage, flow);
+  expect(flow.flow.name).toBe('SD-WAN WAN2 传输网络删除回放');
+  expect(flow.artifacts.playwrightCode).toContain('wan-edit-2');
+  expect(flow.artifacts.playwrightCode).toContain('wan-transport-row-delete-action');
+  expect(flow.artifacts.playwrightCode).toContain('确定要配置WAN的传输网络？');
+  expect(flow.artifacts.playwrightCode).toContain('page.getByTestId("site-save-button").nth(1).click();');
+
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo, async replayPage => {
+    await expectWanConfigPage(replayPage, { expectWan2Transport: false });
+    await expect(replayPage.getByText('配置已保存')).toBeVisible({ timeout: 10_000 });
+  }, [
+    `await expect(page.getByTestId("site-global-wan-section")).toContainText("WAN配置", { timeout: 10000 });`,
+    `await expect(page.getByText("配置已保存")).toBeVisible({ timeout: 10000 });`,
+  ]);
+
+  await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await expectWanConfigPage(page);
+  await humanClick(recorderPage.getByRole('button', { name: 'Playwright 代码' }));
+  const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
+  await humanClick(recorderPage.getByTitle('Resume (F8)'));
+  await expect.poll(async () => {
+    const logs = await runtimeDiagnosticsAfter(recorderPage, runtimeLogBaseline);
+    return logs.some(log => log.type === 'runtime.playback-stop');
+  }, { timeout: 45_000 }).toBeTruthy();
+  const replayRuntimeLogs = await runtimeDiagnosticsAfter(recorderPage, runtimeLogBaseline);
+  expect(replayRuntimeLogs.filter(log => log.type.includes('error') || log.level === 'warn')).toEqual([]);
+  expect(replayRuntimeLogs.filter(log => log.type === 'runtime.playback-request')).toHaveLength(1);
+  expect(replayRuntimeLogs.filter(log => log.type === 'runtime.playback-actions')).toHaveLength(1);
+  await expect(page.getByText('配置已保存')).toBeVisible({ timeout: 10_000 });
+});
+
 test('human-like runtime replay skips redundant IPv4 field focus click @human-smoke', async ({ page, attachRecorder, baseURL }) => {
   test.setTimeout(120_000);
   const strictHumanOptions = { allowFallback: false as const };
@@ -577,6 +681,7 @@ type RuntimeDiagnostic = {
   type: string;
   level?: string;
   message?: string;
+  data?: unknown;
 };
 
 async function runtimeDiagnostics(page: Page): Promise<RuntimeDiagnostic[]> {
@@ -593,6 +698,15 @@ async function runtimeDiagnosticsAfter(page: Page, baseline: RuntimeDiagnostic[]
 
 async function expectAddressAndPortPoolsPage(page: Page) {
   await expect(page.locator('.ant-pro-card-title').filter({ hasText: '地址池与端口池' })).toBeVisible();
+}
+
+async function expectWanConfigPage(page: Page, options: { expectWan2Transport?: boolean } = { expectWan2Transport: true }) {
+  await expect(page.getByTestId('site-global-wan-section')).toContainText('WAN配置');
+  const wan2Row = page.getByTestId('wan-config-table').locator('[data-row-key="2"]').first();
+  await expect(wan2Row).toContainText('WAN2', { timeout: 10_000 });
+  if (options.expectWan2Transport !== false)
+    await expect(wan2Row).toContainText('Nova专线');
+  await expect(page.getByTestId('wan-edit-2')).toBeVisible({ timeout: 10_000 });
 }
 
 function requiredStepId(flow: any, predicate: (step: any) => boolean, description: string) {
