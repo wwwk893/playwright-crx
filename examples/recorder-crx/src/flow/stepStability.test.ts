@@ -1588,16 +1588,20 @@ test('demo', async ({ page }) => {
         ],
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
 
       assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'delete action should click the row delete control inside the dialog instead of using a page-level nth');
       assert(!code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();'), 'dialog-owned delete action should not keep a page-level duplicate ordinal');
       assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'delete action should confirm the visible AntD popconfirm with the captured confirm label');
       assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});'), 'delete action should wait for the AntD popconfirm to close before the next step');
       assertEqual((code.match(/page\.getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
+      assert(playbackCode.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'runtime playback should keep the dialog-scoped delete click');
+      assert(playbackCode.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'runtime playback should still confirm the visible AntD popconfirm');
+      assert(!playbackCode.includes('.catch('), 'runtime playback should not include unsupported catch continuations');
     },
   },
   {
-    name: 'AntD delete test id does not synthesize popconfirm confirmation without captured confirm label',
+    name: 'AntD delete test id falls back to zh-CN popconfirm ok when the popover title is captured',
     run: () => {
       const flow: BusinessFlow = {
         ...createNamedFlow(),
@@ -1618,8 +1622,55 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
 
       assert(code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();') || code.includes('page.getByTestId("wan-transport-row-delete-action").click();'), 'delete action should still replay the recorded delete click');
-      assert(!code.includes('getByRole("button", { name: "确 定" })'), 'unknown Popconfirm ok label should not be hard-coded');
-      assert(!code.includes('getByRole("button", { name: /^(确定|确 定)$/ })'), 'unknown Popconfirm ok label should not be guessed');
+      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'captured AntD popconfirm title should synthesize the zh-CN ok click even if the recorder missed the button label');
+    },
+  },
+  {
+    name: 'plain delete test id does not synthesize popconfirm confirmation without popover evidence',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: { testId: 'plain-delete-button', displayName: 'plain-delete-button' },
+          context: {
+            eventId: 'ctx-delete',
+            capturedAt: 1000,
+            before: { target: { tag: 'button', testId: 'plain-delete-button', controlType: 'button' } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(!code.includes('getByRole("button", { name: "确 定" })'), 'missing Popconfirm evidence should not hard-code a confirm label');
+      assert(!code.includes('getByRole("button", { name: /^(确定|确 定)$/ })'), 'missing Popconfirm evidence should not guess a confirm label');
+    },
+  },
+  {
+    name: 'AntD row delete action uses captured opened popover after-state to synthesize confirmation',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: { testId: 'wan-transport-row-delete-action', displayName: 'Nova专线 default' },
+          context: {
+            eventId: 'ctx-delete',
+            capturedAt: 1000,
+            before: { target: { tag: 'a', testId: 'wan-transport-row-delete-action', framework: 'antd', controlType: 'link' } },
+            after: { openedDialog: { type: 'popover', title: '删除此行？', visible: true } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.locator(".ant-popover:visible, [role=\\"tooltip\\"]:visible").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'AntD row delete should use the captured opened popover to confirm');
     },
   },
   {
@@ -2239,6 +2290,66 @@ test('demo', async ({ page }) => {
 
       assert(noteStep.includes('modal closed note'), 'page field should still fill its own value');
       assert(!noteStep.includes('filter({ hasText: "新建条目" })'), 'page field should not inherit a stale modal scope');
+    },
+  },
+  {
+    name: 'dialog opener test id is not scoped into the dialog it opens',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'button',
+            testId: 'real-create-item',
+            scope: { dialog: { type: 'modal', title: '新建条目', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-create-item',
+            capturedAt: Date.now(),
+            before: {
+              target: {
+                tag: 'button',
+                role: 'button',
+                testId: 'real-create-item',
+                text: '新建条目',
+                normalizedText: '新建条目',
+              },
+            },
+            after: {
+              dialog: { type: 'modal', title: '新建条目', visible: true },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="real-create-item"s]' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(code.includes('await page.getByTestId("real-create-item").click();'), 'dialog opener should click the page-level create button');
+      assert(!code.includes('filter({ hasText: "新建条目" }).getByTestId("real-create-item")'), 'dialog opener must not be scoped into the dialog it opens');
+
+      const targetScopeOnly: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            displayName: '新建条目',
+          },
+          context: {
+            ...step.context!,
+            after: undefined,
+          },
+        })),
+      };
+      const targetScopeOnlyCode = stepCodeBlock(generateBusinessFlowPlaywrightCode(targetScopeOnly), 's001');
+      assert(targetScopeOnlyCode.includes('await page.getByTestId("real-create-item").click();'), 'dialog opener should stay page-level when only target scope carries the opened dialog');
+      assert(!targetScopeOnlyCode.includes('filter({ hasText: "新建条目" }).getByTestId("real-create-item")'), 'target-scope-only opener must not be scoped into the dialog it opens');
     },
   },
   {
@@ -4337,6 +4448,112 @@ test('demo', async ({ page }) => {
       const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
       assert(code.includes('tr[data-row-key="\\"user-42\\""]') || code.includes('tr[data-row-key=\\"user-42\\"]'), 'row click should use the stable row key selector');
       assert(!code.includes('await page.getByTestId("users-table").click();'), 'row click must not replay as an ambiguous table container click');
+    },
+  },
+  {
+    name: 'duplicate shared WAN row edit test id keeps row context instead of global strict locator',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'link',
+            testId: 'ha-wan-row-edit-action',
+            scope: {
+              table: {
+                testId: 'ha-wan-table',
+                rowKey: 'WAN1',
+                rowText: 'WAN1 HS Internet 启用QoS',
+              },
+            },
+            locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: 2, pageIndex: 0 },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="ha-wan-row-edit-action"s]' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(code.includes('page.getByTestId("ha-wan-table").locator("tr[data-row-key=\\"WAN1\\"], [data-row-key=\\"WAN1\\"]").first().getByTestId("ha-wan-row-edit-action").click();'), 'duplicate row action should replay inside the WAN1 table row');
+      assert(!code.includes('await page.getByTestId("ha-wan-row-edit-action").click();'), 'duplicate row action must not use a page-global test id click');
+    },
+  },
+  {
+    name: 'indexed WAN edit test id keeps ordinal instead of forcing table row key',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'link',
+            testId: 'wan-edit-1',
+            scope: {
+              table: {
+                testId: 'wan-config-table',
+                rowKey: '0200727bcf22f788279c5a9e3eb89651',
+                rowText: 'WAN1 Nova Internet 通用禁用',
+              },
+            },
+            locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: 2, pageIndex: 0 },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-edit-1"s]' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(code.includes('page.getByTestId("wan-edit-1").nth(0).click();'), 'indexed WAN edit should preserve its captured ordinal locator');
+      assert(!code.includes('wan-config-table'), 'indexed WAN edit should not force a volatile table row key scope');
+    },
+  },
+  {
+    name: 'shared WAN row click is not rewritten into a guessed edit action',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'row',
+            name: 'WAN1 HS Internet 启用QoS',
+          },
+          context: {
+            eventId: 'ctx-shared-wan-edit',
+            capturedAt: Date.now(),
+            before: {
+              target: {
+                tag: 'tr',
+                role: 'row',
+                text: 'WAN1 HS Internet 启用QoS',
+                normalizedText: 'WAN1 HS Internet 启用QoS',
+              },
+            },
+            after: {
+              dialog: { type: 'modal', title: '编辑 WAN1 共享 WAN', visible: true },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:role=row[name="WAN1 HS Internet 启用QoS"i]' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(!code.includes('data-testid*=\\"edit\\"'), 'row click should not be converted into an edit control click');
+      assert(code.includes('getByRole("row"') || code.includes('internal:role=row'), 'row click should remain a row click when no row action control was recorded');
     },
   },
   {

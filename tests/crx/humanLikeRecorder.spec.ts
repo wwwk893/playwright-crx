@@ -215,6 +215,85 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   await expect(page.getByText('配置已保存')).toBeVisible({ timeout: 10_000 });
 });
 
+test('human-like records shared WAN duplicate row edit action and replays stably @human-smoke', async ({ context, page, attachRecorder, baseURL }, testInfo) => {
+  test.setTimeout(180_000);
+  const strictHumanOptions = { allowFallback: false as const };
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
+  recorderPage.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('5') : dialog.accept());
+
+  await beginNewFlowFromLibraryLikeUser(recorderPage);
+  await fillFlowMetaLikeUser(recorderPage, '流程名称', 'SD-WAN 共享WAN 行编辑回放');
+  await fillFlowMetaLikeUser(recorderPage, '应用', 'Nova SD-WAN');
+  await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
+  await fillFlowMetaLikeUser(recorderPage, '页面', '全局配置-共享WAN');
+  await fillFlowMetaLikeUser(recorderPage, '角色', '租户管理员');
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1&sharedWanDuplicateEdit=1`);
+  await expectWanConfigPage(page, { sharedWanDuplicateEdit: true });
+  await expect(page.getByTestId('ha-wan-row-edit-action')).toHaveCount(2);
+
+  const wan1Row = page.getByTestId('wan-config-table').locator('[data-row-key="1"]').first();
+  const wanDialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '编辑 WAN1 共享 WAN' });
+  await humanClickUntil(
+      wan1Row.getByTestId('ha-wan-row-edit-action'),
+      async () => await wanDialog.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  await expect(wanDialog).toBeVisible({ timeout: 10_000 });
+  await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('HS Internet');
+
+  const popconfirm = page.locator('.ant-popover:visible, [role="tooltip"]:visible').filter({ hasText: '删除此行？' }).last();
+  await humanClickUntil(
+      wanDialog.getByTestId('ha-wan-transport-row-delete-action'),
+      async () => await popconfirm.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
+  );
+  await expect(popconfirm).toBeVisible({ timeout: 10_000 });
+  await humanClickUntil(
+      popconfirm.getByRole('button', { name: '确 定' }),
+      async () => await wanDialog.getByText('暂无数据').isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  await expect(wanDialog.getByText('暂无数据')).toBeVisible({ timeout: 10_000 });
+
+  await humanClickUntil(
+      wanDialog.getByRole('button', { name: '确 定' }),
+      async () => !await wanDialog.isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 800, ...strictHumanOptions },
+  );
+  await expect(wanDialog).toBeHidden({ timeout: 10_000 });
+  await humanClickUntil(
+      page.getByTestId('site-save-button').nth(1),
+      async () => await page.getByText('配置已保存').isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
+  );
+  await expect(page.getByText('配置已保存')).toBeVisible();
+
+  await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('WAN1');
+  await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
+
+  const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
+  await attachRecorderEvidence(testInfo, page, recorderPage, flow);
+  expect(flow.artifacts.playwrightCode).toContain('wan-config-table');
+  expect(flow.artifacts.playwrightCode).toContain('data-row-key=\\"1\\"');
+  expect(flow.artifacts.playwrightCode).toContain('ha-wan-row-edit-action');
+  expect(flow.artifacts.playwrightCode).toContain('ha-wan-transport-row-delete-action');
+  expect(flow.artifacts.playwrightCode).not.toContain('await page.getByTestId("ha-wan-row-edit-action").click();');
+
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo, async replayPage => {
+    await expectWanConfigPage(replayPage, { sharedWanDuplicateEdit: true, expectWan1Transport: false });
+    await expect(replayPage.getByText('配置已保存')).toBeVisible({ timeout: 10_000 });
+  }, [
+    `await expect(page.getByTestId("site-global-wan-section")).toContainText("WAN配置", { timeout: 10000 });`,
+    `await expect(page.getByText("配置已保存")).toBeVisible({ timeout: 10000 });`,
+  ]);
+});
+
 test('human-like runtime replay skips redundant IPv4 field focus click @human-smoke', async ({ page, attachRecorder, baseURL }) => {
   test.setTimeout(120_000);
   const strictHumanOptions = { allowFallback: false as const };
@@ -701,8 +780,17 @@ async function expectAddressAndPortPoolsPage(page: Page) {
   await expect(page.locator('.ant-pro-card-title').filter({ hasText: '地址池与端口池' })).toBeVisible();
 }
 
-async function expectWanConfigPage(page: Page, options: { expectWan2Transport?: boolean } = { expectWan2Transport: true }) {
+async function expectWanConfigPage(page: Page, options: { expectWan2Transport?: boolean; expectWan1Transport?: boolean; sharedWanDuplicateEdit?: boolean } = { expectWan2Transport: true }) {
   await expect(page.getByTestId('site-global-wan-section')).toContainText('WAN配置');
+  if (options.sharedWanDuplicateEdit) {
+    const wan1Row = page.getByTestId('wan-config-table').locator('[data-row-key="1"]').first();
+    await expect(wan1Row).toContainText('WAN1', { timeout: 10_000 });
+    await expect(wan1Row).toContainText('HS专线');
+    if (options.expectWan1Transport !== false)
+      await expect(wan1Row).toContainText('HS Internet');
+    await expect(page.getByTestId('ha-wan-row-edit-action')).toHaveCount(2);
+    return;
+  }
   const wan2Row = page.getByTestId('wan-config-table').locator('[data-row-key="2"]').first();
   await expect(wan2Row).toContainText('WAN2', { timeout: 10_000 });
   if (options.expectWan2Transport !== false)
