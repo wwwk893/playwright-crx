@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  */
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
@@ -136,7 +137,18 @@ async function installSidecarFixture(page: Page) {
       },
     };
   });
-  await page.addScriptTag({ path: path.join(process.cwd(), 'examples/recorder-crx/dist/pageContextSidecar.js') });
+  await page.addScriptTag({ path: sidecarBundlePath() });
+}
+
+function sidecarBundlePath() {
+  const candidates = [
+    path.resolve(process.cwd(), 'examples/recorder-crx/dist/pageContextSidecar.js'),
+    path.resolve(process.cwd(), '../examples/recorder-crx/dist/pageContextSidecar.js'),
+  ];
+  const bundlePath = candidates.find(candidate => fs.existsSync(candidate));
+  if (!bundlePath)
+    throw new Error(`Cannot find pageContextSidecar bundle. Tried: ${candidates.join(', ')}`);
+  return bundlePath;
 }
 
 async function captureAfterSequence(page: Page, selectors: string[]) {
