@@ -103,6 +103,7 @@ export const test = crxTest.extend<{
               await chrome.storage.sync.set({ businessFlowEnabled: mode === 'business-flow' });
             }, mode);
 
+            let didAttachCurrentTab = false;
             const attachCurrentTab = async () => {
               if (page.isClosed())
                 throw new Error('Cannot attach recorder because the target page was closed');
@@ -114,6 +115,7 @@ export const test = crxTest.extend<{
                 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
                 await attach(tab);
               });
+              didAttachCurrentTab = true;
             };
 
             const extensionPages = () => context.pages().filter(p => !p.isClosed() && p.url().startsWith(extensionOrigin));
@@ -152,6 +154,8 @@ export const test = crxTest.extend<{
             }
             if (!recorderPage)
               throw new Error(`Recorder surface ${mode} did not attach after retrying stale extension pages`);
+            if (!didAttachCurrentTab)
+              await attachCurrentTab();
 
             const locator = page.locator('x-pw-glass').first();
             try {
