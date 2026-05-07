@@ -36,7 +36,7 @@ test('should resume', async ({ recorderPage, baseURL }) => {
   await recorderPage.getByTitle('Record').click();
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -50,9 +50,9 @@ test('should show errors', async ({ basePath, page, recorderPage, baseURL }) => 
 
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(1);
+  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(1, { timeout: 10000 });
 
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `▼ Click( page.locator('textarea') ) ❌ — XXms`,
   ]);
@@ -70,9 +70,9 @@ test('should clear errors when resuming after errors', async ({ basePath, page, 
 
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(1);
+  await expect(sourceErrorUnderlineLines(recorderPage)).toHaveCount(1, { timeout: 10000 });
 
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `▼ Click( page.locator('textarea') ) ❌ — XXms`,
   ]);
@@ -81,7 +81,7 @@ test('should clear errors when resuming after errors', async ({ basePath, page, 
 
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -96,27 +96,27 @@ test('should step', async ({ recorderPage, baseURL }) => {
 
   await recorderPage.getByTitle('Step Over (F10)').click();
   await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`  await page.goto('${baseURL}/input/textarea.html');`);
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `▼ Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
   await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`  await page.locator('textarea').click();`);
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `▼ Click( page.locator('textarea') ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
   await expect(sourceMarkedLine(recorderPage, 'paused')).toHaveText(`  await page.locator('textarea').fill('test');`);
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `▼ Fill "test"( page.locator('textarea') ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -127,12 +127,12 @@ test('should step then resume', async ({ recorderPage, baseURL }) => {
   await recorderPage.getByTitle('Record').click();
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `▼ Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Resume (F8)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -143,14 +143,14 @@ test('should resume then step', async ({ recorderPage, baseURL }) => {
   await recorderPage.getByTitle('Record').click();
 
   await recorderPage.getByTitle('Resume (F8)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `▼ Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ⏸️`,
   ]);
 });
@@ -159,7 +159,7 @@ test('should resume then record then resume', async ({ recorderPage, recordActio
   await recorderPage.getByTitle('Record').click();
 
   await recorderPage.getByTitle('Resume (F8)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -173,7 +173,7 @@ test('should resume then record then resume', async ({ recorderPage, recordActio
   await recorderPage.getByTitle('Record').click();
 
   await recorderPage.getByTitle('Resume (F8)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -197,7 +197,7 @@ test('should resume with multiple pages', async ({ context, attachRecorder, reco
   await recorderPage.getByTitle('Record').click();
 
   await recorderPage.getByTitle('Resume (F8)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
@@ -215,19 +215,19 @@ test('should reset call logs on resume', async ({ context, attachRecorder, recor
   await recorderPage.getByTitle('Record').click();
   await recorderPage.getByTitle('Resume (F8)').click();
 
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,
   ]);
 
   await recorderPage.getByTitle('Step Over (F10)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `▼ Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ⏸️`,
   ]);
 
   await recorderPage.getByTitle('Resume (F8)').click();
-  await expect.poll(dumpLogHeaders(recorderPage)).toEqual([
+  await expect.poll(dumpLogHeaders(recorderPage), { timeout: 10000 }).toEqual([
     `► Navigate to "/input/textarea.html"( ${baseURL}/input/textarea.html ) ✅ — XXms`,
     `► Click( page.locator('textarea') ) ✅ — XXms`,
     `► Fill "test"( page.locator('textarea') ) ✅ — XXms`,

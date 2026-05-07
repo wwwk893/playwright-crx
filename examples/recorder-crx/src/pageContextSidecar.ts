@@ -84,14 +84,23 @@ type ActiveDropdownContext = {
 let activeDropdownContexts: ActiveDropdownContext[] = [];
 let lastDropdownPointerKey = '';
 let lastDropdownPointerAt = 0;
+let lastTablePointerKey = '';
+let lastTablePointerAt = 0;
 const dropdownContextTtlMs = 2500;
 const dropdownPointerDedupeMs = 80;
+const tablePointerDedupeMs = 220;
 
 if (!(window as any)[installKey]) {
   (window as any)[installKey] = true;
   document.addEventListener('click', event => recordEvent('click', event), true);
-  document.addEventListener('pointerdown', event => recordDropdownOptionPointerEvent(event), true);
-  document.addEventListener('mousedown', event => recordDropdownOptionPointerEvent(event), true);
+  document.addEventListener('pointerdown', event => {
+    recordDropdownOptionPointerEvent(event);
+    recordTablePointerEvent(event);
+  }, true);
+  document.addEventListener('mousedown', event => {
+    recordDropdownOptionPointerEvent(event);
+    recordTablePointerEvent(event);
+  }, true);
   document.addEventListener('input', event => recordEvent('input', event), true);
   document.addEventListener('change', event => recordEvent('change', event), true);
   document.addEventListener('keydown', event => recordEvent('keydown', event), true);
@@ -125,8 +134,44 @@ function dropdownOptionEventTarget(event: Event) {
   return target && isDropdownOptionTarget(target) ? target : undefined;
 }
 
+function recordTablePointerEvent(event: Event) {
+  const target = event.target instanceof Element ? event.target : undefined;
+  if (!target)
+    return;
+  const contextTarget = eventPointTarget(event, target);
+  if (isDropdownOptionTarget(contextTarget))
+    return;
+  const key = tablePointerKey(contextTarget);
+  if (!key || shouldIgnoreTarget(contextTarget, 'click'))
+    return;
+  const now = performance.now();
+  if (key === lastTablePointerKey && now - lastTablePointerAt < tablePointerDedupeMs)
+    return;
+  lastTablePointerKey = key;
+  lastTablePointerAt = now;
+  recordEventForTarget('click', event, contextTarget);
+}
+
+function tablePointerKey(target: Element) {
+  const row = closestWithin(target, tableRowSelectors);
+  const table = closestWithin(target, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
+  if (!row && !table)
+    return undefined;
+  const tableElement = table || row;
+  const tableKey = tableElement ? (testIdOf(tableElement) || tableTitle(tableElement) || '') : '';
+  const rowKey = row?.getAttribute('data-row-key') || elementText(row || target, 120) || elementText(target, 80) || '';
+  return `${tableKey}:${rowKey}`;
+}
+
+function isRecentTablePointerDuplicate(target: Element) {
+  const key = tablePointerKey(target);
+  return !!key && key === lastTablePointerKey && performance.now() - lastTablePointerAt < tablePointerDedupeMs;
+}
+
 function recordEvent(kind: ContextEventKind, event: Event) {
   const target = event.target instanceof Element ? event.target : undefined;
+  if (kind === 'click' && target && isRecentTablePointerDuplicate(eventPointTarget(event, target)))
+    return;
   recordEventForTarget(kind, event, target);
 }
 
@@ -134,8 +179,9 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
   if (!target || shouldIgnoreTarget(target, kind))
     return;
 
+  const contextTarget = eventPointTarget(event, target);
   const time = performance.now();
-  const before = collectPageContext(target);
+  const before = collectPageContext(contextTarget);
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const baseEvent = {
     id,
@@ -158,6 +204,21 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
   } else {
     emit(baseEvent);
   }
+}
+
+function eventPointTarget(event: Event, fallback: Element) {
+  if (!(event instanceof MouseEvent) || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY))
+    return fallback;
+  const pointed = document.elementFromPoint(event.clientX, event.clientY);
+  if (!(pointed instanceof Element))
+    return fallback;
+  if (fallback === pointed || fallback.contains(pointed) || pointed.contains(fallback))
+    return pointed;
+  const fallbackTable = closestWithin(fallback, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
+  const pointedTable = closestWithin(pointed, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
+  if (fallbackTable && pointedTable && fallbackTable === pointedTable)
+    return pointed;
+  return fallback;
 }
 
 function collectPageContext(target: Element) {
@@ -379,11 +440,12 @@ function collectTable(target: Element, anchor = actionAnchorForElement(target)) 
   const rowText = row ? elementText(row, 160) : undefined;
   const rowIdentity = rowIdentityFor(row, table);
   const parentExpandedRow = parentRowForExpandedRow(row);
+  const inferredRowKey = row?.getAttribute('data-row-key') || parentExpandedRow?.getAttribute('data-row-key') || inferRowKeyFromPeerRows({ row, table, wrapper, columnIndex, cellText: cell ? elementText(cell, 120) : undefined, rowText });
   const rowKind = rowKindFor(row);
   const context = compactObject({
     title: proTableTitle(wrapper) || (table ? tableTitle(table) : undefined) || sectionTitleAround(wrapper || table || row),
     testId: (wrapper ? testIdOf(wrapper) : undefined) || (table ? testIdOf(table) : undefined) || tableContainerTestId(wrapper || table || row),
-    rowKey: row?.getAttribute('data-row-key') || parentExpandedRow?.getAttribute('data-row-key') || (rowIdentity?.stable ? rowIdentity.value : undefined),
+    rowKey: inferredRowKey || (rowIdentity?.stable ? rowIdentity.value : undefined),
     rowText,
     rowIdentity,
     rowIndex: numericAttribute(row, 'data-row-index') ?? numericAttribute(row, 'data-index'),
@@ -700,6 +762,34 @@ function sectionTitleAround(root?: Element | null) {
     return undefined;
   const section = closestWithin(root, '.ant-pro-card, .ant-card, section, [role="region"]');
   return section ? textFromFirst('.ant-pro-card-title, .ant-card-head-title, h1, h2, h3, h4, [class*="title"]', section) : undefined;
+}
+
+function inferRowKeyFromPeerRows({ row, table, wrapper, columnIndex, cellText, rowText }: { row?: Element; table?: Element; wrapper?: Element; columnIndex: number; cellText?: string; rowText?: string }) {
+  const root = wrapper || table || row?.parentElement;
+  if (!root)
+    return undefined;
+  const rows = Array.from(root.querySelectorAll('tr[data-row-key], .ant-table-row[data-row-key], [role="row"][data-row-key]'));
+  const normalizedRowText = normalizeComparableText(rowText);
+  const normalizedCellText = normalizeComparableText(cellText);
+  const matches = rows.filter(candidate => {
+    if (candidate === row)
+      return false;
+    const candidateRowText = normalizeComparableText(elementText(candidate, 160));
+    if (normalizedRowText && candidateRowText && (candidateRowText === normalizedRowText || candidateRowText.includes(normalizedRowText) || normalizedRowText.includes(candidateRowText)))
+      return true;
+    if (columnIndex >= 0 && normalizedCellText) {
+      const cells = Array.from(candidate.children);
+      const candidateCellText = normalizeComparableText(elementText(cells[columnIndex], 120));
+      return candidateCellText === normalizedCellText;
+    }
+    return false;
+  });
+  const keys = Array.from(new Set(matches.map(match => match.getAttribute('data-row-key')).filter((key): key is string => !!key)));
+  return keys.length === 1 ? keys[0] : undefined;
+}
+
+function normalizeComparableText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim();
 }
 
 function rowIdentityFor(row?: Element, table?: Element) {

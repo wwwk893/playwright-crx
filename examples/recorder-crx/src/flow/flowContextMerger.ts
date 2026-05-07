@@ -114,7 +114,7 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
   const hasBetterText = !target.text && contextTarget.text;
   const hasBetterPlaceholder = !target.placeholder && contextTarget.placeholder;
   const hasBetterLabel = !target.label && contextScope?.form?.label;
-  const hasBetterScope = !!contextScope && !target.scope;
+  const hasBetterScope = hasRicherScope(target.scope, contextScope);
   const hasBetterLocatorHint = !!locatorHint && !target.locatorHint;
 
   const preferredContextText = preferContextOptionText(contextTarget, target.text || target.name || target.displayName);
@@ -132,12 +132,56 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
     label: target.label || contextScope?.form?.label,
     placeholder: target.placeholder || contextTarget.placeholder,
     text: target.text && !preferredContextText ? target.text : preferredContextText || contextText,
-    scope: target.scope || contextScope,
+    scope: mergeScope(target.scope, contextScope),
     locatorHint: target.locatorHint || locatorHint,
     raw: {
       recorder: target.raw,
       pageContext: contextTarget,
     },
+  };
+}
+
+function hasRicherScope(current?: FlowTargetScope, context?: FlowTargetScope) {
+  if (!context)
+    return false;
+  if (!current)
+    return true;
+  return (!!context.dialog && !current.dialog) ||
+    (!!context.section && !current.section) ||
+    (!!context.table && (!current.table || (!!context.table.rowKey && !current.table.rowKey) || (!!context.table.rowText && !current.table.rowText))) ||
+    (!!context.form && !current.form);
+}
+
+function mergeScope(current?: FlowTargetScope, context?: FlowTargetScope): FlowTargetScope | undefined {
+  if (!context)
+    return current;
+  if (!current)
+    return context;
+  return {
+    ...current,
+    dialog: current.dialog ?? context.dialog,
+    section: current.section ?? context.section,
+    table: mergeTableScope(current.table, context.table),
+    form: current.form ?? context.form,
+  };
+}
+
+function mergeTableScope(current?: FlowTargetScope['table'], context?: FlowTargetScope['table']) {
+  if (!context)
+    return current;
+  if (!current)
+    return context;
+  return {
+    ...current,
+    title: current.title ?? context.title,
+    testId: current.testId ?? context.testId,
+    rowKey: current.rowKey ?? context.rowKey,
+    rowText: current.rowText ?? context.rowText,
+    rowIdentity: current.rowIdentity ?? context.rowIdentity,
+    columnName: current.columnName ?? context.columnName,
+    nestingLevel: current.nestingLevel ?? context.nestingLevel,
+    fixedSide: current.fixedSide ?? context.fixedSide,
+    fingerprint: current.fingerprint ?? context.fingerprint,
   };
 }
 

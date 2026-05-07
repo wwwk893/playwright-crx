@@ -1300,7 +1300,22 @@ function inferTargetFromSelector(selector: string): Partial<FlowTarget> {
   target.placeholder = cleanupSelectorText(firstMatch(placeholderMatch));
   target.text = cleanupSelectorText(firstMatch(textMatch));
   target.locator = selector;
+  if (target.testId) {
+    const ordinalHint = locatorHintFromSelectorOrdinal(selector);
+    if (ordinalHint)
+      target.locatorHint = ordinalHint;
+  }
   return target;
+}
+
+function locatorHintFromSelectorOrdinal(selector: string) {
+  const nthMatch = selector.match(/(?:>>\s*)?nth=(-?\d+)/);
+  if (!nthMatch)
+    return undefined;
+  const pageIndex = Number(nthMatch[1]);
+  if (!Number.isInteger(pageIndex) || pageIndex < 0)
+    return undefined;
+  return { strategy: 'global-testid' as const, confidence: 0.9, pageCount: pageIndex + 1, pageIndex };
 }
 
 function extractTestId(selector: string) {
