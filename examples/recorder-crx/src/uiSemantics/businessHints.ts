@@ -156,7 +156,7 @@ function mergeBusinessForm(base: UiFormContext | undefined, target: Element): Ui
     formKind: formKindFor(field.getAttribute('data-e2e-form-kind')) || base?.formKind,
     fieldKind: safeText(field.getAttribute('data-e2e-field-kind'), 60) || base?.fieldKind,
     name: safeText(field.getAttribute('data-e2e-field-name'), 80) || base?.name,
-    testId: testIdOf(field) || base?.testId,
+    testId: nearestTestId(field) || base?.testId,
   }) as UiFormContext | undefined;
 }
 

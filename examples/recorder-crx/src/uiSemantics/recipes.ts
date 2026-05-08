@@ -70,6 +70,8 @@ export function buildUiRecipe(ui: UiSemanticContext): UiActionRecipe {
   if (component === 'popover')
     return { ...base, kind: 'raw-dom-action' };
 
+  if (fieldLabel && isFillFieldComponent(component))
+    return { ...base, kind: 'fill-form-field' };
   if (formKind === 'modal-form' || component === 'modal-form')
     return { ...base, kind: isResetText(targetText) ? 'reset-form' : 'submit-form' };
   if (formKind === 'drawer-form' || component === 'drawer-form')
@@ -79,8 +81,6 @@ export function buildUiRecipe(ui: UiSemanticContext): UiActionRecipe {
   if (component === 'drawer')
     return { ...base, kind: 'drawer-action' };
 
-  if (fieldLabel && isFillFieldComponent(component))
-    return { ...base, kind: 'fill-form-field' };
   if (component === 'form')
     return { ...base, kind: isResetText(targetText) ? 'reset-form' : isSubmitText(targetText) ? 'submit-form' : 'raw-dom-action' };
   if (component === 'button' || targetText)
