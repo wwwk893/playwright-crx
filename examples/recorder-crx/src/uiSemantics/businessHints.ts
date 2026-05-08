@@ -22,6 +22,18 @@ const businessHintSelector = [
   '[data-e2e-overlay]',
 ].join(', ');
 
+const tableFallbackSelector = [
+  '[data-testid][data-e2e-component="pro-table"]',
+  '[data-test-id][data-e2e-component="pro-table"]',
+  '[data-e2e][data-e2e-component="pro-table"]',
+  '[data-testid][data-e2e-component="editable-pro-table"]',
+  '[data-test-id][data-e2e-component="editable-pro-table"]',
+  '[data-e2e][data-e2e-component="editable-pro-table"]',
+  '[data-testid][data-e2e-component="pro-list"]',
+  '[data-test-id][data-e2e-component="pro-list"]',
+  '[data-e2e][data-e2e-component="pro-list"]',
+].join(', ');
+
 const componentMap: Record<string, UiComponentKind> = {
   'button': 'button',
   'form': 'form',
@@ -138,7 +150,7 @@ function componentFor(value?: string | null): UiComponentKind | undefined {
   const key = safeText(value, 60)?.toLowerCase();
   if (!key)
     return undefined;
-  return componentMap[key] || 'unknown';
+  return componentMap[key];
 }
 
 function libraryFor(component: UiComponentKind): UiLibrary {
@@ -161,7 +173,7 @@ function mergeBusinessForm(base: UiFormContext | undefined, target: Element): Ui
 }
 
 function mergeBusinessTable(base: UiTableContext | undefined, target: Element, component?: UiComponentKind): UiTableContext | undefined {
-  const table = closestWithAttr(target, 'data-e2e-table') || closestWithin(target, '[data-testid][data-e2e-component="pro-table"], [data-testid][data-e2e-component="editable-pro-table"], [data-testid][data-e2e-component="pro-list"]');
+  const table = closestWithAttr(target, 'data-e2e-table') || closestWithin(target, tableFallbackSelector);
   const row = closestWithAttr(target, 'data-row-key');
   const column = closestWithAttr(target, 'data-column-key');
   const role = closestWithAttr(target, 'data-e2e-role');

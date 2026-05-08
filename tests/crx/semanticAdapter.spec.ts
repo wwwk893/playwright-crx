@@ -172,6 +172,18 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
     expect(fieldEvent.before?.ui?.form?.testId).toBe('site-ip-port-pool-vrf-field');
     expect(fieldEvent.before?.ui?.recipe?.fieldName).toBe('destVrfId');
 
+    const unmappedComponentEvent = await captureAfterSequence(page, ['#business-unmapped-select .ant-select-selector']);
+    expect(unmappedComponentEvent.before?.ui?.library).toBe('antd');
+    expect(unmappedComponentEvent.before?.ui?.component).toBe('select');
+    expect(unmappedComponentEvent.before?.ui?.targetTestId).toBe('site-unmapped-select');
+    expect(unmappedComponentEvent.before?.ui?.form?.name).toBe('unmappedSelect');
+
+    const fallbackTableEvent = await captureAfterSequence(page, ['#business-alt-table-edit']);
+    expect(fallbackTableEvent.before?.ui?.component).toBe('pro-table');
+    expect(fallbackTableEvent.before?.ui?.table?.testId).toBe('business-alt-table');
+    expect(fallbackTableEvent.before?.ui?.table?.rowKey).toBe('alt-1');
+    expect(fallbackTableEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+
     const rowEvent = await captureAfterSequence(page, ['#business-row-edit']);
     expect(rowEvent.before?.ui?.library).toBe('pro-components');
     expect(rowEvent.before?.ui?.component).toBe('pro-table');
@@ -220,6 +232,53 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
     expect(rowEditEvent.before?.ui?.table?.rowKey).toBe('pool-42');
     expect(rowEditEvent.before?.ui?.table?.columnKey).toBe('option');
     expect(rowEditEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+  });
+
+  test('records a realistic WAN transport network configuration flow with human-like interactions', async ({ page }) => {
+    await page.setContent(wanTransportFixtureHtml());
+    await installSidecarOnCurrentPage(page);
+
+    const addEvent = await userClickAndRead(page, '#wan-transport-add-button');
+    expect(addEvent.before?.ui?.component).toBe('pro-table-toolbar');
+    expect(addEvent.before?.ui?.targetTestId).toBe('wan-transport-add-button');
+    expect(addEvent.before?.ui?.table?.tableId).toBe('wan-transport');
+    expect(addEvent.before?.ui?.recipe?.kind).toBe('protable-toolbar-action');
+
+    const transportEvent = await userClickAndRead(page, '#wan-transport-select .ant-select-selector');
+    expect(transportEvent.before?.ui?.component).toBe('select');
+    expect(transportEvent.before?.ui?.form?.name).toBe('transport');
+    expect(transportEvent.before?.ui?.form?.fieldKind).toBe('select');
+
+    const transportOptionEvent = await userClickAndRead(page, '#wan-transport-option-nova-public');
+    expect(transportOptionEvent.before?.ui?.recipe?.kind).toBe('select-option');
+    expect(transportOptionEvent.before?.ui?.option?.text).toBe('Nova 公网');
+
+    const tagEvent = await userClickAndRead(page, '#wan-transport-tags-select .ant-select-selector');
+    expect(tagEvent.before?.ui?.form?.name).toBe('tags');
+    expect(tagEvent.before?.ui?.form?.fieldKind).toBe('multi-select');
+
+    const fecEvent = await userClickAndRead(page, '#wan-transport-egress-fec-auto');
+    expect(fecEvent.before?.ui?.component).toBe('radio-group');
+    expect(fecEvent.before?.ui?.form?.name).toBe('wanTransportFec.enableEgressFec');
+    expect(fecEvent.before?.ui?.recipe?.kind).toBe('toggle-control');
+
+    const thresholdEvent = await userFillAndRead(page, '#wan-transport-egress-disable-threshold-input', '3');
+    expect(thresholdEvent.before?.ui?.form?.name).toBe('wanTransportFec.engressThres.disableThres');
+    expect(thresholdEvent.before?.ui?.recipe?.kind).toBe('fill-form-field');
+
+    const okEvent = await userClickAndRead(page, '#wan-transport-modal-ok-button');
+    expect(okEvent.before?.ui?.targetTestId).toBe('wan-transport-modal-ok-button');
+    expect(okEvent.before?.ui?.form?.formKind).toBe('modal-form');
+    expect(okEvent.before?.ui?.recipe?.kind).toBe('submit-form');
+
+    const deleteEvent = await userClickAndRead(page, '#wan-transport-row-delete-action');
+    expect(deleteEvent.before?.ui?.targetTestId).toBe('wan-transport-row-delete-action');
+    expect(deleteEvent.before?.ui?.table?.rowKey).toBe('nova_public');
+    expect(deleteEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+
+    const confirmEvent = await userClickAndRead(page, '#wan-transport-delete-confirm-ok');
+    expect(confirmEvent.before?.ui?.componentPath).toContain('popconfirm');
+    expect(confirmEvent.before?.ui?.recipe?.kind).toBe('confirm-popconfirm');
   });
 
   test('focused semantic stress stays stable across repeated portal overlay table interactions', async ({ page }) => {
@@ -353,11 +412,40 @@ async function userFillAndRead(page: Page, selector: string, value: string): Pro
 async function performUserActionAndRead(page: Page, selector: string, action: (locator: Locator) => Promise<void>): Promise<CapturedContextEvent> {
   const locator = page.locator(selector);
   await locator.scrollIntoViewIfNeeded();
+  const expected = await locator.evaluate(element => {
+    const nearestTestId = (current: Element | null): string | undefined => {
+      for (let node = current; node; node = node.parentElement) {
+        const value = node.getAttribute('data-testid') || node.getAttribute('data-test-id') || node.getAttribute('data-e2e');
+        if (value)
+          return value;
+      }
+      return undefined;
+    };
+    const nearestAttr = (current: Element | null, attr: string): string | undefined => {
+      for (let node = current; node; node = node.parentElement) {
+        const value = node.getAttribute(attr);
+        if (value)
+          return value;
+      }
+      return undefined;
+    };
+    return {
+      testId: nearestTestId(element),
+      fieldName: nearestAttr(element, 'data-e2e-field-name'),
+      action: nearestAttr(element, 'data-e2e-action'),
+      text: element.textContent?.trim(),
+    };
+  });
   const start = await page.evaluate(() => (window as any).__semanticEvents.length as number);
   await action(locator);
   await expect.poll(async () => page.evaluate(length => (window as any).__semanticEvents.length > length, start), { message: `semantic event for ${selector}`, timeout: 2000 }).toBe(true);
-  const events = await page.evaluate(() => (window as any).__semanticEvents as CapturedContextEvent[]);
-  return events[events.length - 1];
+  const events = await page.evaluate(startIndex => ((window as any).__semanticEvents as CapturedContextEvent[]).slice(startIndex), start);
+  return events.slice().reverse().find(event =>
+    (!!expected.testId && (event.before?.target?.testId === expected.testId || event.before?.ui?.targetTestId === expected.testId || event.before?.ui?.form?.testId === expected.testId || event.before?.ui?.table?.testId === expected.testId)) ||
+    (!!expected.fieldName && event.before?.ui?.form?.name === expected.fieldName) ||
+    (!!expected.action && event.before?.ui?.table?.region === 'row-action') ||
+    (!!expected.text && event.before?.ui?.targetText === expected.text)
+  ) ?? events[events.length - 1];
 }
 
 function businessPilotFixtureHtml() {
@@ -391,6 +479,39 @@ body { font-family: sans-serif; padding: 20px; }
 <div class="ant-select-dropdown" data-e2e-overlay="select-dropdown">
   <div id="site-ip-port-pool-vrf-option-default" class="ant-select-item-option" role="option" title="默认 VRF"><div>默认 VRF</div></div>
 </div>
+</body></html>`;
+}
+
+function wanTransportFixtureHtml() {
+  return `<!doctype html>
+<html><head><style>
+body { font-family: sans-serif; padding: 20px; }
+.ant-pro-table,.ant-modal,.ant-popover,.ant-select-dropdown { border:1px solid #ddd; margin:8px; padding:8px; }
+.ant-modal,.ant-popover,.ant-select-dropdown { display:block; visibility:visible; position:relative; z-index:10; background:#fff; }
+.ant-form-item { margin:8px 0; }
+.ant-select-selector { border:1px solid #999; padding:4px; display:inline-block; min-width:180px; }
+.ant-radio-wrapper { display:inline-block; margin:4px 8px 4px 0; }
+</style></head><body>
+<section class="ant-pro-table" data-testid="wan-transport-table" data-e2e-component="pro-table" data-e2e-table="wan-transport">
+  <div class="ant-pro-table-list-toolbar"><button id="wan-transport-add-button" class="ant-btn ant-btn-dashed" data-testid="wan-transport-add-button" data-e2e-component="pro-table-toolbar" data-e2e-action="create">增加传输网络</button></div>
+  <table class="ant-table"><tbody><tr class="ant-table-row" data-testid="wan-transport-row" data-row-key="nova_public"><td>Nova 公网</td><td data-column-key="option"><button id="wan-transport-row-edit-action" class="ant-btn" data-testid="wan-transport-row-edit-action" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button><a id="wan-transport-row-delete-action" href="#" data-testid="wan-transport-row-delete-action" data-e2e-component="pro-table" data-e2e-action="delete">删除</a></td></tr></tbody></table>
+</section>
+<div class="ant-modal ant-pro-form modal-form" role="dialog" data-testid="wan-transport-modal" data-e2e-overlay="modal" data-e2e-component="modal-form">
+  <div class="ant-modal-title">增加传输网络</div>
+  <form class="ant-form ant-pro-form">
+    <div class="ant-form-item" data-testid="wan-transport-select-field" data-e2e-component="pro-form-field" data-e2e-field-name="transport" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>传输网络</label></div><div id="wan-transport-select" class="ant-select" data-testid="wan-transport-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox"><span>请选择传输网络</span></div></div></div>
+    <div class="ant-form-item" data-testid="wan-transport-tags-field" data-e2e-component="pro-form-field" data-e2e-field-name="tags" data-e2e-field-kind="multi-select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>WAN 标签</label></div><div id="wan-transport-tags-select" class="ant-select ant-select-multiple" data-testid="wan-transport-tags-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox"><span>请选择 WAN 标签</span></div></div></div>
+    <div class="ant-form-item" data-testid="wan-transport-egress-fec-field" data-e2e-component="pro-form-field" data-e2e-field-name="wanTransportFec.enableEgressFec" data-e2e-field-kind="radio" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>出方向 FEC</label></div><label id="wan-transport-egress-fec-auto" class="ant-radio-wrapper" data-e2e-component="radio-group"><span class="ant-radio"><input type="radio" /></span><span>自动</span></label></div>
+    <div class="ant-form-item" data-testid="wan-transport-egress-disable-threshold-field" data-e2e-component="pro-form-field" data-e2e-field-name="wanTransportFec.engressThres.disableThres" data-e2e-field-kind="number" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label for="wan-transport-egress-disable-threshold-input">小于该丢包率即关闭 FEC</label></div><input id="wan-transport-egress-disable-threshold-input" data-e2e-component="input" data-e2e-field-name="wanTransportFec.engressThres.disableThres" data-e2e-field-kind="number" /></div>
+    <button id="wan-transport-modal-ok-button" type="button" class="ant-btn ant-btn-primary" data-testid="wan-transport-modal-ok-button" data-e2e-component="modal-form" data-e2e-action="submit">确 定</button>
+    <button id="wan-transport-modal-cancel-button" type="button" class="ant-btn" data-testid="wan-transport-modal-cancel-button" data-e2e-component="modal-form" data-e2e-action="cancel">取 消</button>
+  </form>
+</div>
+<div class="ant-select-dropdown" data-e2e-overlay="select-dropdown">
+  <div id="wan-transport-option-nova-public" class="ant-select-item-option" role="option" title="Nova 公网"><div>Nova 公网</div></div>
+  <div id="wan-transport-tags-option-controller" class="ant-select-item-option" role="option" title="controller"><div>controller</div></div>
+</div>
+<div class="ant-popover ant-popconfirm" data-e2e-overlay="popconfirm"><div class="ant-popover-content"><div class="ant-popover-inner"><div class="ant-popover-title ant-popconfirm-title">删除此行？</div><div class="ant-popover-inner-content ant-popconfirm-buttons"><button id="wan-transport-delete-confirm-ok" class="ant-btn ant-btn-primary">确 定</button></div></div></div></div>
 </body></html>`;
 }
 
@@ -438,5 +559,7 @@ body { font-family: sans-serif; }
 <section class="ant-pro-table" data-testid="business-ip-port-pool-table" data-e2e-component="pro-table" data-e2e-table="ip-port-pool"><div class="ant-pro-table-list-toolbar"><button id="business-create" class="ant-btn ant-btn-primary" data-testid="site-ip-port-pool-create-button" data-e2e-component="pro-table-toolbar" data-e2e-action="create">新建地址池</button></div><table class="ant-table"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody><tr class="ant-table-row" data-testid="site-ip-port-pool-row" data-row-key="pool-42"><td>pool-a</td><td data-column-key="option"><button id="business-row-edit" class="ant-btn" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr></tbody></table></section>
 <div class="ant-form-item" data-testid="site-ip-port-pool-vrf-field" data-e2e-component="pro-form-field" data-e2e-field-name="destVrfId" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>目的 VRF</label></div><div id="business-vrf-select" class="ant-select" data-testid="site-ip-port-pool-vrf-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox" aria-label="目的 VRF"><span>请选择 VRF</span></div></div></div>
 <div id="business-unknown-hint" data-testid="custom-widget-root" data-e2e-component="company-owned-widget"><span>自定义业务控件</span></div>
+<div class="ant-form-item" data-testid="site-unmapped-select-field" data-e2e-field-name="unmappedSelect" data-e2e-field-kind="select"><div class="ant-form-item-label"><label>未映射选择器</label></div><div id="business-unmapped-select" class="ant-select" data-testid="site-unmapped-select" data-e2e-component="company-select"><div class="ant-select-selector" role="combobox"><span>请选择</span></div></div></div>
+<section class="ant-pro-table" data-test-id="business-alt-table" data-e2e-component="pro-table"><table class="ant-table"><tbody><tr class="ant-table-row" data-row-key="alt-1"><td>Alt</td><td data-column-key="option"><button id="business-alt-table-edit" class="ant-btn" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr></tbody></table></section>
 </body></html>`;
 }
