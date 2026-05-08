@@ -152,6 +152,7 @@ function sanitizeUiSemanticContext(ui?: UiSemanticContext): UiSemanticContext | 
       formKind: ui.form.formKind,
       formTitle: ui.form.formTitle,
       formName: ui.form.formName,
+      testId: ui.form.testId,
       fieldKind: ui.form.fieldKind,
       label: ui.form.label,
       name: ui.form.name,
@@ -163,6 +164,8 @@ function sanitizeUiSemanticContext(ui?: UiSemanticContext): UiSemanticContext | 
     table: ui.table ? compactObject({
       tableKind: ui.table.tableKind,
       title: ui.table.title,
+      tableId: ui.table.tableId,
+      testId: ui.table.testId,
       rowKey: ui.table.rowKey,
       columnKey: ui.table.columnKey,
       columnTitle: ui.table.columnTitle,

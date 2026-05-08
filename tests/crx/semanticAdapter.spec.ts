@@ -16,11 +16,13 @@ type CapturedContextEvent = {
       componentPath?: string[];
       library?: string;
       targetText?: string;
-      form?: { label?: string; formKind?: string; fieldKind?: string };
-      table?: { title?: string; rowKey?: string; columnTitle?: string; region?: string; tableKind?: string };
+      targetTestId?: string;
+      targetRole?: string;
+      form?: { label?: string; name?: string; formKind?: string; fieldKind?: string; testId?: string };
+      table?: { title?: string; testId?: string; tableId?: string; rowKey?: string; columnKey?: string; columnTitle?: string; region?: string; tableKind?: string };
       overlay?: { type?: string; title?: string; text?: string };
       option?: { text?: string; path?: string[] };
-      recipe?: { kind?: string; component?: string; formKind?: string; fieldLabel?: string; optionText?: string; tableTitle?: string; rowKey?: string; columnTitle?: string; overlayTitle?: string; targetText?: string };
+      recipe?: { kind?: string; component?: string; formKind?: string; fieldLabel?: string; fieldName?: string; optionText?: string; tableTitle?: string; rowKey?: string; columnTitle?: string; overlayTitle?: string; targetText?: string };
       locatorHints?: Array<{ kind?: string; score?: number; reason?: string }>;
       confidence?: number;
       weak?: boolean;
@@ -149,6 +151,38 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
     expect(json).not.toContain('rowText');
     expect(json).not.toContain('overlay text');
     expect(json).not.toContain('option.value');
+  });
+
+  test('maps generic business e2e hints into UiSemanticContext without networking hardcoding', async ({ page }) => {
+    await installSidecarFixture(page);
+
+    const toolbarEvent = await captureAfterSequence(page, ['#business-create']);
+    expect(toolbarEvent.before?.ui?.library).toBe('pro-components');
+    expect(toolbarEvent.before?.ui?.component).toBe('pro-table-toolbar');
+    expect(toolbarEvent.before?.ui?.targetTestId).toBe('site-ip-port-pool-create-button');
+    expect(toolbarEvent.before?.ui?.table?.tableId || toolbarEvent.before?.ui?.table?.title).toBe('ip-port-pool');
+    expect(toolbarEvent.before?.ui?.recipe?.kind).toBe('protable-toolbar-action');
+
+    const fieldEvent = await captureAfterSequence(page, ['#business-vrf-select .ant-select-selector']);
+    expect(fieldEvent.before?.ui?.library).toBe('antd');
+    expect(fieldEvent.before?.ui?.component).toBe('select');
+    expect(fieldEvent.before?.ui?.targetTestId).toBe('site-ip-port-pool-vrf-select');
+    expect(fieldEvent.before?.ui?.form?.name).toBe('destVrfId');
+    expect(fieldEvent.before?.ui?.form?.fieldKind).toBe('select');
+    expect(fieldEvent.before?.ui?.form?.testId).toBe('site-ip-port-pool-vrf-field');
+    expect(fieldEvent.before?.ui?.recipe?.fieldName).toBe('destVrfId');
+
+    const rowEvent = await captureAfterSequence(page, ['#business-row-edit']);
+    expect(rowEvent.before?.ui?.library).toBe('pro-components');
+    expect(rowEvent.before?.ui?.component).toBe('pro-table');
+    expect(rowEvent.before?.ui?.table?.rowKey).toBe('pool-42');
+    expect(rowEvent.before?.ui?.table?.columnKey).toBe('option');
+    expect(rowEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+
+    const unknownEvent = await captureAfterSequence(page, ['#business-unknown-hint']);
+    expect(unknownEvent.before?.ui?.component).toBe('unknown');
+    expect(unknownEvent.before?.ui?.library).toBe('unknown');
+    expect(unknownEvent.before?.ui?.targetTestId).toBe('custom-widget-root');
   });
 
   test('focused semantic stress stays stable across repeated portal overlay table interactions', async ({ page }) => {
@@ -302,5 +336,8 @@ body { font-family: sans-serif; }
 <form class="ant-pro-form beta-schema-form"><div class="ant-form-item"><div class="ant-form-item-label"><label for="schema-field">Schema 字段</label></div><input id="schema-field" name="schemaField" /></div></form>
 <section class="ant-pro-descriptions"><h2>租户详情</h2><div id="desc-status" class="ant-descriptions-item"><span class="ant-descriptions-item-label">状态</span><span class="ant-descriptions-item-content">启用</span></div></section>
 <section class="ant-pro-list"><h2>工单列表</h2><div class="ant-list-item" data-row-key="list-1"><span>工单 A</span><button id="list-action" class="ant-btn">处理</button></div></section>
+<section class="ant-pro-table" data-testid="business-ip-port-pool-table" data-e2e-component="pro-table" data-e2e-table="ip-port-pool"><div class="ant-pro-table-list-toolbar"><button id="business-create" class="ant-btn ant-btn-primary" data-testid="site-ip-port-pool-create-button" data-e2e-component="pro-table-toolbar" data-e2e-action="create">新建地址池</button></div><table class="ant-table"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody><tr class="ant-table-row" data-testid="site-ip-port-pool-row" data-row-key="pool-42"><td>pool-a</td><td data-column-key="option"><button id="business-row-edit" class="ant-btn" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr></tbody></table></section>
+<div class="ant-form-item" data-testid="site-ip-port-pool-vrf-field" data-e2e-component="pro-form-field" data-e2e-field-name="destVrfId" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>目的 VRF</label></div><div id="business-vrf-select" class="ant-select" data-testid="site-ip-port-pool-vrf-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox" aria-label="目的 VRF"><span>请选择 VRF</span></div></div></div>
+<div id="business-unknown-hint" data-testid="custom-widget-root" data-e2e-component="company-owned-widget"><span>自定义业务控件</span></div>
 </body></html>`;
 }

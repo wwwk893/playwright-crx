@@ -4973,6 +4973,87 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'business semantic hints export compact yaml and AI input keep generic contract only',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('编辑')], [], {});
+      const businessUi = {
+        library: 'pro-components',
+        component: 'pro-table',
+        componentPath: ['pro-table'],
+        targetText: '编辑',
+        targetTestId: 'site-ip-port-pool-row-edit-action',
+        form: {
+          formKind: 'modal-form',
+          fieldKind: 'select',
+          name: 'destVrfId',
+          label: '目的 VRF',
+          testId: 'site-ip-port-pool-vrf-field',
+          valuePreview: 'internal-sensitive-preview',
+        },
+        table: {
+          tableKind: 'pro-table',
+          tableId: 'ip-port-pool',
+          testId: 'site-ip-port-pool-table',
+          rowKey: 'pool-42',
+          rowText: 'pool-42 admin@example.com secret row text',
+          columnKey: 'option',
+        },
+        overlay: { type: 'modal', title: 'IP 端口地址池', text: 'secret overlay text' },
+        locatorHints: [{ kind: 'testid', value: 'site-ip-port-pool-row-edit-action', score: 0.99, reason: 'business test id' }],
+        reasons: ['matched business hints with secret diagnostic reason'],
+        confidence: 0.96,
+      } as any;
+      const flowWithBusinessHints: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          uiRecipe: {
+            kind: 'table-row-action',
+            library: 'pro-components',
+            component: 'pro-table',
+            fieldKind: 'select',
+            fieldName: 'destVrfId',
+            tableTitle: 'ip-port-pool',
+            rowKey: 'pool-42',
+            columnTitle: 'option',
+            targetText: '编辑',
+            reasons: businessUi.reasons,
+          } as any,
+          target: { ...step.target, raw: { ui: businessUi, selector: '#business-secret-selector' } },
+          context: {
+            eventId: 'ctx-business-hints',
+            capturedAt: Date.now(),
+            before: {
+              title: 'IP 池页面',
+              url: 'https://example.test/networking/site/ip-pools?token=***#frag',
+              target: { tag: 'button', text: '编辑', testId: 'site-ip-port-pool-row-edit-action' },
+              ui: businessUi,
+            },
+          },
+        })),
+      };
+
+      const exported = prepareBusinessFlowForExport(flowWithBusinessHints, 'await page.getByTestId("site-ip-port-pool-row-edit-action").click();');
+      const exportedJson = JSON.stringify(exported);
+      const yaml = toCompactFlow(exported);
+      const aiJson = JSON.stringify(buildAiIntentInput(exported, exported.steps));
+
+      for (const text of [exportedJson, yaml, aiJson]) {
+        assert(text.includes('site-ip-port-pool-row-edit-action'), 'business target test id should remain useful');
+        assert(text.includes('destVrfId'), 'business field name should remain useful');
+        assert(text.includes('pool-42'), 'business row key should remain useful');
+        assert(!text.includes('admin@example.com'), 'business rowText internals should not leak');
+        assert(!text.includes('secret overlay text'), 'business overlay text should not leak');
+        assert(!text.includes('internal-sensitive-preview'), 'business form value previews should not leak');
+        assert(!text.includes('business test id'), 'business locator hint reasons should not leak');
+        assert(!text.includes('#business-secret-selector'), 'business raw selector should not leak');
+      }
+      assert(yaml.includes('table: ip-port-pool') || yaml.includes('table: "ip-port-pool"'), 'compact yaml should preserve business table id');
+      assert(yaml.includes('column: option') || yaml.includes('column: "option"'), 'compact yaml should preserve business column key fallback');
+      assert(!aiJson.includes('token='), 'business AI input URL should strip query');
+    },
+  },
+  {
     name: 'semantic diagnostics ring buffer stores only compact redacted fields',
     run: () => {
       const buffer = createSemanticDiagnosticsBuffer(3);

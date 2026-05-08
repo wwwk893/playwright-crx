@@ -31,6 +31,14 @@ const antdActionSelectors = [
   '[data-testid]',
   '[data-test-id]',
   '[data-e2e]',
+  '[data-e2e-component]',
+  '[data-e2e-role]',
+  '[data-e2e-action]',
+  '[data-e2e-field-name]',
+  '[data-e2e-field-kind]',
+  '[data-e2e-form-kind]',
+  '[data-e2e-table]',
+  '[data-e2e-overlay]',
   'button',
   '.ant-btn',
   'a[role="button"]',
@@ -356,6 +364,10 @@ function anchorScore(element: Element, original: Element) {
     const actionLikeTestId = looksLikeActionTestId(testId);
     score += depth === 0 || actionLikeTestId ? (depth <= 2 ? 1000 : 220) : 140;
   }
+  if (element.getAttribute('data-e2e-component') || element.getAttribute('data-e2e-action'))
+    score += depth <= 2 ? 260 : 120;
+  if (element.getAttribute('data-e2e-field-name') || element.getAttribute('data-e2e-table'))
+    score += 110;
   if (tag === 'button')
     score += 500;
   if (className.includes('ant-btn'))

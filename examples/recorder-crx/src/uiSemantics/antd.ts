@@ -52,7 +52,7 @@ export function actionAnchorForElement(element: Element): Element {
 
 function isPotentialAnchor(element: Element) {
   const tag = element.tagName.toLowerCase();
-  return !!testIdOf(element) || /^(button|a|input|textarea|select|label)$/i.test(tag) ||
+  return !!testIdOf(element) || !!element.getAttribute('data-e2e-component') || !!element.getAttribute('data-e2e-role') || !!element.getAttribute('data-e2e-action') || !!element.getAttribute('data-e2e-field-name') || !!element.getAttribute('data-e2e-table') || /^(button|a|input|textarea|select|label)$/i.test(tag) ||
     element.matches([
       '.ant-btn', '.ant-select-selector', '.ant-select', '.ant-tree-select', '.ant-cascader', '.ant-cascader-picker',
       '.ant-select-item-option', '.ant-select-tree-treenode', '.ant-tree-treenode', '.ant-select-tree-node-content-wrapper', '.ant-cascader-menu-item',
@@ -71,6 +71,10 @@ function anchorScore(element: Element, original: Element) {
     const testId = testIdOf(element) || '';
     score += element === original || /(^|[-_])(button|btn|link|tab|switch|checkbox|radio|select|input|create|add|new|save|delete|remove|edit|confirm|cancel|submit|ok|option|menu)([-_]|$)/i.test(testId) ? (ancestorDistance(original, element) <= 2 ? 1000 : 180) : 140;
   }
+  if (element.getAttribute('data-e2e-component') || element.getAttribute('data-e2e-action'))
+    score += ancestorDistance(original, element) <= 2 ? 260 : 120;
+  if (element.getAttribute('data-e2e-field-name') || element.getAttribute('data-e2e-table'))
+    score += 110;
   if (tag === 'button' || className.includes('ant-btn') || role === 'button')
     score += 520;
   if (className.includes('ant-radio-button-wrapper') || className.includes('ant-checkbox-wrapper') || className.includes('ant-radio-wrapper'))

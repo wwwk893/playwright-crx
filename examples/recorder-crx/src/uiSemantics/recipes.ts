@@ -10,9 +10,9 @@ export function buildUiRecipe(ui: UiSemanticContext): UiActionRecipe {
   const fieldLabel = ui.form?.label;
   const fieldName = ui.form?.name;
   const optionText = ui.option?.text;
-  const tableTitle = ui.table?.title;
+  const tableTitle = ui.table?.title || ui.table?.tableId || ui.table?.testId;
   const rowKey = ui.table?.rowKey;
-  const columnTitle = ui.table?.columnTitle;
+  const columnTitle = ui.table?.columnTitle || ui.table?.columnKey;
   const overlayTitle = ui.overlay?.title;
   const formKind = ui.form?.formKind;
   const fieldKind = ui.form?.fieldKind;
