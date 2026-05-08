@@ -856,13 +856,16 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     case 'openPage':
       return action.url || step.url ? `await page.goto(${stringLiteral(action.url || step.url)});` : undefined;
     case 'click': {
+      const selectTriggerLocator = selectTriggerClickLocator(step);
+      if (selectTriggerLocator)
+        return `await ${selectTriggerLocator}.click();`;
       const testIdLocator = globalTestIdLocator(step);
       if (testIdLocator) {
         const clickSource = `await ${testIdLocator}.click();`;
         const popconfirmSource = antdPopoverConfirmAfterClickSource(step, options);
         if (popconfirmSource)
           return `${clickSource}\n${popconfirmSource}`;
-        const parserSafeDuplicateLocator = options.parserSafe ? duplicateRoleLocator(step) : undefined;
+        const parserSafeDuplicateLocator = options.parserSafe && shouldPreferParserSafeDuplicateRole(step) ? duplicateRoleLocator(step) : undefined;
         if (parserSafeDuplicateLocator)
           return `await page.waitForTimeout(300);\nawait ${parserSafeDuplicateLocator}.click({ force: true });`;
         return options.parserSafe && duplicatePageIndex(step) !== undefined ? `await page.waitForTimeout(300);\n${clickSource}` : clickSource;
@@ -1011,6 +1014,14 @@ function targetClickFallback(step: FlowStep) {
     return `await ${preferred}.click();`;
   const text = step.target?.text || step.target?.name || step.target?.label || step.target?.displayName;
   return text ? `await page.getByText(${stringLiteral(text)}).click();` : undefined;
+}
+
+function selectTriggerClickLocator(step: FlowStep) {
+  if (step.action !== 'click')
+    return undefined;
+  if (!isAntdSelectFieldStep(step))
+    return undefined;
+  return fieldLocator(step);
 }
 
 function preferredTargetLocator(step: FlowStep) {
@@ -1580,6 +1591,12 @@ function duplicateRoleLocator(step: FlowStep) {
   return `page.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(name)} }).nth(${pageIndex})`;
 }
 
+function shouldPreferParserSafeDuplicateRole(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  return role === 'button' || (!role && controlType === 'button');
+}
+
 function looksLikeButtonText(step: FlowStep) {
   const testId = step.target?.testId || step.context?.before.target?.testId || '';
   const text = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text) || '';
@@ -1695,14 +1712,17 @@ function choiceControlLocator(step: FlowStep) {
 }
 
 function fieldLocator(step: FlowStep) {
-  if (step.target?.role === 'button' || step.context?.before.target?.controlType === 'button')
-    return undefined;
+  const targetText = step.target?.name || step.target?.text || step.target?.displayName;
   const label = step.target?.label ||
     step.target?.scope?.form?.label ||
     step.context?.before.form?.label ||
-    popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
-  const controlType = step.context?.before.target?.controlType;
-  if (label && (controlType === 'select' || controlType === 'tree-select' || step.target?.role === 'combobox'))
+    popupFieldLabelFromName(targetText);
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
+  const isSelectLikeField = /^(select|tree-select|cascader)$/.test(controlType) || step.target?.role === 'combobox' || /ant-select|ant-cascader|role=combobox/.test(source);
+  if ((step.target?.role === 'button' || controlType === 'button') && !isSelectLikeField)
+    return undefined;
+  if (label && isSelectLikeField)
     return antdSelectFieldLocator(step) || `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;
   if (label) {
     const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);

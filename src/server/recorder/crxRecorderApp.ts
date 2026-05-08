@@ -48,7 +48,7 @@ export type RecorderRuntimeEvent = {
   data?: Record<string, unknown>;
 };
 
-export type RecorderEventData =  (EventData | { event: 'resetCallLogs' | 'codeChanged' | 'businessFlowCodeChanged' | 'cursorActivity', params: any }) & { type: string };
+export type RecorderEventData =  (EventData | { event: 'resetCallLogs' | 'codeChanged' | 'businessFlowCodeChanged' | 'cursorActivity' | 'activeTabAttachRequested', params: any }) & { type: string };
 
 type ActionInContextWithWallTime = ActionInContextWithLocation & {
   wallTime?: number;
@@ -78,6 +78,7 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
   private _playInIncognito = false;
   private _currentCursorPosition: { line: number } | undefined;
   private _playbackRunning = false;
+  private _pendingReplayAttach?: Promise<void>;
 
   constructor(crx: Crx, recorder: Recorder) {
     super();
@@ -287,6 +288,14 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
             lineCount: typeof params.code === 'string' ? params.code.split(/\r?\n/).length : 0,
           });
           break;
+        case 'activeTabAttachRequested':
+          const attachPromise = this._attachActiveTabForReplay();
+          this._pendingReplayAttach = attachPromise
+              .finally(() => {
+                if (this._pendingReplayAttach === attachPromise)
+                  this._pendingReplayAttach = undefined;
+              });
+          break;
         case 'cursorActivity':
           this._currentCursorPosition = params.position;
           this._updateLocator(this._currentCursorPosition);
@@ -321,8 +330,10 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
       this._sendRuntimeEvent('runtime.playback-skip', 'Playwright 正在回放，本次运行请求已忽略', undefined, 'warn');
       return;
     }
+    const activeTabAttach = this._pendingReplayAttach;
+    await activeTabAttach?.catch(() => {});
     const incognito = this._playInIncognito;
-    if (incognito) {
+    if (incognito && !activeTabAttach) {
       const incognitoCrxApp = await this._crx.get({ incognito });
       await incognitoCrxApp?.close({ closeWindows: true });
     }
@@ -345,6 +356,53 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
       contextPageCount: crxApp._context.pages().length,
     }, playbackPage ? 'info' : 'warn');
     await this._crx.player.run(playbackPage ?? crxApp._context, actions);
+  }
+
+  private async _attachActiveTabForReplay() {
+    try {
+      const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+      const focusedTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
+      const currentTabs = focusedTabs.length ? focusedTabs : await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
+      const fallbackTabs = currentTabs.length ? currentTabs : await chrome.tabs.query({ active: true }).catch(() => [] as chrome.tabs.Tab[]);
+      const allTabs = await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[]);
+      const seenTabIds = new Set<number>();
+      const candidates = [...focusedTabs, ...currentTabs, ...fallbackTabs, ...allTabs]
+          .sort((a, b) => Number(b.active) - Number(a.active) || Number(b.lastAccessed ?? 0) - Number(a.lastAccessed ?? 0))
+          .filter(tab => {
+            if (!tab.id || seenTabIds.has(tab.id))
+              return false;
+            seenTabIds.add(tab.id);
+            return !tab.url?.startsWith(extensionOrigin) && /^https?:\/\//.test(tab.url ?? '');
+          });
+      const tab = candidates[0];
+      if (!tab?.id) {
+        const incognito = this._playInIncognito;
+        const existingCrxApp = await this._crx.get({ incognito }) ?? await this._crx.get({ incognito: !incognito });
+        const existingPage = existingCrxApp?.activePage();
+        this._sendRuntimeEvent('runtime.attach-active-tab-skipped', existingPage ? '回放前未找到新的当前业务页，沿用已附加页面' : '回放前未找到可附加的当前业务页，沿用已附加页面', {
+          incognito: existingCrxApp?.isIncognito() ?? incognito,
+          candidateCount: candidates.length,
+          tabId: existingPage ? existingCrxApp?.tabIdForPage(existingPage) : undefined,
+          url: existingPage?.mainFrame().url(),
+        }, existingPage ? 'info' : 'warn');
+        return;
+      }
+      this._playInIncognito = !!tab.incognito;
+      const incognito = this._playInIncognito;
+      const existingCrxApp = await this._crx.get({ incognito });
+      const crxApp = existingCrxApp ?? await this._crx.start({ incognito }, serverSideCallMetadata());
+      const page = await crxApp.attach(tab.id);
+      this._sendRuntimeEvent('runtime.attach-active-tab', '回放前已将当前业务页附加到 recorder', {
+        tabId: tab.id,
+        url: page.mainFrame().url(),
+        incognito,
+      });
+    } catch (error: any) {
+      this._sendRuntimeEvent('runtime.attach-active-tab-failed', '回放前附加当前业务页失败', {
+        message: error?.message ?? String(error),
+        stack: error?.stack,
+      }, 'warn');
+    }
   }
 
   _sendMessage(msg: RecorderMessage) {
