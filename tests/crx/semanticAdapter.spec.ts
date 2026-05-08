@@ -186,7 +186,7 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
 
     const nonTableCreateEvent = await captureAfterSequence(page, ['#business-non-table-create']);
     expect(nonTableCreateEvent.before?.ui?.targetTestId).toBe('business-non-table-create');
-    expect(nonTableCreateEvent.before?.ui?.table?.region).toBeUndefined();
+    expect(nonTableCreateEvent.before?.ui?.table).toBeUndefined();
     expect(nonTableCreateEvent.before?.ui?.recipe?.kind).not.toBe('protable-toolbar-action');
 
     const rowEvent = await captureAfterSequence(page, ['#business-row-edit']);
@@ -539,7 +539,7 @@ body { font-family: sans-serif; }
 <div class="ant-form-item" data-testid="site-ip-port-pool-vrf-field" data-e2e-component="pro-form-field" data-e2e-field-name="destVrfId" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>目的 VRF</label></div><div id="business-vrf-select" class="ant-select" data-testid="site-ip-port-pool-vrf-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox" aria-label="目的 VRF"><span>请选择 VRF</span></div></div></div>
 <div id="business-unknown-hint" data-testid="custom-widget-root" data-e2e-component="company-owned-widget"><span>自定义业务控件</span></div>
 <div class="ant-form-item" data-testid="site-unmapped-select-field" data-e2e-field-name="unmappedSelect" data-e2e-field-kind="select"><div class="ant-form-item-label"><label>未映射选择器</label></div><div id="business-unmapped-select" class="ant-select" data-testid="site-unmapped-select" data-e2e-component="company-select"><div class="ant-select-selector" role="combobox"><span>请选择</span></div></div></div>
-<button id="business-non-table-create" data-testid="business-non-table-create" data-e2e-action="create">全局创建</button>
+<button id="business-non-table-create" data-testid="business-non-table-create" data-e2e-role="page-action" data-e2e-action="create">全局创建</button>
 <section class="ant-pro-table" data-test-id="business-alt-table" data-e2e-component="pro-table"><table class="ant-table"><tbody><tr class="ant-table-row" data-row-key="alt-1"><td>Alt</td><td data-column-key="option"><button id="business-alt-table-edit" class="ant-btn" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr></tbody></table></section>
 </body></html>`;
 }

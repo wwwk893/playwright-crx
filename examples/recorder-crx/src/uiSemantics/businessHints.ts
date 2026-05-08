@@ -178,12 +178,16 @@ function mergeBusinessTable(base: UiTableContext | undefined, target: Element, c
   const column = closestWithAttr(target, 'data-column-key');
   const role = closestWithAttr(target, 'data-e2e-role');
   const action = closestWithAttr(target, 'data-e2e-action');
-  if (!table && !row && !column && !role)
+  const tableKind = tableKindFor(component);
+  const hasTableScope = !!(table || row || column || tableKind || base?.tableKind || base?.tableId || base?.testId);
+  if (!hasTableScope && !role)
     return base;
-  const region = tableRegionFor(role?.getAttribute('data-e2e-role'), action?.getAttribute('data-e2e-action'), component) || base?.region;
+  const region = tableRegionFor(role?.getAttribute('data-e2e-role'), action?.getAttribute('data-e2e-action'), component, hasTableScope) || base?.region;
+  if (!hasTableScope && !region)
+    return base;
   return compactObject({
     ...(base || {}),
-    tableKind: tableKindFor(component) || base?.tableKind,
+    tableKind: tableKind || base?.tableKind,
     tableId: safeText(table?.getAttribute('data-e2e-table'), 80) || base?.tableId,
     testId: (table ? testIdOf(table) : undefined) || base?.testId,
     title: base?.title,
@@ -242,7 +246,9 @@ function tableKindFor(component?: UiComponentKind): UiTableContext['tableKind'] 
   return undefined;
 }
 
-function tableRegionFor(role?: string | null, action?: string | null, component?: UiComponentKind): UiTableContext['region'] | undefined {
+function tableRegionFor(role?: string | null, action?: string | null, component?: UiComponentKind, hasTableScope = false): UiTableContext['region'] | undefined {
+  if (!hasTableScope)
+    return undefined;
   const normalizedRole = safeText(role, 40) as UiTableContext['region'] | undefined;
   if (normalizedRole && tableRegions.has(normalizedRole))
     return normalizedRole;
