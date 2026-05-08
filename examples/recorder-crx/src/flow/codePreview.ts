@@ -865,7 +865,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         const popconfirmSource = antdPopoverConfirmAfterClickSource(step, options);
         if (popconfirmSource)
           return `${clickSource}\n${popconfirmSource}`;
-        const parserSafeDuplicateLocator = options.parserSafe ? duplicateRoleLocator(step) : undefined;
+        const parserSafeDuplicateLocator = options.parserSafe && shouldPreferParserSafeDuplicateRole(step) ? duplicateRoleLocator(step) : undefined;
         if (parserSafeDuplicateLocator)
           return `await page.waitForTimeout(300);\nawait ${parserSafeDuplicateLocator}.click({ force: true });`;
         return options.parserSafe && duplicatePageIndex(step) !== undefined ? `await page.waitForTimeout(300);\n${clickSource}` : clickSource;
@@ -1589,6 +1589,12 @@ function duplicateRoleLocator(step: FlowStep) {
   if (!name)
     return undefined;
   return `page.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(name)} }).nth(${pageIndex})`;
+}
+
+function shouldPreferParserSafeDuplicateRole(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  return role === 'button' || (!role && controlType === 'button');
 }
 
 function looksLikeButtonText(step: FlowStep) {

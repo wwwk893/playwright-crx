@@ -4810,6 +4810,157 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'parser-safe indexed WAN edit keeps test id instead of duplicate row fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'row',
+            name: 'WAN1 Nova Internet 通用禁用',
+            text: 'WAN1 Nova Internet 通用禁用',
+            displayName: 'WAN1 Nova Internet 通用禁用',
+            testId: 'wan-edit-1',
+            locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: 2, pageIndex: 0 },
+            raw: {
+              recorder: { selector: 'internal:testid=[data-testid="wan-edit-1"s]' },
+              pageContext: {
+                role: 'row',
+                text: 'WAN1 Nova Internet 通用禁用',
+                uniqueness: { pageCount: 2, pageIndex: 0 },
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-wan-row-edit',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'tr',
+                role: 'row',
+                text: 'WAN1 Nova Internet 通用禁用',
+                normalizedText: 'WAN1 Nova Internet 通用禁用',
+                uniqueness: { pageCount: 2, pageIndex: 0 },
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-edit-1"s]' } },
+          sourceCode: `await page.getByRole('row', { name: 'WAN1 Nova Internet 通用禁用' }).nth(0).click({ force: true });`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+      assert(playbackCode.includes('page.getByTestId("wan-edit-1").nth(0).click();'), 'runtime indexed WAN edit should keep the captured test id ordinal');
+      assert(!playbackCode.includes('getByRole("row"') && !playbackCode.includes("getByRole('row'"), 'runtime indexed WAN edit should not replay through a row role fallback');
+    },
+  },
+  {
+    name: 'parser-safe non-button duplicate test id controls keep their test id locator',
+    run: () => {
+      const samples = [
+        { role: 'link', controlType: 'link', testId: 'wan-transport-row-delete-action', text: '删除', nth: 0 },
+        { role: 'switch', controlType: 'switch', testId: 'network-resource-health-switch', text: '开启', nth: 1 },
+        { role: 'checkbox', controlType: 'checkbox', testId: 'proxy-arp-checkbox', text: '开启代理ARP', nth: 1 },
+        { role: 'tab', controlType: 'tab', testId: 'ipv6-tab', text: 'IPv6', nth: 1 },
+      ] as const;
+
+      for (const sample of samples) {
+        const flow: BusinessFlow = {
+          ...createNamedFlow(),
+          steps: [{
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              role: sample.role,
+              name: sample.text,
+              text: sample.text,
+              displayName: sample.text,
+              testId: sample.testId,
+              locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: sample.nth + 2, pageIndex: sample.nth },
+            },
+            context: {
+              eventId: `ctx-${sample.testId}`,
+              capturedAt: 1000,
+              before: {
+                target: {
+                  tag: 'a',
+                  role: sample.role,
+                  testId: sample.testId,
+                  text: sample.text,
+                  normalizedText: sample.text,
+                  framework: 'antd',
+                  controlType: sample.controlType,
+                  uniqueness: { pageCount: sample.nth + 2, pageIndex: sample.nth },
+                },
+              },
+            },
+            rawAction: { action: { name: 'click', selector: `internal:testid=[data-testid="${sample.testId}"s] >> nth=${sample.nth}` } },
+            sourceCode: `await page.getByRole('${sample.role}', { name: '${sample.text}' }).nth(${sample.nth}).click({ force: true });`,
+            assertions: [],
+          }],
+        };
+
+        const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+        assert(playbackCode.includes(`page.getByTestId("${sample.testId}").nth(${sample.nth}).click();`), `${sample.role} duplicate test id should keep its captured test id ordinal`);
+        assert(!playbackCode.includes(`getByRole("${sample.role}"`) && !playbackCode.includes(`getByRole('${sample.role}'`), `${sample.role} duplicate test id should not replay through role ordinal fallback`);
+      }
+    },
+  },
+  {
+    name: 'parser-safe action-like test id without button semantics does not infer button role fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-delete-action',
+            name: '删除',
+            text: '删除',
+            displayName: '删除',
+            locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: 2, pageIndex: 0 },
+            raw: { controlType: 'link' },
+          },
+          context: {
+            eventId: 'ctx-link-without-role',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'a',
+                testId: 'wan-transport-row-delete-action',
+                text: '删除',
+                normalizedText: '删除',
+                framework: 'antd',
+                controlType: 'link',
+                uniqueness: { pageCount: 2, pageIndex: 0 },
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-transport-row-delete-action"s] >> nth=0' } },
+          sourceCode: `await page.getByRole('button', { name: '删除' }).nth(0).click({ force: true });`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+      assert(playbackCode.includes('page.getByTestId("wan-transport-row-delete-action").nth(0).click();'), 'link-like action test id should keep its captured test id ordinal');
+      assert(!playbackCode.includes('getByRole("button"') && !playbackCode.includes("getByRole('button'"), 'link-like action test id should not infer button role fallback from its name');
+    },
+  },
+  {
     name: 'shared WAN row click is not rewritten into a guessed edit action',
     run: () => {
       const flow: BusinessFlow = {
