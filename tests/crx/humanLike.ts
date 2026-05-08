@@ -503,11 +503,29 @@ function normalized(value: string) {
 }
 
 export async function exportBusinessFlowJsonLikeUser(recorderPage: Page) {
+  const startedOnExportPanel = await recorderPage.locator('.export-review-panel').isVisible().catch(() => false);
+  await openExportPanelLikeUser(recorderPage);
   const exportedJson = await downloadTextAfterHumanClick(
       recorderPage,
       recorderPage.getByRole('button', { name: '导出流程 JSON' }).last(),
   );
+  if (!startedOnExportPanel)
+    await openStepCheckPanelLikeUser(recorderPage);
   return JSON.parse(exportedJson);
+}
+
+async function openExportPanelLikeUser(recorderPage: Page) {
+  if (await recorderPage.locator('.export-review-panel').isVisible().catch(() => false))
+    return;
+  await humanClick(recorderPage.locator('.side-panel-nav').getByRole('button', { name: '导出', exact: true }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
+  await expect(recorderPage.locator('.export-review-panel')).toBeVisible();
+}
+
+async function openStepCheckPanelLikeUser(recorderPage: Page) {
+  await humanClick(recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.review-step-list')).toBeVisible();
 }
 
 async function downloadTextAfterHumanClick(recorderPage: Page, trigger: Locator) {
