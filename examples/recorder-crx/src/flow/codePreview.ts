@@ -37,7 +37,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
     }
     if (emittedRepeatStepIds.has(step.id))
       continue;
-    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index))
+    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -83,7 +83,7 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
     }
     if (emittedRepeatStepIds.has(step.id))
       continue;
-    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index))
+    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -124,7 +124,7 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
       for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         let previousSegmentStep: FlowStep | undefined;
         for (const [stepIndex, segmentStep] of segmentSteps.entries()) {
-          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) || isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) || isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]))
+          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) || isPlaceholderSelectOptionClick(segmentStep) || isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) || isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]))
             continue;
           count += countStepActions(segmentStep, { parserSafe: true, previousStep: previousSegmentStep, nextStep: segmentSteps[stepIndex + 1] });
           previousSegmentStep = segmentStep;
@@ -135,7 +135,7 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     }
     if (emittedRepeatStepIds.has(step.id))
       continue;
-    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index))
+    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -584,7 +584,7 @@ function emitRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRep
   lines.push(`  for (const row of ${segmentDataName(segment)}) {`);
   const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
   for (const [index, step] of segmentSteps.entries()) {
-    if (isIntermediateSameFieldFill(step, segmentSteps, index) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]))
+    if (isIntermediateSameFieldFill(step, segmentSteps, index) || isPlaceholderSelectOptionClick(step) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]))
       continue;
     emitStep(lines, step, '    ', segment, undefined, { nextStep: segmentSteps[index + 1] });
   }
@@ -610,7 +610,7 @@ function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment:
     const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
     let previousEmittedStep: FlowStep | undefined;
     for (const [index, step] of segmentSteps.entries()) {
-      if (isIntermediateSameFieldFill(step, segmentSteps, index) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]))
+      if (isIntermediateSameFieldFill(step, segmentSteps, index) || isPlaceholderSelectOptionClick(step) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]))
         continue;
       emitStep(lines, step, '  ', segment, row.values, { ...options, previousStep: previousEmittedStep, nextStep: segmentSteps[index + 1] });
       previousEmittedStep = step;
@@ -618,6 +618,26 @@ function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment:
     if (segment.assertionTemplate)
       lines.push(`  // template assertion: ${replaceTemplateValuesWithRow(segment.assertionTemplate.description, segment, row.values)}`);
   });
+}
+
+function isPlaceholderSelectOptionClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  const looksLikeSelectOption = /ant-select-item-option|role=option|internal:role=option/.test(selector) || !!step.context?.before.target?.optionPath?.length || String(step.context?.before.target?.controlType || '') === 'option';
+  if (!looksLikeSelectOption)
+    return false;
+  const optionName = generatedTextCandidate(
+      step.context?.before.target?.selectedOption,
+      step.context?.before.target?.text,
+      step.context?.before.target?.normalizedText,
+      step.context?.before.target?.ariaLabel,
+      step.target?.text,
+      step.target?.name,
+      step.target?.displayName,
+      rawSelectOptionTitle(step),
+  );
+  return !!optionName && /^请?选择(?:一个)?\S*/.test(optionName);
 }
 
 function isIntermediateSameFieldFill(step: FlowStep, steps: FlowStep[], index: number) {

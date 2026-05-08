@@ -180,6 +180,13 @@ function recordTablePointerEvent(event: Event) {
   recordEventForTarget('click', event, contextTarget);
 }
 
+function isActionLikeAnchor(element: Element) {
+  const testId = testIdOf(element);
+  return element.tagName.toLowerCase() === 'button' ||
+    element.getAttribute('role') === 'button' ||
+    !!(testId && looksLikeActionTestId(testId));
+}
+
 function tablePointerKey(target: Element) {
   const row = closestWithin(target, tableRowSelectors);
   const table = closestWithin(target, '.ant-pro-table, .ant-table-wrapper, .ant-table, table, [role="table"], [role="grid"]');
@@ -198,8 +205,13 @@ function isRecentTablePointerDuplicate(target: Element) {
 
 function recordEvent(kind: ContextEventKind, event: Event) {
   const target = event.target instanceof Element ? event.target : undefined;
-  if (kind === 'click' && target && isRecentTablePointerDuplicate(eventPointTarget(event, target)))
-    return;
+  if (kind === 'click' && target) {
+    const contextTarget = eventPointTarget(event, target);
+    const contextAnchor = actionAnchorForElement(contextTarget);
+    const targetAnchor = actionAnchorForElement(target);
+    if (isRecentTablePointerDuplicate(contextTarget) && !isActionLikeAnchor(contextAnchor) && !isActionLikeAnchor(targetAnchor))
+      return;
+  }
   recordEventForTarget(kind, event, target);
 }
 

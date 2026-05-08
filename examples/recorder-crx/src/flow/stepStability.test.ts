@@ -222,6 +222,89 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'code preview omits placeholder select option clicks before the real option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { role: 'option', text: '选择一个VRF', displayName: 'option 选择一个VRF' },
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="选择一个VRF"i' } as any,
+            context: {
+              eventId: 'ctx-vrf-placeholder',
+              capturedAt: 1000,
+              before: {
+                form: { label: '关联VRF' },
+                target: { role: 'option' as any, text: '选择一个VRF', normalizedText: '选择一个VRF', optionPath: ['选择一个VRF'] },
+                dialog: { type: 'modal', title: '新建IP端口地址池', visible: true },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: { role: 'option', text: 'default', displayName: 'default' },
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="default"i' } as any,
+            context: {
+              eventId: 'ctx-vrf-default',
+              capturedAt: 1100,
+              before: {
+                form: { label: '关联VRF' },
+                target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] },
+                dialog: { type: 'modal', title: '新建IP端口地址池', visible: true },
+              },
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+
+      for (const generated of [code, playbackCode]) {
+        assert(!generated.includes('选择一个VRF'), 'placeholder option text should not be emitted as a replay click');
+        assert(generated.includes('default'), 'real selected option should still be emitted');
+      }
+    },
+  },
+  {
+    name: 'page context matcher falls back to exact test id when table action timing is delayed',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'ha-wan-row-edit-action', displayName: 'WAN1 HS专线 HS Internet IPv4' },
+            rawAction: { name: 'click', selector: 'internal:testid=[data-testid="ha-wan-row-edit-action"s]', wallTime: 10_000, endWallTime: 10_010 } as any,
+            assertions: [],
+          },
+        ],
+      };
+      const merged = mergePageContextIntoFlow(flow, [{
+        id: 'ctx-delayed-row-action',
+        kind: 'click',
+        time: 1000,
+        wallTime: 13_500,
+        before: {
+          target: { testId: 'ha-wan-row-edit-action', role: 'button', text: 'WAN1 HS专线 HS Internet IPv4' },
+          table: { testId: 'wan-config-table', rowKey: '1', rowIdentity: { stable: true } },
+        },
+      } as PageContextEvent]);
+
+      assertEqual(merged.steps[0].target?.scope?.table?.testId, 'wan-config-table');
+      assertEqual(merged.steps[0].target?.scope?.table?.rowKey, '1');
+      assert(generateBusinessFlowPlaywrightCode(merged).includes('wan-config-table'), 'row-scoped code should survive delayed exact-testid page context');
+    },
+  },
+  {
     name: 'same label fills in different dialogs stay as separate business steps',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
