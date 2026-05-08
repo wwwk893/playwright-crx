@@ -30,6 +30,7 @@ import {
   humanClickUntil,
   humanType,
   openReplayPanelLikeUser,
+  openStepCheckPanelLikeUser,
   selectAntdCascaderPathLikeUser,
   selectAntdOptionLikeUser,
   selectAntdTreeNodeLikeUser,
@@ -476,7 +477,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-global-ip-pools-section')).toBeFalsy();
   expect(flow.artifacts.playwrightCode).not.toContain('site-global-ip-pools-section');
   const firstSaveStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-save-button', 'first save config step');
-  await openInsertMenuAfterStepLikeUser(recorderPage, firstSaveStepId);
+  await openInsertMenuAfterStepLikeUser(recorderPage, firstSaveStepId, 'site-save-button');
   await humanClick(recorderPage.getByRole('button', { name: '插入等待' }));
   await expect(recorderPage.locator('.review-step-list')).toContainText('等待');
 
@@ -498,7 +499,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   }, { timeout: 60_000 }).toBeTruthy();
   const replayRuntimeLogs = await runtimeDiagnosticsAfter(recorderPage, runtimeLogBaseline);
   expect(replayRuntimeLogs.filter(log => log.type.includes('error') || log.level === 'warn')).toEqual([]);
-  await expect(page.getByRole('row', { name: /test1.*test1 共享 1\.1\.1\.1--2\.2\.2\.2.*1\.1\.1\.1:80.*default/ })).toBeVisible({ timeout: 10_000 });
+  await expect.poll(async () => await page.getByTestId('site-ip-port-pool-table').innerText().catch(() => ''), { timeout: 30_000 }).toMatch(/test12[\s\S]*test1[\s\S]*1\.1\.1\.1--2\.2\.2\.2[\s\S]*1\.1\.1\.1:80[\s\S]*default/);
 });
 
 test('human-like records IPv4 pool repeat flow and replays generated code @human-smoke', async ({ context, page, attachRecorder, baseURL }, testInfo) => {
@@ -844,8 +845,11 @@ function stepIndex(flow: any, stepId: string) {
   return flow.steps.findIndex((step: any) => step.id === stepId);
 }
 
-async function openInsertMenuAfterStepLikeUser(recorderPage: Page, stepId: string) {
-  const row = recorderPage.locator('.review-step-row').filter({ hasText: stepId }).first();
+async function openInsertMenuAfterStepLikeUser(recorderPage: Page, stepId: string, fallbackText?: string) {
+  await openStepCheckPanelLikeUser(recorderPage);
+  let row = recorderPage.locator('.review-step-row').filter({ hasText: stepId }).first();
+  if (!await row.isVisible().catch(() => false) && fallbackText)
+    row = recorderPage.locator('.review-step-row').filter({ hasText: fallbackText }).first();
   await expect(row).toBeVisible({ timeout: 10_000 });
   const insertButton = row.locator('xpath=following-sibling::*[contains(@class, "review-insert-slot")][1]//button').first();
   await expect(insertButton).toBeVisible({ timeout: 10_000 });

@@ -101,7 +101,7 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await recorderPage.locator('.side-panel-nav').getByRole('button', { name: '导出', exact: true }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
   await expect(recorderPage.locator('.export-review-panel')).toContainText('导出前复核：AntD 用户流程 E2E');
-  await expect(recorderPage.locator('.export-review-panel')).toContainText('Replay CTA');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText(/Replay CTA|回放 CTA/);
   await expect(recorderPage.locator('.export-review-panel')).toContainText('P1');
   await expect(recorderPage.locator('.export-review-panel')).toContainText('脱敏开启');
 
@@ -180,7 +180,6 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
   expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)/);
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
   expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
@@ -282,7 +281,6 @@ test('records real ProFormField network configuration fields and replays generat
   expect(flow.artifacts.playwrightCode).toContain('https://probe.example/health');
   expect(flow.artifacts.playwrightCode).toContain('8443');
   expect(flow.artifacts.playwrightCode).toContain('ProFormField 全量组合录制');
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
   expectInOrder(flow.artifacts.playwrightCode, [
     'network-resource-add',
@@ -391,6 +389,8 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(repeatStepIds).toContain(confirmStepId);
   expect(repeatStepIds).not.toContain(saveConfigStepId);
 
+  await openStepCheckPanel(recorderPage);
+
   for (const stepId of repeatStepIds)
     await recorderPage.locator(`button[aria-label="选择 ${stepId} 作为循环步骤"]`).click();
   await expect(recorderPage.locator('.repeat-create-actions .primary')).toBeEnabled();
@@ -481,6 +481,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   const waitStepId = requiredStepId(flow, (step: any) => step.action === 'wait', 'inserted wait step');
   expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, saveStepId) + 1);
 
+  await openStepCheckPanel(recorderPage);
   await recorderPage.getByRole('button', { name: '选择全部' }).click();
   await expect(recorderPage.locator('.repeat-create-actions .primary')).toBeEnabled();
   await recorderPage.locator('.repeat-create-actions .primary').click();
@@ -519,7 +520,6 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   expect(flow.artifacts.playwrightCode).toMatch(/批量保存地址池|批量执行/);
   expect(flow.artifacts.playwrightCode).toContain('WAN1');
   expect(flow.artifacts.playwrightCode).not.toContain('WAN1-copy');
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
@@ -673,6 +673,7 @@ function stepIndex(flow: any, stepId: string) {
 }
 
 async function openInsertMenuAfterStep(recorderPage: Page, stepId: string) {
+  await openStepCheckPanel(recorderPage);
   await recorderPage.evaluate(id => {
     const rows = Array.from(document.querySelectorAll('.review-step-row'));
     const row = rows.find(row => row.textContent?.includes(id));

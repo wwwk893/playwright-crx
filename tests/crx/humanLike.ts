@@ -385,7 +385,7 @@ export async function visibleStepTexts(recorderPage: Page) {
 }
 
 export async function createRepeatSegmentLikeUser(recorderPage: Page, options: { fromStepText: string, toStepText: string, segmentName: string, minSteps?: number, expectedDataText?: string | RegExp, requiredSelectedTexts?: string[] }) {
-  await expect(recorderPage.locator('.review-step-list, .flow-step-list').first()).toBeVisible({ timeout: 10_000 });
+  await openStepCheckPanelLikeUser(recorderPage);
   await selectVisibleRepeatRange(recorderPage, options.fromStepText, options.toStepText);
   for (const text of options.requiredSelectedTexts ?? [])
     await ensureRepeatRowSelectedContainingText(recorderPage, text);
@@ -528,7 +528,7 @@ export async function openReplayPanelLikeUser(recorderPage: Page) {
   await expect(recorderPage.getByTitle('Resume (F8)')).toBeVisible({ timeout: 10_000 });
 }
 
-async function openStepCheckPanelLikeUser(recorderPage: Page) {
+export async function openStepCheckPanelLikeUser(recorderPage: Page) {
   const status = recorderPage.locator('.recording-status');
   for (let attempt = 0; attempt < 3; attempt++) {
     await recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true }).click();
