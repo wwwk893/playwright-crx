@@ -623,7 +623,7 @@ function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment:
 function isPlaceholderSelectOptionClick(step: FlowStep) {
   if (step.action !== 'click')
     return false;
-  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  const selector = [rawAction(step.rawAction).selector, step.target?.selector, step.target?.locator, step.sourceCode].filter(Boolean).join('\n');
   const looksLikeSelectOption = /ant-select-item-option|role=option|internal:role=option/.test(selector) || !!step.context?.before.target?.optionPath?.length || String(step.context?.before.target?.controlType || '') === 'option';
   if (!looksLikeSelectOption)
     return false;
@@ -636,8 +636,13 @@ function isPlaceholderSelectOptionClick(step: FlowStep) {
       step.target?.name,
       step.target?.displayName,
       rawSelectOptionTitle(step),
+      placeholderOptionTextFromSource(selector),
   );
   return !!optionName && /^请?选择(?:一个)?\S*/.test(optionName);
+}
+
+function placeholderOptionTextFromSource(source: string) {
+  return source.match(/(?:has-text=|text=|name:\s*)[\\"'`](请?选择(?:一个)?[^\\"'`),]+)/)?.[1];
 }
 
 function isIntermediateSameFieldFill(step: FlowStep, steps: FlowStep[], index: number) {

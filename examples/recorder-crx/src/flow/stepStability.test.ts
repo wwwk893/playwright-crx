@@ -232,7 +232,8 @@ const tests: TestCase[] = [
             order: 1,
             action: 'click',
             target: { role: 'option', text: '选择一个VRF', displayName: 'option 选择一个VRF' },
-            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="选择一个VRF"i' } as any,
+            rawAction: { name: 'click' } as any,
+            sourceCode: 'await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text=\\"选择一个VRF\\"i").click();',
             context: {
               eventId: 'ctx-vrf-placeholder',
               capturedAt: 1000,
