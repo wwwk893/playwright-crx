@@ -27,6 +27,7 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
         uiRecipe: sanitizeUiRecipe(step.uiRecipe),
         target: sanitizeFlowTarget(step.target),
         context: sanitizeStepContext(step.context),
+        url: compactUrl(step.url),
       };
     }),
     artifacts: {
@@ -212,7 +213,9 @@ function compactUrl(value?: string) {
     return undefined;
   try {
     const url = new URL(value);
-    return `${url.origin}${url.pathname}`;
+    url.search = '';
+    url.hash = '';
+    return url.origin === 'null' ? url.href : `${url.origin}${url.pathname}`;
   } catch {
     return value.split(/[?#]/)[0];
   }

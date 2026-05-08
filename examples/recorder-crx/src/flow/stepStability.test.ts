@@ -4920,6 +4920,7 @@ test('demo', async ({ page }) => {
           ...step,
           sourceCode: 'await page.locator("#raw-secret").click();',
           rawAction: { selector: '#raw-secret' },
+          url: 'about:blank?debug=true#frag',
           uiRecipe: {
             ...ui.recipe,
             optionValue: 'recipe-secret-value',
@@ -4939,7 +4940,7 @@ test('demo', async ({ page }) => {
               target: { tag: 'button', text: '保存', selector: '#raw-secret' } as any,
               ui,
             },
-            after: { url: 'https://example.test/users?token=secret#after' } as any,
+            after: { url: 'chrome://extensions/?id=secret#after' } as any,
           },
         })),
       };
@@ -4962,6 +4963,11 @@ test('demo', async ({ page }) => {
       assert(aiJson.includes('https://example.test/users'), 'AI input should keep URL origin/path');
       assert(!aiJson.includes('token=secret'), 'AI input URL should strip query');
       assert(!aiJson.includes('#frag'), 'AI input URL should strip hash');
+      assert(exportedJson.includes('about:blank'), 'export should preserve opaque URL scheme for step URLs');
+      assert(yaml.includes('about:blank'), 'compact yaml should preserve opaque URL scheme for step URLs');
+      assert(aiJson.includes('chrome://extensions/'), 'AI input should preserve opaque URL scheme for context URLs');
+      assert(![exportedJson, yaml, aiJson].some(text => text.includes('nullblank') || text.includes('null/')), 'compact URLs must not use null origin for opaque schemes');
+      assert(![exportedJson, yaml, aiJson].some(text => text.includes('about:blank?') || text.includes('chrome://extensions/?') || text.includes('#after')), 'compact URLs should still strip query and hash for opaque schemes');
       assert(yaml.includes('field: "角色"') || yaml.includes('field: 角色'), 'compact yaml should retain useful compact semantic field');
       assert(yaml.includes('option: "管理员"') || yaml.includes('option: 管理员'), 'compact yaml should retain useful compact semantic option');
     },
