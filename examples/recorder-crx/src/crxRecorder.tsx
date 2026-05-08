@@ -832,6 +832,10 @@ export const CrxRecorder: React.FC = ({
       if (runtimeEvent)
         appendDiagnosticLog(runtimeEvent);
       if ((data.event === 'resume' || data.event === 'step') && businessFlowEnabledRef.current && businessFlowPlaybackCodeRef.current) {
+        postRecorderEvent({
+          event: 'activeTabAttachRequested',
+          params: { source: data.event },
+        });
         await chrome.runtime.sendMessage({ event: 'activeTabAttachRequested' }).then(result => {
           const skipped = !result?.ok && result?.reason === '没有找到可附加的当前业务页';
           appendDiagnosticLog({
