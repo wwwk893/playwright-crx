@@ -1021,11 +1021,26 @@ function preferredTargetLocator(step: FlowStep) {
     activeDropdownOptionLocator(step) ||
     tableScopedLocator(step) ||
     choiceControlLocator(step) ||
-    fieldLocator(step) ||
-    dialogScopedLocator(step) ||
-    sectionScopedLocator(step) ||
-    globalRoleLocator(step) ||
-    fallbackTextLocator(step);
+	    fieldLocator(step) ||
+	    popoverConfirmButtonLocator(step) ||
+	    dialogScopedLocator(step) ||
+	    sectionScopedLocator(step) ||
+	    globalRoleLocator(step) ||
+	    fallbackTextLocator(step);
+}
+
+function popoverConfirmButtonLocator(step: FlowStep) {
+  const targetName = targetNameForLocator(step);
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  if (role !== 'tooltip' && !/internal:role=tooltip|role=["']?tooltip/i.test(selector))
+    return undefined;
+  if (!isLikelyPopconfirmConfirmButton(normalizeGeneratedText(targetName) || ''))
+    return undefined;
+  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  if (dialog?.type === 'popover' && dialog.title)
+    return `${dialogRootLocator(dialog)}.getByRole("button", { name: /^(确定|确 定)$/ })`;
+  return `page.locator(${stringLiteral(dialogRootSelector({ type: 'popover', visible: true }))}).last().getByRole("button", { name: /^(确定|确 定)$/ })`;
 }
 
 function antdSelectOptionLocator(step: FlowStep) {

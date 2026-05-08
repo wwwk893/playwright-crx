@@ -36,7 +36,7 @@ export const AssertionStepContextCard: React.FC<{
         <strong>Step Context：{displayStepId} · {action}</strong>
         <span>这条断言会挂到 {displayStepId} 之后，用来确认{action}动作真的生效。</span>
       </div>
-      {onBackToFlow && <button className='mini-button' type='button' onClick={onBackToFlow}>← 返回流程</button>}
+      {onBackToFlow && <button className='mini-button' type='button' onClick={onBackToFlow}>← 返回录制</button>}
     </div>
     <div className='step-context-grid'>
       <ContextRow label='原动作' value={`${action}「${subject}」`} />

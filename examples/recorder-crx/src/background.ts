@@ -265,6 +265,18 @@ async function getStorageState() {
   return await crxApp.context().storageState();
 }
 
+async function attachActiveTabForReplay() {
+  await settingsInitializing.catch(() => {});
+  const focusedTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
+  const currentTabs = focusedTabs.length ? focusedTabs : await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
+  const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+  const tab = currentTabs.find(tab => tab.id && !tab.url?.startsWith(extensionOrigin));
+  if (!tab?.id)
+    return { ok: false, reason: '没有找到可附加的当前业务页' };
+  await attach(tab);
+  return { ok: true, tabId: tab.id, url: tab.url, alreadyAttached: attachedTabIds.has(tab.id) };
+}
+
 function addPageContextEvent(tabId: number, event: PageContextEvent) {
   const events = contextEventsByTabId.get(tabId) ?? [];
   const eventWithTab = {
@@ -326,6 +338,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.event === 'storageStateRequested') {
     getStorageState().then(sendResponse).catch(() => {});
+    return true;
+  }
+
+  if (message.event === 'activeTabAttachRequested') {
+    attachActiveTabForReplay()
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ ok: false, reason: error?.message ?? String(error) }));
     return true;
   }
 });
