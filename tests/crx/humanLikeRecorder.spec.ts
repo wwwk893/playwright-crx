@@ -379,6 +379,10 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('1.1.1.1');
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
+  const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
+  expect(flow.artifacts.playwrightCode).toContain('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().click();');
+  expect(flow.artifacts.playwrightCode).not.toContain('role=button[name="选择一个WAN口"');
+  expect(flow.artifacts.playwrightCode).not.toContain('nth(4)');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expectAddressAndPortPoolsPage(page);
@@ -426,8 +430,8 @@ test('human-like runtime replay supports wait inserted between address and port 
   const wanTrigger = ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, wanTrigger, 'xtest16:WAN1', { searchText: 'xtest16', ...strictHumanOptions });
   await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
-  await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1');
-  await humanType(page.getByRole('textbox', { name: '结束地址，例如：' }), '2.2.2.2');
+  await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1', { confirmWithFill: true });
+  await humanType(page.getByRole('textbox', { name: '结束地址，例如：' }), '2.2.2.2', { confirmWithFill: true });
   await humanClickUntil(
       ipv4Dialog.getByRole('button', { name: '确 定' }),
       async () => !await ipv4Dialog.isVisible().catch(() => false),
@@ -487,6 +491,8 @@ test('human-like runtime replay supports wait inserted between address and port 
   expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, firstSaveStepId) + 1);
   expect(flow.artifacts.playwrightCode).toContain('waitForTimeout(5000)');
   expect(flow.artifacts.playwrightCode).toContain('site-ip-port-pool-create-button');
+  expect(flow.artifacts.playwrightCode).not.toContain('.fill("2.2.")');
+  expect(flow.artifacts.playwrightCode).toContain('.fill("2.2.2.2")');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
   await expectAddressAndPortPoolsPage(page);

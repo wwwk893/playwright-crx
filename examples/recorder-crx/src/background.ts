@@ -267,10 +267,22 @@ async function getStorageState() {
 
 async function attachActiveTabForReplay() {
   await settingsInitializing.catch(() => {});
+  const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+  const seenTabIds = new Set<number>();
+  const businessTab = (tab?: chrome.tabs.Tab) => {
+    if (!tab?.id || seenTabIds.has(tab.id))
+      return false;
+    seenTabIds.add(tab.id);
+    return !tab.url?.startsWith(extensionOrigin) && /^https?:\/\//.test(tab.url ?? '');
+  };
   const focusedTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
   const currentTabs = focusedTabs.length ? focusedTabs : await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
-  const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
-  const tab = currentTabs.find(tab => tab.id && !tab.url?.startsWith(extensionOrigin));
+  const activeTabs = await chrome.tabs.query({ active: true }).catch(() => [] as chrome.tabs.Tab[]);
+  const recordedTab = currentPageContextTabId ? await chrome.tabs.get(currentPageContextTabId).catch(() => undefined) : undefined;
+  const allTabs = await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[]);
+  const tab = [recordedTab, ...focusedTabs, ...currentTabs, ...activeTabs, ...allTabs]
+      .sort((a, b) => Number(b?.active) - Number(a?.active) || Number(b?.lastAccessed ?? 0) - Number(a?.lastAccessed ?? 0))
+      .find(businessTab);
   if (!tab?.id)
     return { ok: false, reason: '没有找到可附加的当前业务页' };
   await attach(tab);

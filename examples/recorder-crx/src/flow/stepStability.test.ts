@@ -187,6 +187,41 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'code preview omits intermediate prefix fills on the same field',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'fill',
+            value: '2.2.',
+            target: { label: '结束地址，例如：192.168.1.254', displayName: '* 结束地址，例如：' },
+            context: { eventId: 'ctx-end-prefix', capturedAt: 1000, before: { form: { label: '结束地址，例如：192.168.1.254', testId: 'ipv4-address-pool-form' } } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            value: '2.2.2.2',
+            target: { label: '结束地址，例如：192.168.1.254', displayName: '* 结束地址，例如：' },
+            context: { eventId: 'ctx-end-final', capturedAt: 1100, before: { form: { label: '结束地址，例如：192.168.1.254', testId: 'ipv4-address-pool-form' } } },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+
+      assert(!code.includes('.fill("2.2.");'), 'exported code should not replay a prefix value that is superseded by a final same-field fill');
+      assert(code.includes('.fill("2.2.2.2");'), 'exported code should keep the final fill value');
+      assert(!playbackCode.includes('.fill("2.2.");'), 'runtime playback should also omit superseded prefix fills');
+      assert(playbackCode.includes('.fill("2.2.2.2");'), 'runtime playback should keep the final fill value');
+    },
+  },
+  {
     name: 'same label fills in different dialogs stay as separate business steps',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -1579,11 +1614,19 @@ test('demo', async ({ page }) => {
             id: 's002',
             order: 2,
             action: 'click',
-            target: { testId: 'wan-config-confirm', displayName: '确定' },
+            target: {
+              role: 'tooltip',
+              displayName: 'tooltip 确 定',
+              name: 'tooltip 确 定',
+            },
+            sourceCode: 'await page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();',
             context: {
-              eventId: 'ctx-confirm',
-              capturedAt: 2000,
-              before: { target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' } },
+              eventId: 'ctx-popconfirm-ok',
+              capturedAt: 1500,
+              before: {
+                dialog: { type: 'popover', title: '删除此行？', visible: true },
+                target: { tag: 'div', role: 'tooltip', framework: 'antd', controlType: 'button', text: '确 定' },
+              },
             },
             assertions: [],
           },
@@ -1591,11 +1634,44 @@ test('demo', async ({ page }) => {
             id: 's003',
             order: 3,
             action: 'click',
+            target: { testId: 'wan-config-confirm', displayName: '确定' },
+            context: {
+              eventId: 'ctx-confirm',
+              capturedAt: 2000,
+              before: {
+                dialog: { type: 'modal', title: '编辑WAN2', visible: true },
+                target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
             target: { testId: 'wan-config-confirm', displayName: 'testId wan-config-confirm' },
             context: {
               eventId: 'ctx-confirm-echo',
               capturedAt: 2050,
-              before: { target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' } },
+              before: {
+                dialog: { type: 'modal', title: '编辑WAN2', visible: true },
+                target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's005',
+            order: 5,
+            action: 'click',
+            target: { role: 'button', displayName: 'button 确 定', name: '确 定' },
+            context: {
+              eventId: 'ctx-dialog-confirm-echo',
+              capturedAt: 2100,
+              before: {
+                dialog: { type: 'modal', title: '编辑WAN2', visible: true },
+                target: { tag: 'button', role: 'button', framework: 'antd', controlType: 'button', text: '确 定' },
+              },
             },
             assertions: [],
           },
@@ -1608,7 +1684,10 @@ test('demo', async ({ page }) => {
       assert(!code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();'), 'dialog-owned delete action should not keep a page-level duplicate ordinal');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'delete action should confirm the visible AntD popconfirm with the captured confirm label');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});'), 'delete action should wait for the AntD popconfirm to close before the next step');
-      assertEqual((code.match(/page\.getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
+      assertEqual((code.match(/ant-popover[^\n]+getByRole\("button", \{ name: \/\^\(确定\|确 定\)\$\/ \}\)\.click\(\);/g) || []).length, 1);
+      assert(!code.includes('.last().getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'explicit recorded popconfirm confirmation should be skipped when the delete action already synthesized it');
+      assert(!code.includes('page.getByRole("button", { name: "确 定" }).click();'), 'dialog confirm echo should not fall back to a page-global ambiguous role locator');
+      assertEqual((code.match(/getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
       assert(playbackCode.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'runtime playback should keep the dialog-scoped delete click');
       assert(playbackCode.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'runtime playback should still confirm the visible AntD popconfirm');
       assert(!playbackCode.includes('.catch('), 'runtime playback should not include unsupported catch continuations');
@@ -4190,6 +4269,185 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'select trigger recorded as button uses structured form context instead of duplicate role button',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'button',
+            name: '业务域',
+            text: '业务域',
+            displayName: '业务域',
+          },
+          context: {
+            eventId: 'ctx-generic-select-trigger-button',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建业务配置', visible: true },
+              form: { label: '业务域', name: 'domain' },
+              target: {
+                tag: 'div',
+                text: '',
+                framework: 'procomponents',
+                controlType: 'select',
+                locatorQuality: 'semantic',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=button[name="业务域"i] >> nth=4',
+            },
+          },
+          sourceCode: `await page.getByRole('button', { name: '业务域' }).nth(4).click();`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+      const firstStep = stepCodeBlock(playbackCode, 's001');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "业务域" }).locator(".ant-select-selector").first().click();'), 'button-looking select trigger should click the owning form-item selector');
+      assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), 'trigger should not replay through duplicate button role');
+      assert(!firstStep.includes('nth(4)'), 'trigger should not replay through brittle duplicate ordinal');
+    },
+  },
+  {
+    name: 'select trigger with test id still avoids parser-safe duplicate role fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'button',
+            name: '选择一个WAN口',
+            text: '选择一个WAN口',
+            displayName: '选择一个WAN口',
+            testId: 'site-ip-address-pool-wan-select',
+            locatorHint: {
+              strategy: 'global-testid',
+              confidence: 0.98,
+              pageCount: 8,
+              pageIndex: 4,
+            },
+          },
+          context: {
+            eventId: 'ctx-wan-select-trigger-button',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建IPv4地址池', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+              target: {
+                tag: 'div',
+                role: 'button',
+                text: '选择一个WAN口',
+                testId: 'site-ip-address-pool-wan-select',
+                framework: 'procomponents',
+                controlType: 'select',
+                uniqueness: {
+                  pageCount: 8,
+                  pageIndex: 4,
+                },
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=button[name="选择一个WAN口"i] >> nth=4',
+            },
+          },
+          sourceCode: `await page.getByRole('button', { name: '选择一个WAN口' }).nth(4).click({ force: true });`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+      const firstStep = stepCodeBlock(playbackCode, 's001');
+      assert(firstStep.includes('page.getByTestId("site-ip-address-pool-wan-select").click();'), 'select trigger should keep its stable test id instead of duplicate button fallback');
+      assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), 'trigger should not replay through duplicate button role');
+      assert(!firstStep.includes('nth(4)'), 'trigger should not replay through brittle duplicate ordinal');
+    },
+  },
+  {
+    name: 'tree-select and cascader triggers recorded as buttons avoid duplicate role fallback',
+    run: () => {
+      const samples = [
+        { controlType: 'tree-select', label: '发布范围', triggerText: '请选择发布范围', nth: 3 },
+        { controlType: 'cascader', label: '出口路径', triggerText: '选择出口路径', nth: 5 },
+      ] as const;
+
+      for (const sample of samples) {
+        const flow: BusinessFlow = {
+          ...createNamedFlow(),
+          steps: [{
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              role: 'button',
+              name: sample.triggerText,
+              text: sample.triggerText,
+              displayName: sample.triggerText,
+              locatorHint: {
+                strategy: 'global-role',
+                confidence: 0.62,
+                pageCount: 8,
+                pageIndex: sample.nth,
+              },
+            },
+            context: {
+              eventId: `ctx-${sample.controlType}-trigger-button`,
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'modal', title: '新建业务配置', visible: true },
+                form: { label: sample.label, name: sample.controlType },
+                target: {
+                  tag: 'div',
+                  role: 'button',
+                  text: sample.triggerText,
+                  framework: 'procomponents',
+                  controlType: sample.controlType,
+                  uniqueness: {
+                    pageCount: 8,
+                    pageIndex: sample.nth,
+                  },
+                },
+              },
+            },
+            rawAction: {
+              action: {
+                name: 'click',
+                selector: `internal:role=button[name="${sample.triggerText}"i] >> nth=${sample.nth}`,
+              },
+            },
+            sourceCode: `await page.getByRole('button', { name: '${sample.triggerText}' }).nth(${sample.nth}).click({ force: true });`,
+            assertions: [],
+          }],
+        };
+
+        const playbackCode = generateBusinessFlowPlaybackCode(flow);
+        const firstStep = stepCodeBlock(playbackCode, 's001');
+        assert(firstStep.includes(`locator(".ant-form-item").filter({ hasText: "${sample.label}" }).locator(".ant-select-selector").first().click();`), `${sample.controlType} trigger should click the owning form-item selector`);
+        assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), `${sample.controlType} trigger should not replay through duplicate button role`);
+        assert(!firstStep.includes(`nth(${sample.nth})`), `${sample.controlType} trigger should not replay through brittle duplicate ordinal`);
+      }
+    },
+  },
+  {
     name: 'ProFormSelect search fill uses form-item scoped AntD input instead of combobox role',
     run: () => {
       const flow: BusinessFlow = {
@@ -4628,6 +4886,157 @@ test('demo', async ({ page }) => {
       const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
       assert(code.includes('page.getByTestId("wan-edit-1").nth(0).click();'), 'indexed WAN edit should preserve its captured ordinal locator');
       assert(!code.includes('wan-config-table'), 'indexed WAN edit should not force a volatile table row key scope');
+    },
+  },
+  {
+    name: 'parser-safe indexed WAN edit keeps test id instead of duplicate row fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'row',
+            name: 'WAN1 Nova Internet 通用禁用',
+            text: 'WAN1 Nova Internet 通用禁用',
+            displayName: 'WAN1 Nova Internet 通用禁用',
+            testId: 'wan-edit-1',
+            locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: 2, pageIndex: 0 },
+            raw: {
+              recorder: { selector: 'internal:testid=[data-testid="wan-edit-1"s]' },
+              pageContext: {
+                role: 'row',
+                text: 'WAN1 Nova Internet 通用禁用',
+                uniqueness: { pageCount: 2, pageIndex: 0 },
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-wan-row-edit',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'tr',
+                role: 'row',
+                text: 'WAN1 Nova Internet 通用禁用',
+                normalizedText: 'WAN1 Nova Internet 通用禁用',
+                uniqueness: { pageCount: 2, pageIndex: 0 },
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-edit-1"s]' } },
+          sourceCode: `await page.getByRole('row', { name: 'WAN1 Nova Internet 通用禁用' }).nth(0).click({ force: true });`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+      assert(playbackCode.includes('page.getByTestId("wan-edit-1").nth(0).click();'), 'runtime indexed WAN edit should keep the captured test id ordinal');
+      assert(!playbackCode.includes('getByRole("row"') && !playbackCode.includes("getByRole('row'"), 'runtime indexed WAN edit should not replay through a row role fallback');
+    },
+  },
+  {
+    name: 'parser-safe non-button duplicate test id controls keep their test id locator',
+    run: () => {
+      const samples = [
+        { role: 'link', controlType: 'link', testId: 'wan-transport-row-delete-action', text: '删除', nth: 0 },
+        { role: 'switch', controlType: 'switch', testId: 'network-resource-health-switch', text: '开启', nth: 1 },
+        { role: 'checkbox', controlType: 'checkbox', testId: 'proxy-arp-checkbox', text: '开启代理ARP', nth: 1 },
+        { role: 'tab', controlType: 'tab', testId: 'ipv6-tab', text: 'IPv6', nth: 1 },
+      ] as const;
+
+      for (const sample of samples) {
+        const flow: BusinessFlow = {
+          ...createNamedFlow(),
+          steps: [{
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              role: sample.role,
+              name: sample.text,
+              text: sample.text,
+              displayName: sample.text,
+              testId: sample.testId,
+              locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: sample.nth + 2, pageIndex: sample.nth },
+            },
+            context: {
+              eventId: `ctx-${sample.testId}`,
+              capturedAt: 1000,
+              before: {
+                target: {
+                  tag: 'a',
+                  role: sample.role,
+                  testId: sample.testId,
+                  text: sample.text,
+                  normalizedText: sample.text,
+                  framework: 'antd',
+                  controlType: sample.controlType,
+                  uniqueness: { pageCount: sample.nth + 2, pageIndex: sample.nth },
+                },
+              },
+            },
+            rawAction: { action: { name: 'click', selector: `internal:testid=[data-testid="${sample.testId}"s] >> nth=${sample.nth}` } },
+            sourceCode: `await page.getByRole('${sample.role}', { name: '${sample.text}' }).nth(${sample.nth}).click({ force: true });`,
+            assertions: [],
+          }],
+        };
+
+        const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+        assert(playbackCode.includes(`page.getByTestId("${sample.testId}").nth(${sample.nth}).click();`), `${sample.role} duplicate test id should keep its captured test id ordinal`);
+        assert(!playbackCode.includes(`getByRole("${sample.role}"`) && !playbackCode.includes(`getByRole('${sample.role}'`), `${sample.role} duplicate test id should not replay through role ordinal fallback`);
+      }
+    },
+  },
+  {
+    name: 'parser-safe action-like test id without button semantics does not infer button role fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-delete-action',
+            name: '删除',
+            text: '删除',
+            displayName: '删除',
+            locatorHint: { strategy: 'global-testid', confidence: 0.98, pageCount: 2, pageIndex: 0 },
+            raw: { controlType: 'link' },
+          },
+          context: {
+            eventId: 'ctx-link-without-role',
+            capturedAt: 1000,
+            before: {
+              target: {
+                tag: 'a',
+                testId: 'wan-transport-row-delete-action',
+                text: '删除',
+                normalizedText: '删除',
+                framework: 'antd',
+                controlType: 'link',
+                uniqueness: { pageCount: 2, pageIndex: 0 },
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-transport-row-delete-action"s] >> nth=0' } },
+          sourceCode: `await page.getByRole('button', { name: '删除' }).nth(0).click({ force: true });`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+      assert(playbackCode.includes('page.getByTestId("wan-transport-row-delete-action").nth(0).click();'), 'link-like action test id should keep its captured test id ordinal');
+      assert(!playbackCode.includes('getByRole("button"') && !playbackCode.includes("getByRole('button'"), 'link-like action test id should not infer button role fallback from its name');
     },
   },
   {
