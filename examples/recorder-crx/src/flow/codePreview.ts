@@ -1509,7 +1509,7 @@ function scopedOrGlobalTestIdLocator(step: FlowStep, testId: string, source: 'ta
 }
 
 function looksLikeOverlayRootClickTestId(step: FlowStep, testId: string) {
-  if (!/(modal|drawer|dialog|popup|popover|overlay|form)([-_]|$)/i.test(testId))
+  if (!/(^|[-_])(modal|drawer|dialog|popup|popover|overlay|form)([-_]|$)/i.test(testId))
     return false;
   return hasNonTestIdTargetText(step, testId);
 }
