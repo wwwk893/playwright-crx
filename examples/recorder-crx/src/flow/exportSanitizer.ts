@@ -19,7 +19,9 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
   return {
     ...flow,
     steps: flow.steps.map(step => {
-      const { rawAction, sourceCode, ...exportStep } = step;
+      const exportStep = { ...step };
+      delete exportStep.rawAction;
+      delete exportStep.sourceCode;
       return {
         ...exportStep,
         uiRecipe: sanitizeUiRecipe(step.uiRecipe),

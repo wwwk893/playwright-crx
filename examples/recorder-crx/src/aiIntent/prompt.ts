@@ -97,10 +97,6 @@ function compactStep(step: FlowStep): AiIntentStepInput {
   };
 }
 
-function firstText(...values: Array<string | undefined>) {
-  return values.map(value => value?.trim()).find(Boolean);
-}
-
 function compactUrl(value?: string) {
   if (!value)
     return undefined;
@@ -110,8 +106,4 @@ function compactUrl(value?: string) {
   } catch {
     return value.split(/[?#]/)[0];
   }
-}
-
-function compactRowText(value?: string) {
-  return value?.split(/\s+/).find(token => token.length <= 40 && !/^(编辑|删除|操作|--)$/.test(token));
 }

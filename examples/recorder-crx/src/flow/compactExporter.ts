@@ -143,10 +143,6 @@ function compactUrl(value?: string) {
   }
 }
 
-function compactRowText(value?: string) {
-  return value?.split(/\s+/).find(token => token.length <= 40 && !/^(编辑|删除|操作|--)$/.test(token));
-}
-
 function toYaml(value: CompactValue, indent = 0): string {
   if (Array.isArray(value))
     return yamlArray(value, indent);
