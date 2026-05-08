@@ -68,12 +68,12 @@ function compactStep(step: FlowStep): AiIntentStepInput {
     ui: compactUiSemanticContext(before?.ui, step.uiRecipe),
     before: {
       page: before?.title,
-      url: before?.url,
+      url: compactUrl(before?.url),
       breadcrumb: before?.breadcrumb,
       activeTab: before?.activeTab?.title,
       section: before?.section?.title,
       table: before?.table?.title,
-      row: firstText(before?.table?.rowKey, compactRowText(before?.table?.rowText)),
+      row: before?.table?.rowKey,
       column: before?.table?.columnName,
       form: before?.form?.title || before?.form?.name,
       field: before?.form?.label,
@@ -91,16 +91,21 @@ function compactStep(step: FlowStep): AiIntentStepInput {
       activeTab: after?.activeTab?.title,
       dialog: after?.dialog?.title,
       toast: after?.toast,
-      url: after?.url,
+      url: compactUrl(after?.url),
       selectedOption: before?.target?.selectedOption,
     },
   };
 }
 
-function firstText(...values: Array<string | undefined>) {
-  return values.map(value => value?.trim()).find(Boolean);
-}
-
-function compactRowText(value?: string) {
-  return value?.split(/\s+/).find(token => token.length <= 40 && !/^(编辑|删除|操作|--)$/.test(token));
+function compactUrl(value?: string) {
+  if (!value)
+    return undefined;
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.origin === 'null' ? url.href : `${url.origin}${url.pathname}`;
+  } catch {
+    return value.split(/[?#]/)[0];
+  }
 }

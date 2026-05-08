@@ -10,6 +10,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 type CapturedContextEvent = {
   before?: {
+    target?: { text?: string; testId?: string; role?: string };
     ui?: {
       component?: string;
       componentPath?: string[];
@@ -25,6 +26,11 @@ type CapturedContextEvent = {
       weak?: boolean;
     };
   };
+};
+
+type SidecarFixtureOptions = {
+  semanticAdapterEnabled?: boolean;
+  semanticAdapterDiagnosticsEnabled?: boolean;
 };
 
 test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
@@ -120,12 +126,56 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
     expect(ui?.library).toBe('unknown');
     expect(ui?.weak).toBe(true);
   });
+
+  test('can disable semantic adapter without losing basic page context', async ({ page }) => {
+    await installSidecarFixture(page, { semanticAdapterEnabled: false, semanticAdapterDiagnosticsEnabled: true });
+    const event = await captureAfterSequence(page, ['#role-select .ant-select-selector']);
+    expect(event.before?.target?.text || event.before?.target?.testId || event.before?.target?.role).toBeTruthy();
+    expect(event.before?.ui).toBeUndefined();
+    const diagnostics = await readSemanticDiagnostics(page);
+    expect(diagnostics.some(entry => entry.event === 'semantic.disabled')).toBe(true);
+  });
+
+  test('keeps semantic diagnostics compact and private', async ({ page }) => {
+    await installSidecarFixture(page, { semanticAdapterDiagnosticsEnabled: true });
+    await captureAfterSequence(page, ['#plain-status']);
+    await captureAfterSequence(page, ['#role-select .ant-select-selector', '#role-admin']);
+    const diagnostics = await readSemanticDiagnostics(page);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics.some(entry => entry.event === 'semantic.detect' || entry.event === 'semantic.weak' || entry.event === 'semantic.fallback-css')).toBe(true);
+    const json = JSON.stringify(diagnostics);
+    expect(json).toContain('valuePreview');
+    expect(json).not.toContain('"value"');
+    expect(json).not.toContain('rowText');
+    expect(json).not.toContain('overlay text');
+    expect(json).not.toContain('option.value');
+  });
+
+  test('focused semantic stress stays stable across repeated portal overlay table interactions', async ({ page }) => {
+    for (let i = 0; i < 3; i++) {
+      await installSidecarFixture(page, { semanticAdapterDiagnosticsEnabled: true });
+      const selectEvent = await captureAfterSequence(page, ['#role-select .ant-select-selector', '#role-admin']);
+      expect(selectEvent.before?.ui?.recipe?.kind).toBe('select-option');
+      expect(selectEvent.before?.ui?.option?.text || selectEvent.before?.ui?.recipe?.optionText).toBe('管理员');
+
+      const popconfirmEvent = await captureAfterSequence(page, ['#popconfirm-ok']);
+      expect(popconfirmEvent.before?.ui?.componentPath).toContain('popconfirm');
+      expect(popconfirmEvent.before?.ui?.recipe?.kind).toBe('confirm-popconfirm');
+
+      const tooltipEvent = await captureAfterSequence(page, ['#tooltip-trigger']);
+      expect(tooltipEvent.before?.ui?.component).toBe('tooltip');
+
+      const rowEvent = await captureAfterSequence(page, ['#user-edit']);
+      expect(rowEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+      expect(rowEvent.before?.ui?.table?.rowKey || rowEvent.before?.ui?.recipe?.rowKey).toBe('user-42');
+    }
+  });
 });
 
-async function installSidecarFixture(page: Page) {
+async function installSidecarFixture(page: Page, options: SidecarFixtureOptions = {}) {
   await page.goto(`data:text/html,<html><body>reset-${Date.now()}-${Math.random()}</body></html>`);
   await page.setContent(semanticFixtureHtml());
-  await page.evaluate(() => {
+  await page.evaluate(sidecarOptions => {
     document.addEventListener('submit', event => event.preventDefault(), true);
     document.addEventListener('click', event => {
       const target = event.target as Element | null;
@@ -134,6 +184,7 @@ async function installSidecarFixture(page: Page) {
     }, true);
     (window as any).__semanticEvents = [];
     (window as any).__sidecarErrors = [];
+    (window as any).__playwrightCrxSemanticAdapterOptions = sidecarOptions;
     window.addEventListener('error', event => {
       (window as any).__sidecarErrors.push({ message: event.message, filename: event.filename, lineno: event.lineno, colno: event.colno, stack: event.error?.stack });
     });
@@ -145,8 +196,15 @@ async function installSidecarFixture(page: Page) {
         },
       },
     };
+  }, {
+    semanticAdapterEnabled: options.semanticAdapterEnabled !== false,
+    semanticAdapterDiagnosticsEnabled: options.semanticAdapterDiagnosticsEnabled === true,
   });
   await page.addScriptTag({ path: sidecarBundlePath() });
+}
+
+async function readSemanticDiagnostics(page: Page): Promise<Array<{ event?: string }>> {
+  return await page.evaluate(() => (window as any).__playwrightCrxSemanticDiagnostics?.entries?.() ?? []);
 }
 
 function sidecarBundlePath() {

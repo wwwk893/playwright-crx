@@ -6,7 +6,7 @@
  */
 import type { StepContextSnapshot } from './pageContextTypes';
 import type { BusinessFlow, FlowTarget } from './types';
-import type { UiSemanticContext } from '../uiSemantics/types';
+import type { UiActionRecipe, UiSemanticContext } from '../uiSemantics/types';
 
 export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string): BusinessFlow {
   const artifacts = { ...flow.artifacts };
@@ -18,11 +18,18 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
   delete artifacts.recorder;
   return {
     ...flow,
-    steps: flow.steps.map(step => ({
-      ...step,
-      target: sanitizeFlowTarget(step.target),
-      context: sanitizeStepContext(step.context),
-    })),
+    steps: flow.steps.map(step => {
+      const exportStep = { ...step };
+      delete exportStep.rawAction;
+      delete exportStep.sourceCode;
+      return {
+        ...exportStep,
+        uiRecipe: sanitizeUiRecipe(step.uiRecipe),
+        target: sanitizeFlowTarget(step.target),
+        context: sanitizeStepContext(step.context),
+        url: compactUrl(step.url),
+      };
+    }),
     artifacts: {
       ...artifacts,
       playwrightCode: code,
@@ -42,14 +49,11 @@ function sanitizeFlowTarget(target?: FlowTarget): FlowTarget | undefined {
 
 function sanitizeRawTarget(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
-    return raw;
-  if (!('ui' in raw))
-    return raw;
+    return undefined;
   const rawRecord = raw as Record<string, unknown>;
-  return {
-    ...rawRecord,
-    ui: sanitizeUiSemanticContext(rawRecord.ui as UiSemanticContext | undefined),
-  };
+  const target = rawRecord.target && typeof rawRecord.target === 'object' && !Array.isArray(rawRecord.target) ? sanitizeUnknownElementTarget(rawRecord.target as Record<string, unknown>) : undefined;
+  const ui = sanitizeUiSemanticContext(rawRecord.ui as UiSemanticContext | undefined);
+  return compactObject({ target, ui });
 }
 
 function sanitizeStepContext(context?: StepContextSnapshot): StepContextSnapshot | undefined {
@@ -57,20 +61,106 @@ function sanitizeStepContext(context?: StepContextSnapshot): StepContextSnapshot
     return undefined;
   return {
     ...context,
-    before: {
-      ...context.before,
-      ui: sanitizeUiSemanticContext(context.before.ui),
-    },
-    after: context.after ? { ...context.after } : undefined,
+    before: sanitizePageContext(context.before),
+    after: context.after ? sanitizePageContextAfter(context.after) : undefined,
   };
+}
+
+function sanitizePageContext(snapshot: StepContextSnapshot['before']): StepContextSnapshot['before'] {
+  return compactObject({
+    url: compactUrl(snapshot.url),
+    title: snapshot.title,
+    breadcrumb: snapshot.breadcrumb,
+    activeTab: snapshot.activeTab,
+    dialog: snapshot.dialog,
+    section: snapshot.section,
+    table: snapshot.table ? compactObject({
+      title: snapshot.table.title,
+      testId: snapshot.table.testId,
+      rowKey: snapshot.table.rowKey,
+      rowIndex: snapshot.table.rowIndex,
+      ariaRowIndex: snapshot.table.ariaRowIndex,
+      columnName: snapshot.table.columnName,
+      columnIndex: snapshot.table.columnIndex,
+      headers: snapshot.table.headers,
+      nestingLevel: snapshot.table.nestingLevel,
+      parentTitle: snapshot.table.parentTitle,
+      fixedSide: snapshot.table.fixedSide,
+      rowKind: snapshot.table.rowKind,
+      expandedParentRowKey: snapshot.table.expandedParentRowKey,
+    }) as StepContextSnapshot['before']['table'] : undefined,
+    form: snapshot.form,
+    target: sanitizeElementContext(snapshot.target),
+    ui: sanitizeUiSemanticContext(snapshot.ui),
+  }) as StepContextSnapshot['before'];
+}
+
+function sanitizePageContextAfter(snapshot: NonNullable<StepContextSnapshot['after']>): NonNullable<StepContextSnapshot['after']> {
+  return compactObject({
+    url: compactUrl(snapshot.url),
+    title: snapshot.title,
+    breadcrumb: snapshot.breadcrumb,
+    activeTab: snapshot.activeTab,
+    dialog: snapshot.dialog,
+    openedDialog: snapshot.openedDialog,
+    toast: snapshot.toast,
+  }) as NonNullable<StepContextSnapshot['after']>;
+}
+
+function sanitizeElementContext(target?: StepContextSnapshot['before']['target']): StepContextSnapshot['before']['target'] | undefined {
+  if (!target)
+    return undefined;
+  return compactObject({
+    tag: target.tag,
+    role: target.role,
+    testId: target.testId,
+    ariaLabel: target.ariaLabel,
+    title: target.title,
+    text: target.text,
+    placeholder: target.placeholder,
+    selectedOption: target.selectedOption,
+    normalizedText: target.normalizedText,
+    framework: target.framework,
+    controlType: target.controlType,
+    locatorQuality: target.locatorQuality,
+    optionPath: target.optionPath,
+    uniqueness: target.uniqueness,
+  }) as StepContextSnapshot['before']['target'];
+}
+
+function sanitizeUnknownElementTarget(target: Record<string, unknown>) {
+  return compactObject({
+    tag: typeof target.tag === 'string' ? target.tag : undefined,
+    role: typeof target.role === 'string' ? target.role : undefined,
+    testId: typeof target.testId === 'string' ? target.testId : undefined,
+    ariaLabel: typeof target.ariaLabel === 'string' ? target.ariaLabel : undefined,
+    title: typeof target.title === 'string' ? target.title : undefined,
+    text: typeof target.text === 'string' ? target.text : undefined,
+    placeholder: typeof target.placeholder === 'string' ? target.placeholder : undefined,
+  });
 }
 
 function sanitizeUiSemanticContext(ui?: UiSemanticContext): UiSemanticContext | undefined {
   if (!ui)
     return undefined;
-  const sanitized = {
-    ...ui,
-    table: ui.table ? {
+  return compactObject({
+    library: ui.library,
+    component: ui.component,
+    targetText: ui.targetText,
+    targetTestId: ui.targetTestId,
+    form: ui.form ? compactObject({
+      formKind: ui.form.formKind,
+      formTitle: ui.form.formTitle,
+      formName: ui.form.formName,
+      fieldKind: ui.form.fieldKind,
+      label: ui.form.label,
+      name: ui.form.name,
+      dataIndex: ui.form.dataIndex,
+      required: ui.form.required,
+      placeholder: ui.form.placeholder,
+      status: ui.form.status,
+    }) : undefined,
+    table: ui.table ? compactObject({
       tableKind: ui.table.tableKind,
       title: ui.table.title,
       rowKey: ui.table.rowKey,
@@ -82,18 +172,61 @@ function sanitizeUiSemanticContext(ui?: UiSemanticContext): UiSemanticContext | 
       currentPage: ui.table.currentPage,
       pageSize: ui.table.pageSize,
       region: ui.table.region,
-    } : undefined,
-    overlay: ui.overlay ? {
+    }) : undefined,
+    overlay: ui.overlay ? compactObject({
       type: ui.overlay.type,
       title: ui.overlay.title,
       visible: ui.overlay.visible,
-    } : undefined,
-    option: ui.option ? {
+    }) : undefined,
+    option: ui.option ? compactObject({
       text: ui.option.text,
       path: ui.option.path,
-    } : undefined,
-  };
-  delete (sanitized as Partial<UiSemanticContext>).locatorHints;
-  delete (sanitized as Partial<UiSemanticContext>).reasons;
-  return sanitized as UiSemanticContext;
+    }) : undefined,
+    recipe: sanitizeUiRecipe(ui.recipe),
+    confidence: ui.confidence,
+    weak: ui.weak,
+  }) as UiSemanticContext | undefined;
+}
+
+function sanitizeUiRecipe(recipe?: UiActionRecipe): UiActionRecipe | undefined {
+  if (!recipe)
+    return undefined;
+  return compactObject({
+    kind: recipe.kind,
+    library: recipe.library,
+    component: recipe.component,
+    formKind: recipe.formKind,
+    fieldKind: recipe.fieldKind,
+    fieldLabel: recipe.fieldLabel,
+    fieldName: recipe.fieldName,
+    optionText: recipe.optionText,
+    tableTitle: recipe.tableTitle,
+    rowKey: recipe.rowKey,
+    columnTitle: recipe.columnTitle,
+    overlayTitle: recipe.overlayTitle,
+    targetText: recipe.targetText,
+  }) as UiActionRecipe | undefined;
+}
+
+function compactUrl(value?: string) {
+  if (!value)
+    return undefined;
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.origin === 'null' ? url.href : `${url.origin}${url.pathname}`;
+  } catch {
+    return value.split(/[?#]/)[0];
+  }
+}
+
+function compactObject<T extends Record<string, unknown>>(object: T): Partial<T> | undefined {
+  const result: Partial<T> = {};
+  for (const [key, value] of Object.entries(object)) {
+    if (value === undefined || value === '' || (Array.isArray(value) && !value.length))
+      continue;
+    result[key as keyof T] = value as T[keyof T];
+  }
+  return Object.keys(result).length ? result : undefined;
 }

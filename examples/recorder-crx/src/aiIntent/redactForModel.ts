@@ -6,7 +6,7 @@
 import type { AiIntentInput } from './types';
 
 const sensitiveKeyPattern = /(password|token|cookie|authorization|secret|api[-_]?key)/i;
-const dropKeyPattern = /^(value|rawAction|sourceCode|selector|locator|network|responseBody|storageState)$/i;
+const dropKeyPattern = /^(value|rawAction|sourceCode|selector|locator|locatorHints|reasons|rowText|nearbyText|network|responseBody|storageState)$/i;
 const jwtPattern = /\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g;
 const base64LikePattern = /\b[A-Za-z0-9+/=_-]{80,}\b/g;
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;

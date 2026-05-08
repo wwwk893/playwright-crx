@@ -20,6 +20,8 @@ export type CrxSettings = {
   experimental?: boolean;
   playInIncognito: boolean;
   businessFlowEnabled?: boolean;
+  semanticAdapterEnabled?: boolean;
+  semanticAdapterDiagnosticsEnabled?: boolean;
   defaultApp?: string;
   defaultRepo?: string;
   defaultRole?: string;
@@ -33,6 +35,8 @@ export const defaultSettings = {
   experimental: false,
   playInIncognito: false,
   businessFlowEnabled: true,
+  semanticAdapterEnabled: true,
+  semanticAdapterDiagnosticsEnabled: false,
   defaultApp: '',
   defaultRepo: '',
   defaultRole: '',
@@ -42,7 +46,7 @@ export const defaultSettings = {
 export async function loadSettings(): Promise<CrxSettings> {
   const [isAllowedIncognitoAccess, loadedPreferences] = await Promise.all([
     chrome.extension.isAllowedIncognitoAccess(),
-    chrome.storage.sync.get(['testIdAttributeName', 'targetLanguage', 'sidepanel', 'playInIncognito', 'experimental', 'businessFlowEnabled', 'defaultApp', 'defaultRepo', 'defaultRole', 'redactSensitiveData']) as Partial<CrxSettings>,
+    chrome.storage.sync.get(['testIdAttributeName', 'targetLanguage', 'sidepanel', 'playInIncognito', 'experimental', 'businessFlowEnabled', 'semanticAdapterEnabled', 'semanticAdapterDiagnosticsEnabled', 'defaultApp', 'defaultRepo', 'defaultRole', 'redactSensitiveData']) as Partial<CrxSettings>,
   ]);
   return { ...defaultSettings, ...loadedPreferences, playInIncognito: !!loadedPreferences.playInIncognito && isAllowedIncognitoAccess };
 }
@@ -54,8 +58,8 @@ export async function storeSettings(settings: CrxSettings) {
 const listeners = new Map<(settings: CrxSettings) => void, any>();
 
 export function addSettingsChangedListener(listener: (settings: CrxSettings) => void) {
-  const wrappedListener = ({ testIdAttributeName, targetLanguage, sidepanel, playInIncognito, experimental, businessFlowEnabled, defaultApp, defaultRepo, defaultRole, redactSensitiveData }: Record<string, chrome.storage.StorageChange>) => {
-    if (!testIdAttributeName && !targetLanguage && !sidepanel && !playInIncognito && !experimental && !businessFlowEnabled && !defaultApp && !defaultRepo && !defaultRole && !redactSensitiveData)
+  const wrappedListener = ({ testIdAttributeName, targetLanguage, sidepanel, playInIncognito, experimental, businessFlowEnabled, semanticAdapterEnabled, semanticAdapterDiagnosticsEnabled, defaultApp, defaultRepo, defaultRole, redactSensitiveData }: Record<string, chrome.storage.StorageChange>) => {
+    if (!testIdAttributeName && !targetLanguage && !sidepanel && !playInIncognito && !experimental && !businessFlowEnabled && !semanticAdapterEnabled && !semanticAdapterDiagnosticsEnabled && !defaultApp && !defaultRepo && !defaultRole && !redactSensitiveData)
       return;
 
     loadSettings().then(listener).catch(() => {});
