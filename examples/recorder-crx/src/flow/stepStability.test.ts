@@ -1529,8 +1529,18 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)")'), 'popconfirm should start from visible AntD popover scope');
       assert(firstStep.includes('filter({ hasText: "删除此行？" })'), 'popconfirm should filter by its title');
-      assert(firstStep.includes('getByRole("button", { name: "确定" })') || firstStep.includes('getByRole("button", { name: "确 定" })'), 'popconfirm should click the confirm button');
+      assert(firstStep.includes('getByRole("button", { name: /^(确定|确 定)$/ })') || firstStep.includes('getByRole("button", { name: "确定" })') || firstStep.includes('getByRole("button", { name: "确 定" })'), 'popconfirm should click the confirm button');
       assert(!firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]")'), 'popconfirm should not be scoped to modal/drawer');
+    },
+  },
+  {
+    name: 'AntD popconfirm tooltip fallback clicks the visible popover confirm button',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('div >> internal:role=tooltip[name="确 定"i]')], [], {});
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(firstStep.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'tooltip target should click the visible AntD popconfirm button, not the tooltip container');
+      assert(!firstStep.includes('page.getByRole("tooltip", { name: "确 定" }).click();'), 'tooltip role click is not a runnable confirmation target');
     },
   },
   {

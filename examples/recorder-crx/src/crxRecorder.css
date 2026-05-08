@@ -988,6 +988,49 @@
   overflow: hidden;
 }
 
+.flow-settings-panel {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.flow-settings-panel .flow-ai-control {
+  margin: 0;
+}
+
+.flow-settings-logs {
+  padding: 0;
+}
+
+.flow-settings-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.flow-settings-head h2 {
+  overflow: hidden;
+  margin: 2px 0 4px;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.flow-settings-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .flow-ai-control summary::-webkit-details-marker,
 .export-review-panel summary::-webkit-details-marker,
 .export-risk-details summary::-webkit-details-marker,
@@ -2523,7 +2566,7 @@
 .review-insert-slot {
   position: relative;
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 1fr;
   align-items: center;
   gap: 8px;
   min-height: 14px;
@@ -2534,15 +2577,8 @@
 }
 
 .review-insert-slot::before {
-  content: "";
-  justify-self: center;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--primary);
-  border-radius: 50%;
-  background: #fff;
-  opacity: 0;
-  transition: opacity 0.16s ease;
+  display: none;
+  content: none;
 }
 
 .review-insert-slot > button {
@@ -2566,8 +2602,6 @@
   padding: 6px 8px;
 }
 
-.review-insert-slot:hover::before,
-.review-insert-slot.active::before,
 .review-insert-slot:hover > button,
 .review-insert-slot.active > button {
   opacity: 1;
@@ -4613,7 +4647,7 @@
 
 .recording-toolbar {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
@@ -5162,7 +5196,7 @@
   position: sticky;
   bottom: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: auto;
   padding: 12px 16px;
@@ -5182,6 +5216,8 @@
   .step-context-grid,
   .flow-compact-stats,
   .stats-row,
+  .recording-toolbar,
+  .export-stage-footer,
   .assertion-object-grid,
   .subject-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
