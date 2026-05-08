@@ -271,6 +271,42 @@ const tests: TestCase[] = [
         assert(!generated.includes('选择一个VRF'), 'placeholder option text should not be emitted as a replay click');
         assert(generated.includes('default'), 'real selected option should still be emitted');
       }
+      const repeatFlow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { role: 'option', text: 'default', displayName: 'default' },
+            rawAction: { name: 'click' } as any,
+            sourceCode: 'await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text=\\"default\\"i").click();',
+            context: { eventId: 'ctx-vrf-default-repeat', capturedAt: 1200, before: { form: { label: '关联VRF' }, target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] } } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: { role: 'option', text: 'default', displayName: 'default' },
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="default"i' } as any,
+            context: { eventId: 'ctx-vrf-default-repeat-real', capturedAt: 1300, before: { form: { label: '关联VRF' }, target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] } } },
+            assertions: [],
+          },
+        ],
+        repeatSegments: [{
+          id: 'segment-vrf',
+          name: 'VRF rows',
+          stepIds: ['s001', 's002'],
+          parameters: [{ id: 'param-vrf', variableName: 'vrf', label: 'VRF', sourceStepId: 's001', currentValue: 'default', enabled: true }],
+          rows: [{ id: 'row-placeholder', values: { 'param-vrf': '选择一个VRF' } }],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+      const repeatPlayback = generateBusinessFlowPlaybackCode(repeatFlow);
+      assert(!repeatPlayback.includes('internal:has-text=\\"选择一个VRF\\"i'), 'placeholder produced only after repeat row parameterization should still be dropped');
+      assert(!repeatPlayback.includes('选择一个VRF'), 'parameterized placeholder text should not leak into runtime playback');
     },
   },
   {
@@ -1847,6 +1883,8 @@ test('demo', async ({ page }) => {
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
 
+      assert(code.includes('page.locator("tr, [role=\\"row\\"], .ant-table-row, .ant-list-item, .ant-descriptions-row, .ant-space, .ant-card, .ant-table-cell").filter({ hasText: /Nova专线[\\s\\S]*default/ }).getByTestId("wan-transport-row-delete-action").first().click();'), 'row delete with reusable test id should fall back to row text scope instead of global test id when rowKey is missing');
+      assert(!code.includes('await page.getByTestId("wan-transport-row-delete-action").click();'), 'reusable row delete should not replay as an ambiguous global test id');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'AntD row delete should use the captured opened popover to confirm');
     },
   },

@@ -641,6 +641,10 @@ function isPlaceholderSelectOptionClick(step: FlowStep) {
   return !!optionName && /^请?选择(?:一个)?\S*/.test(optionName);
 }
 
+function isPlaceholderSelectOptionSourceLine(line: string) {
+  return /ant-select-item-option|role=option|internal:role=option/.test(line) && /请?选择(?:一个)?\S*/.test(line);
+}
+
 function placeholderOptionTextFromSource(source: string) {
   return source.match(/(?:has-text=|text=|name:\s*)[\\"'`](请?选择(?:一个)?[^\\"'`),]+)/)?.[1];
 }
@@ -739,10 +743,17 @@ function uniqueValues(values: string[]) {
 function emitStep(lines: string[], step: FlowStep, indent: string, segment?: FlowRepeatSegment, rowValues?: Record<string, string>, options: EmitStepOptions = {}) {
   lines.push(`${indent}// ${step.id} ${actionLabel[step.action]}: ${summarizeStepSubject(step)}`);
   const sourceCode = sourceCodeForStep(step, options);
-  if (sourceCode)
-    lines.push(...sourceCode.map(line => `${indent}${segment ? parameterizeLine(line, step, segment, rowValues) : line}`));
-  else
+  if (sourceCode) {
+    const emittedSource = sourceCode
+        .map(line => segment ? parameterizeLine(line, step, segment, rowValues) : line)
+        .filter(line => !isPlaceholderSelectOptionSourceLine(line));
+    if (emittedSource.length)
+      lines.push(...emittedSource.map(line => `${indent}${line}`));
+    else
+      lines.push(`${indent}// ${step.id} skipped unsafe placeholder select option replay.`);
+  } else {
     lines.push(`${indent}// ${step.id} has no runnable Playwright action source.`);
+  }
 
   for (const assertion of step.assertions.filter(assertion => assertion.enabled))
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
@@ -1667,7 +1678,43 @@ function rowScopedActionTestIdLocator(step: FlowStep, testId: string) {
     if (rowLocator)
       return `${rowLocator}.getByTestId(${stringLiteral(testId)})`;
   }
+  const fallbackRowText = fallbackRowActionText(step, testId);
+  if (fallbackRowText) {
+    const root = testIdDialogScope(step) ? dialogRootLocator(testIdDialogScope(step)) : 'page';
+    return `${root}.locator(${stringLiteral(rowActionContainerSelector())}).filter({ hasText: ${rowTextRegexLiteral(fallbackRowText)} }).getByTestId(${stringLiteral(testId)}).first()`;
+  }
   return undefined;
+}
+
+function fallbackRowActionText(step: FlowStep, testId: string) {
+  const value = generatedTextCandidate(
+      step.target?.scope?.table?.rowText,
+      step.context?.before.table?.rowText,
+      step.target?.scope?.table?.rowIdentity?.value,
+      step.context?.before.table?.rowIdentity?.value,
+      step.target?.name,
+      step.target?.text,
+      step.target?.displayName,
+      step.context?.before.target?.ariaLabel,
+      step.context?.before.target?.normalizedText,
+      step.context?.before.target?.text,
+  );
+  if (!value)
+    return undefined;
+  const stripped = value.replace(new RegExp(escapeRegExp(testId), 'g'), '').replace(/^(button|link|操作|action)\s*/i, '').trim();
+  if (/^(确定|确 定|OK|Yes|Confirm|保存|应用|删除|移除|编辑)$/i.test(stripped))
+    return undefined;
+  return stripped && stripped !== testId ? stripped : undefined;
+}
+
+function rowTextRegexLiteral(value: string) {
+  const tokens = value.split(/\s+/).map(token => token.trim()).filter(Boolean);
+  const pattern = tokens.length ? tokens.map(escapeRegExp).join('[\\s\\S]*') : escapeRegExp(value);
+  return `/${pattern}/`;
+}
+
+function rowActionContainerSelector() {
+  return 'tr, [role="row"], .ant-table-row, .ant-list-item, .ant-descriptions-row, .ant-space, .ant-card, .ant-table-cell';
 }
 
 function isReusableRowActionTestId(testId: string) {
