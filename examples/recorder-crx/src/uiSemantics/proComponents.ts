@@ -10,7 +10,7 @@ export function collectProComponentsContext(target: Element, base: UiSemanticCon
   const pro = closestProComponent(target);
   if (!pro)
     return base;
-  const component = proComponentFor(target, pro, base);
+  const component = shouldPreserveBaseInteractiveComponent(base) ? base.component : proComponentFor(target, pro, base);
   const componentPath = [...(base.componentPath ?? [base.component])];
   for (const item of proComponentPath(target))
     addUnique(componentPath, item);
@@ -39,6 +39,10 @@ export function collectProComponentsContext(target: Element, base: UiSemanticCon
     confidence: Math.max(base.confidence ?? 0, weak ? 0.62 : 0.84),
     reasons,
   }) as UiSemanticContext;
+}
+
+function shouldPreserveBaseInteractiveComponent(base: UiSemanticContext) {
+  return !!base.option?.text && /^(select|tree-select|cascader|dropdown)$/.test(base.component);
 }
 
 function closestProComponent(target: Element) {

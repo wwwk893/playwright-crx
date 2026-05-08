@@ -178,7 +178,7 @@ function mergeBusinessTable(base: UiTableContext | undefined, target: Element, c
   const column = closestWithAttr(target, 'data-column-key');
   const role = closestWithAttr(target, 'data-e2e-role');
   const action = closestWithAttr(target, 'data-e2e-action');
-  if (!table && !row && !column && !role && !action)
+  if (!table && !row && !column && !role)
     return base;
   const region = tableRegionFor(role?.getAttribute('data-e2e-role'), action?.getAttribute('data-e2e-action'), component) || base?.region;
   return compactObject({

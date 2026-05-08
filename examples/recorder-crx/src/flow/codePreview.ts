@@ -799,6 +799,8 @@ function isNonInteractiveContainerClick(step: FlowStep) {
     return false;
   if (testId && looksLikeActionTestId(testId))
     return false;
+  if (isTableScopedClick(step))
+    return false;
 
   const contextTag = step.context?.before.target?.tag || String((step.target?.raw as { tag?: unknown } | undefined)?.tag || '');
   const contextFramework = step.context?.before.target?.framework || String((step.target?.raw as { framework?: unknown } | undefined)?.framework || '');
@@ -819,6 +821,15 @@ function isNonInteractiveContainerClick(step: FlowStep) {
   if (!looksLikeStructuralContainer)
     return false;
   return !hasTargetText || !!testId;
+}
+
+function isTableScopedClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const table = step.target?.scope?.table || step.context?.before.table;
+  if (!table?.testId)
+    return false;
+  return !!(table.rowKey || table.rowIdentity?.value || table.rowText || step.context?.before.target?.role === 'row' || step.target?.role === 'row');
 }
 
 function hasNonTestIdTargetText(step: FlowStep, testId?: string) {
@@ -893,10 +904,10 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const selectTrigger = isComboboxFill ? antdSelectFieldLocator(step) : undefined;
       if (selectTrigger)
         return `await ${options.parserSafe ? parserSafeLocator(selectTrigger) : selectTrigger}.locator(${stringLiteral('input')})${options.parserSafe ? '' : '.first()'}.fill(${value});`;
-      const testIdLocator = globalTestIdLocator(step);
+      const preferred = fieldLocator(step);
+      const testIdLocator = fillTestIdLocator(step);
       if (testIdLocator)
         return `await ${testIdLocator}.fill(${value});`;
-      const preferred = fieldLocator(step);
       if (preferred)
         return `await ${preferred}.fill(${value});`;
       return selector ? `await ${locatorExpressionForSelector(selector)}.fill(${value});` : undefined;
@@ -1471,10 +1482,21 @@ function scopedOrGlobalTestIdLocator(step: FlowStep, testId: string, source: 'ta
   const rowScoped = rowScopedActionTestIdLocator(step, testId);
   if (rowScoped)
     return rowScoped;
+  const ownDialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  if (step.action === 'click' && ownDialog?.testId === testId && !dialogOpenedByThisStep(step, ownDialog))
+    return undefined;
+  if (step.action === 'click' && looksLikeOverlayRootClickTestId(step, testId))
+    return undefined;
   const dialog = step.action === 'click' ? testIdDialogScope(step) : undefined;
   if (dialog && !looksLikeDialogOwnedTestId(testId))
     return `${dialogRootLocator(dialog)}.getByTestId(${stringLiteral(testId)})`;
   return testIdLocatorWithOrdinal(step, testId, source);
+}
+
+function looksLikeOverlayRootClickTestId(step: FlowStep, testId: string) {
+  if (!/(modal|drawer|dialog|popup|popover|overlay|form)([-_]|$)/i.test(testId))
+    return false;
+  return hasNonTestIdTargetText(step, testId);
 }
 
 function testIdDialogScope(step: FlowStep) {
@@ -1602,7 +1624,7 @@ function uniquenessFromRawTarget(raw: unknown) {
 function tableScopedLocator(step: FlowStep) {
   const table = step.target?.scope?.table || step.context?.before.table;
   const targetName = targetNameForLocator(step);
-  const role = step.target?.role || 'button';
+  const role = step.target?.role || step.context?.before.target?.role || 'button';
   if (!table?.testId || !targetName)
     return undefined;
 
@@ -1611,7 +1633,7 @@ function tableScopedLocator(step: FlowStep) {
   if (stableRowValue) {
     const rowSelector = `tr[data-row-key="${stableRowValue}"], [data-row-key="${stableRowValue}"]`;
     const rowLocator = `page.getByTestId(${stringLiteral(table.testId)}).locator(${stringLiteral(rowSelector)})`;
-    if (role === 'row')
+    if (role === 'row' || role === 'cell' || role === 'gridcell' || isRowContainerClick(step, targetName, table))
       return `${rowLocator}.first()`;
     return rowLocator +
       `.filter({ has: page.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} }) })` +
@@ -1629,6 +1651,15 @@ function tableScopedLocator(step: FlowStep) {
     return `${rowLocator}.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
   }
   return undefined;
+}
+
+function isRowContainerClick(step: FlowStep, targetName: string, table: NonNullable<FlowTableScope>) {
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (/^(button|link|checkbox|radio|switch|select|input|textarea)$/i.test(controlType))
+    return false;
+  const rowText = normalizeComparableText(table.rowText || table.rowIdentity?.value || '');
+  const name = normalizeComparableText(targetName);
+  return !!rowText && !!name && name.includes(rowText);
 }
 
 function dialogScopedLocator(step: FlowStep) {
@@ -1677,6 +1708,23 @@ function choiceControlLocator(step: FlowStep) {
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
   const base = dialog?.title ? `page.getByRole('dialog', { name: ${stringLiteral(dialog.title)} })` : 'page';
   return `${base}.locator('label').filter({ hasText: ${stringLiteral(text)} })`;
+}
+
+function fillTestIdLocator(step: FlowStep) {
+  const testId = step.target?.testId;
+  const preferred = fieldLocator(step);
+  if (testId && preferred && isContainerTestIdForFill(step, testId))
+    return undefined;
+  return globalTestIdLocator(step);
+}
+
+function isContainerTestIdForFill(step: FlowStep, testId: string) {
+  const dialogTestId = step.target?.scope?.dialog?.testId || step.context?.before.dialog?.testId;
+  if (dialogTestId && dialogTestId === testId)
+    return true;
+  if (/(modal|drawer|dialog|form)$/i.test(testId))
+    return true;
+  return looksLikeStructuralContainerTestId(testId);
 }
 
 function fieldLocator(step: FlowStep) {
