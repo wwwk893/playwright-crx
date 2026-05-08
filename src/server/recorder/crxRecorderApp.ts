@@ -330,12 +330,13 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
       this._sendRuntimeEvent('runtime.playback-skip', 'Playwright 正在回放，本次运行请求已忽略', undefined, 'warn');
       return;
     }
+    const activeTabAttach = this._pendingReplayAttach;
+    await activeTabAttach?.catch(() => {});
     const incognito = this._playInIncognito;
-    if (incognito) {
+    if (incognito && !activeTabAttach) {
       const incognitoCrxApp = await this._crx.get({ incognito });
       await incognitoCrxApp?.close({ closeWindows: true });
     }
-    await this._pendingReplayAttach?.catch(() => {});
     const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito }, serverSideCallMetadata());
     const actions = this._getActions();
     this._sendRuntimeEvent('runtime.playback-actions', actions.length ? `准备执行 ${actions.length} 个 Playwright action` : '没有可执行的 Playwright action', {
@@ -358,36 +359,43 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
   }
 
   private async _attachActiveTabForReplay() {
-    const incognito = this._playInIncognito;
     try {
       const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
       const focusedTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
       const currentTabs = focusedTabs.length ? focusedTabs : await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [] as chrome.tabs.Tab[]);
       const fallbackTabs = currentTabs.length ? currentTabs : await chrome.tabs.query({ active: true }).catch(() => [] as chrome.tabs.Tab[]);
+      const allTabs = await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[]);
       const seenTabIds = new Set<number>();
-      const candidates = [...focusedTabs, ...currentTabs, ...fallbackTabs].filter(tab => {
-        if (!tab.id || seenTabIds.has(tab.id))
-          return false;
-        seenTabIds.add(tab.id);
-        return !tab.url?.startsWith(extensionOrigin) && tab.incognito === incognito;
-      });
+      const candidates = [...focusedTabs, ...currentTabs, ...fallbackTabs, ...allTabs]
+          .sort((a, b) => Number(b.active) - Number(a.active) || Number(b.lastAccessed ?? 0) - Number(a.lastAccessed ?? 0))
+          .filter(tab => {
+            if (!tab.id || seenTabIds.has(tab.id))
+              return false;
+            seenTabIds.add(tab.id);
+            return !tab.url?.startsWith(extensionOrigin) && /^https?:\/\//.test(tab.url ?? '');
+          });
       const tab = candidates[0];
-      const existingCrxApp = await this._crx.get({ incognito });
       if (!tab?.id) {
+        const incognito = this._playInIncognito;
+        const existingCrxApp = await this._crx.get({ incognito }) ?? await this._crx.get({ incognito: !incognito });
         const existingPage = existingCrxApp?.activePage();
         this._sendRuntimeEvent('runtime.attach-active-tab-skipped', existingPage ? '回放前未找到新的当前业务页，沿用已附加页面' : '回放前未找到可附加的当前业务页，沿用已附加页面', {
-          incognito,
+          incognito: existingCrxApp?.isIncognito() ?? incognito,
           candidateCount: candidates.length,
           tabId: existingPage ? existingCrxApp?.tabIdForPage(existingPage) : undefined,
           url: existingPage?.mainFrame().url(),
         }, existingPage ? 'info' : 'warn');
         return;
       }
+      this._playInIncognito = !!tab.incognito;
+      const incognito = this._playInIncognito;
+      const existingCrxApp = await this._crx.get({ incognito });
       const crxApp = existingCrxApp ?? await this._crx.start({ incognito }, serverSideCallMetadata());
       const page = await crxApp.attach(tab.id);
       this._sendRuntimeEvent('runtime.attach-active-tab', '回放前已将当前业务页附加到 recorder', {
         tabId: tab.id,
         url: page.mainFrame().url(),
+        incognito,
       });
     } catch (error: any) {
       this._sendRuntimeEvent('runtime.attach-active-tab-failed', '回放前附加当前业务页失败', {
