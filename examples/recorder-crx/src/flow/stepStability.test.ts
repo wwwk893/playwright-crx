@@ -4190,6 +4190,185 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'select trigger recorded as button uses structured form context instead of duplicate role button',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'button',
+            name: '业务域',
+            text: '业务域',
+            displayName: '业务域',
+          },
+          context: {
+            eventId: 'ctx-generic-select-trigger-button',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建业务配置', visible: true },
+              form: { label: '业务域', name: 'domain' },
+              target: {
+                tag: 'div',
+                text: '',
+                framework: 'procomponents',
+                controlType: 'select',
+                locatorQuality: 'semantic',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=button[name="业务域"i] >> nth=4',
+            },
+          },
+          sourceCode: `await page.getByRole('button', { name: '业务域' }).nth(4).click();`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+      const firstStep = stepCodeBlock(playbackCode, 's001');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "业务域" }).locator(".ant-select-selector").first().click();'), 'button-looking select trigger should click the owning form-item selector');
+      assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), 'trigger should not replay through duplicate button role');
+      assert(!firstStep.includes('nth(4)'), 'trigger should not replay through brittle duplicate ordinal');
+    },
+  },
+  {
+    name: 'select trigger with test id still avoids parser-safe duplicate role fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'button',
+            name: '选择一个WAN口',
+            text: '选择一个WAN口',
+            displayName: '选择一个WAN口',
+            testId: 'site-ip-address-pool-wan-select',
+            locatorHint: {
+              strategy: 'global-testid',
+              confidence: 0.98,
+              pageCount: 8,
+              pageIndex: 4,
+            },
+          },
+          context: {
+            eventId: 'ctx-wan-select-trigger-button',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建IPv4地址池', visible: true },
+              form: { label: 'WAN口', name: 'wan' },
+              target: {
+                tag: 'div',
+                role: 'button',
+                text: '选择一个WAN口',
+                testId: 'site-ip-address-pool-wan-select',
+                framework: 'procomponents',
+                controlType: 'select',
+                uniqueness: {
+                  pageCount: 8,
+                  pageIndex: 4,
+                },
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=button[name="选择一个WAN口"i] >> nth=4',
+            },
+          },
+          sourceCode: `await page.getByRole('button', { name: '选择一个WAN口' }).nth(4).click({ force: true });`,
+          assertions: [],
+        }],
+      };
+
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+      const firstStep = stepCodeBlock(playbackCode, 's001');
+      assert(firstStep.includes('page.getByTestId("site-ip-address-pool-wan-select").click();'), 'select trigger should keep its stable test id instead of duplicate button fallback');
+      assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), 'trigger should not replay through duplicate button role');
+      assert(!firstStep.includes('nth(4)'), 'trigger should not replay through brittle duplicate ordinal');
+    },
+  },
+  {
+    name: 'tree-select and cascader triggers recorded as buttons avoid duplicate role fallback',
+    run: () => {
+      const samples = [
+        { controlType: 'tree-select', label: '发布范围', triggerText: '请选择发布范围', nth: 3 },
+        { controlType: 'cascader', label: '出口路径', triggerText: '选择出口路径', nth: 5 },
+      ] as const;
+
+      for (const sample of samples) {
+        const flow: BusinessFlow = {
+          ...createNamedFlow(),
+          steps: [{
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              role: 'button',
+              name: sample.triggerText,
+              text: sample.triggerText,
+              displayName: sample.triggerText,
+              locatorHint: {
+                strategy: 'global-role',
+                confidence: 0.62,
+                pageCount: 8,
+                pageIndex: sample.nth,
+              },
+            },
+            context: {
+              eventId: `ctx-${sample.controlType}-trigger-button`,
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'modal', title: '新建业务配置', visible: true },
+                form: { label: sample.label, name: sample.controlType },
+                target: {
+                  tag: 'div',
+                  role: 'button',
+                  text: sample.triggerText,
+                  framework: 'procomponents',
+                  controlType: sample.controlType,
+                  uniqueness: {
+                    pageCount: 8,
+                    pageIndex: sample.nth,
+                  },
+                },
+              },
+            },
+            rawAction: {
+              action: {
+                name: 'click',
+                selector: `internal:role=button[name="${sample.triggerText}"i] >> nth=${sample.nth}`,
+              },
+            },
+            sourceCode: `await page.getByRole('button', { name: '${sample.triggerText}' }).nth(${sample.nth}).click({ force: true });`,
+            assertions: [],
+          }],
+        };
+
+        const playbackCode = generateBusinessFlowPlaybackCode(flow);
+        const firstStep = stepCodeBlock(playbackCode, 's001');
+        assert(firstStep.includes(`locator(".ant-form-item").filter({ hasText: "${sample.label}" }).locator(".ant-select-selector").first().click();`), `${sample.controlType} trigger should click the owning form-item selector`);
+        assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), `${sample.controlType} trigger should not replay through duplicate button role`);
+        assert(!firstStep.includes(`nth(${sample.nth})`), `${sample.controlType} trigger should not replay through brittle duplicate ordinal`);
+      }
+    },
+  },
+  {
     name: 'ProFormSelect search fill uses form-item scoped AntD input instead of combobox role',
     run: () => {
       const flow: BusinessFlow = {

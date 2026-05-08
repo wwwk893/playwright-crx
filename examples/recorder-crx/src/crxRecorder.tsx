@@ -475,6 +475,7 @@ export const CrxRecorder: React.FC = ({
   const [recordedActionCount, setRecordedActionCount] = React.useState(0);
   const [panelStage, setPanelStage] = React.useState<PanelStage>('library');
   const [activeTab, setActiveTab] = React.useState<PanelTab>('business');
+  const [pageContextCaptureActive, setPageContextCaptureActiveState] = React.useState(false);
   const [flowFormSheet, setFlowFormSheet] = React.useState<FlowFormSheetState>();
   const [aiUsageSheetOpen, setAiUsageSheetOpen] = React.useState(false);
   const [expandedRuntimeLogIds, setExpandedRuntimeLogIds] = React.useState<Set<number>>(() => new Set());
@@ -505,6 +506,7 @@ export const CrxRecorder: React.FC = ({
   const syntheticFlushTimerRef = React.useRef<number>();
   const businessFlowPlaybackCodeRef = React.useRef('');
   const businessFlowEnabledRef = React.useRef(defaultSettings.businessFlowEnabled !== false);
+  const pageContextCaptureActiveRef = React.useRef(false);
 
   React.useEffect(() => {
     businessFlowEnabledRef.current = settings.businessFlowEnabled !== false;
@@ -513,6 +515,18 @@ export const CrxRecorder: React.FC = ({
   React.useEffect(() => {
     flowDraftRef.current = flowDraft;
   }, [flowDraft]);
+
+  const setPageContextCaptureActive = React.useCallback((active: boolean) => {
+    pageContextCaptureActiveRef.current = active;
+    setPageContextCaptureActiveState(active);
+    if (!active) {
+      if (syntheticFlushTimerRef.current) {
+        window.clearTimeout(syntheticFlushTimerRef.current);
+        syntheticFlushTimerRef.current = undefined;
+      }
+      pendingSyntheticClickEventsRef.current = [];
+    }
+  }, []);
 
   const appendDiagnosticLog = React.useCallback((event: MergeDiagnosticEvent) => {
     const entry: RecorderDiagnosticLog = {
@@ -562,6 +576,8 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog]);
 
   const queueSyntheticClickEvent = React.useCallback((event: PageContextEvent) => {
+    if (!pageContextCaptureActiveRef.current)
+      return;
     const existingIndex = pendingSyntheticClickEventsRef.current.findIndex(existing => existing.id === event.id);
     if (existingIndex >= 0)
       pendingSyntheticClickEventsRef.current[existingIndex] = event;
@@ -574,7 +590,7 @@ export const CrxRecorder: React.FC = ({
       syntheticFlushTimerRef.current = undefined;
       const events = pendingSyntheticClickEventsRef.current;
       pendingSyntheticClickEventsRef.current = [];
-      if (!events.length)
+      if (!pageContextCaptureActiveRef.current || !events.length)
         return;
 
       applyPageContextEventsToDraft(events);
@@ -589,6 +605,8 @@ export const CrxRecorder: React.FC = ({
 
     const queuedEventsBeforeSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
+    if (!pageContextCaptureActiveRef.current)
+      return flowDraftRef.current;
     // pageContextSidecar intentionally delays click context by 160ms so it can include
     // post-click overlay/toast state. Stop/export must drain that product pipeline,
     // otherwise table rowKey / AntD option context can miss the final flow export.
@@ -616,6 +634,11 @@ export const CrxRecorder: React.FC = ({
       lastDiagnosticContextEventIdRef.current = events[events.length - 1]?.id;
     return applyPageContextEventsToDraft(events);
   }, [applyPageContextEventsToDraft]);
+
+  React.useEffect(() => {
+    if (mode !== 'recording' && pageContextCaptureActiveRef.current)
+      setPageContextCaptureActive(false);
+  }, [mode, setPageContextCaptureActive]);
 
   React.useEffect(() => {
     return () => {
@@ -881,7 +904,7 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog]);
 
   React.useEffect(() => {
-    if (panelStage !== 'recording')
+    if (panelStage !== 'recording' || !pageContextCaptureActive)
       return;
 
     let disposed = false;
@@ -892,7 +915,7 @@ export const CrxRecorder: React.FC = ({
 
     const interval = window.setInterval(() => {
       requestPageContextEvents().then(events => {
-        if (disposed || !events.length)
+        if (disposed || !pageContextCaptureActiveRef.current || !events.length)
           return;
         const lastId = lastDiagnosticContextEventIdRef.current;
         const lastIndex = lastId ? events.findIndex(event => event.id === lastId) : events.length - 1;
@@ -923,7 +946,7 @@ export const CrxRecorder: React.FC = ({
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [appendDiagnosticLog, panelStage, queueSyntheticClickEvent]);
+  }, [appendDiagnosticLog, pageContextCaptureActive, panelStage, queueSyntheticClickEvent]);
 
   const refreshFlowRecords = React.useCallback(() => {
     return listFlowRecords()
@@ -946,7 +969,7 @@ export const CrxRecorder: React.FC = ({
     return () => {
       disposed = true;
     };
-  }, [refreshFlowRecords]);
+  }, [refreshFlowRecords, setPageContextCaptureActive]);
 
   React.useEffect(() => {
     let disposed = false;
@@ -1177,6 +1200,7 @@ export const CrxRecorder: React.FC = ({
   }, [currentCodeText, flushPageContextEventsNow, refreshFlowRecords, settings.businessFlowEnabled]);
 
   const goToLibraryNow = React.useCallback(() => {
+    setPageContextCaptureActive(false);
     pendingInsertRecordingRef.current = undefined;
     setInsertRecordingAfterStepId(undefined);
     setUnsavedFlowPromptOpen(false);
@@ -1185,7 +1209,7 @@ export const CrxRecorder: React.FC = ({
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
     refreshFlowRecords();
-  }, [refreshFlowRecords]);
+  }, [refreshFlowRecords, setPageContextCaptureActive]);
 
   const goToLibrary = React.useCallback(() => {
     if (hasUnsavedFlowChanges) {
@@ -1278,6 +1302,7 @@ export const CrxRecorder: React.FC = ({
     setFlowFormSheet(undefined);
 
     if (action === 'saveAndStart') {
+      setPageContextCaptureActive(true);
       setPanelStage('recording');
       setRecordStatus(`已保存并开始录制 ${new Date().toLocaleTimeString()}`);
       appendDiagnosticLog({
@@ -1296,7 +1321,7 @@ export const CrxRecorder: React.FC = ({
     if (action === 'saveDraft')
       setPanelStage('library');
     setRecordStatus(action === 'saveDraft' ? `草稿已保存 ${new Date().toLocaleTimeString()}` : `流程修改已保存 ${new Date().toLocaleTimeString()}`);
-  }, [activateNewFlowDraft, appendDiagnosticLog, refreshFlowRecords, settings.businessFlowEnabled]);
+  }, [activateNewFlowDraft, appendDiagnosticLog, refreshFlowRecords, settings.businessFlowEnabled, setPageContextCaptureActive]);
 
   const openRecord = React.useCallback((flow: BusinessFlow) => {
     const normalized = normalizeIntentSources(normalizeFlowStepIds(flow));
@@ -1306,8 +1331,9 @@ export const CrxRecorder: React.FC = ({
     setActiveTab('business');
     setPanelStage(normalized.steps.length ? 'recording' : 'editRecord');
     setDraftStatus(`已打开记录 ${new Date(normalized.updatedAt).toLocaleTimeString()}`);
+    setPageContextCaptureActive(false);
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
-  }, []);
+  }, [setPageContextCaptureActive]);
 
   const duplicateRecord = React.useCallback((flow: BusinessFlow) => {
     const duplicated = cloneFlowRecord(flow);
@@ -1775,6 +1801,7 @@ export const CrxRecorder: React.FC = ({
 
   const startRecording = React.useCallback(() => {
     if (!hasRecordingFlowContext(flowDraft)) {
+      setPageContextCaptureActive(false);
       setPanelStage('recording');
       setActiveTab('business');
       setRecordStatus(flowContextMissingMessage(flowDraft));
@@ -1793,14 +1820,17 @@ export const CrxRecorder: React.FC = ({
         recordedActionCount,
       },
     });
+    setPageContextCaptureActive(true);
     setPanelStage('recording');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'recording' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft, recordedActionCount]);
+  }, [appendDiagnosticLog, flowDraft, recordedActionCount, setPageContextCaptureActive]);
 
   const pauseRecording = React.useCallback(() => {
-    window.dispatch({ event: 'setMode', params: { mode: mode === 'recording' ? 'standby' : 'recording' } }).catch(() => {});
-  }, [mode]);
+    const nextMode = mode === 'recording' ? 'standby' : 'recording';
+    setPageContextCaptureActive(nextMode === 'recording');
+    window.dispatch({ event: 'setMode', params: { mode: nextMode } }).catch(() => {});
+  }, [mode, setPageContextCaptureActive]);
 
   const stopRecording = React.useCallback(async () => {
     appendDiagnosticLog({
@@ -1813,15 +1843,17 @@ export const CrxRecorder: React.FC = ({
       },
     });
     await flushPageContextEventsNow();
+    setPageContextCaptureActive(false);
     pendingInsertRecordingRef.current = undefined;
     setInsertRecordingAfterStepId(undefined);
     setPanelStage('recording');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft.steps.length, flushPageContextEventsNow, recordedActionCount]);
+  }, [appendDiagnosticLog, flowDraft.steps.length, flushPageContextEventsNow, recordedActionCount, setPageContextCaptureActive]);
 
   const continueRecording = React.useCallback(() => {
     if (!hasRecordingFlowContext(flowDraft)) {
+      setPageContextCaptureActive(false);
       setPanelStage('recording');
       setActiveTab('business');
       setRecordStatus(flowContextMissingMessage(flowDraft));
@@ -1849,13 +1881,15 @@ export const CrxRecorder: React.FC = ({
       },
     });
     setInsertRecordingAfterStepId(undefined);
+    setPageContextCaptureActive(true);
     setPanelStage('recording');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'recording' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft, recordedActionCount]);
+  }, [appendDiagnosticLog, flowDraft, recordedActionCount, setPageContextCaptureActive]);
 
   const continueRecordingFrom = React.useCallback((afterStepId: string) => {
     if (!hasRecordingFlowContext(flowDraft)) {
+      setPageContextCaptureActive(false);
       setPanelStage('recording');
       setActiveTab('business');
       setRecordStatus(flowContextMissingMessage(flowDraft));
@@ -1888,10 +1922,11 @@ export const CrxRecorder: React.FC = ({
       },
     });
     setInsertRecordingAfterStepId(afterStepId);
+    setPageContextCaptureActive(true);
     setPanelStage('recording');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'recording' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft, recordedActionCount]);
+  }, [appendDiagnosticLog, flowDraft, recordedActionCount, setPageContextCaptureActive]);
 
   const exitInsertRecording = React.useCallback(() => {
     appendDiagnosticLog({
