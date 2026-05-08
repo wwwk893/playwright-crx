@@ -50,6 +50,7 @@ const settingsInitializing = loadSettings().then(s => settings = s).catch(() => 
 addSettingsChangedListener(newSettings => {
   settings = newSettings;
   setTestIdAttributeName(newSettings.testIdAttributeName);
+  updateSemanticSidecarOptionsForAttachedTabs().catch(() => {});
 });
 
 let allowsIncognitoAccess = false;
@@ -203,10 +204,31 @@ async function hasRecorderWindow() {
 async function ensurePageContextSidecar(tabId: number) {
   if (!chrome.scripting?.executeScript)
     return;
+  await settingsInitializing.catch(() => {});
+  await injectSemanticSidecarOptions(tabId);
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['pageContextSidecar.js'],
   });
+}
+
+async function injectSemanticSidecarOptions(tabId: number) {
+  if (!chrome.scripting?.executeScript)
+    return;
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: options => {
+      (globalThis as any).__playwrightCrxSemanticAdapterOptions = options;
+    },
+    args: [{
+      semanticAdapterEnabled: settings.semanticAdapterEnabled !== false,
+      semanticAdapterDiagnosticsEnabled: settings.semanticAdapterDiagnosticsEnabled === true,
+    }],
+  });
+}
+
+async function updateSemanticSidecarOptionsForAttachedTabs() {
+  await Promise.all(Array.from(attachedTabIds).map(tabId => injectSemanticSidecarOptions(tabId).catch(() => {})));
 }
 
 async function setTestIdAttributeName(testIdAttributeName: string) {

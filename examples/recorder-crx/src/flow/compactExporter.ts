@@ -71,7 +71,7 @@ function compactStep(step: FlowStep) {
     target: summarizeTarget(step.target),
     ui: compactUiSemanticContext(step.context?.before.ui, step.uiRecipe),
     context: compactContext(step.context),
-    url: step.url,
+    url: compactUrl(step.url),
     value: step.value,
     assert: step.assertions.map(assertion => ({
       id: assertion.id,
@@ -95,7 +95,7 @@ function compactContext(context?: StepContextSnapshot) {
     tab: firstText(context.before.activeTab?.title, context.after?.activeTab?.title),
     section: context.before.section?.title,
     table: context.before.table?.title,
-    row: firstText(context.before.table?.rowKey, compactRowText(context.before.table?.rowText)),
+    row: context.before.table?.rowKey,
     dialog: context.before.dialog?.title,
     field: context.before.form?.label,
     target: firstText(context.before.target?.text, context.before.target?.title, context.before.target?.ariaLabel, context.before.target?.testId),
@@ -130,6 +130,17 @@ function summarizeTarget(target: FlowStep['target']) {
 
 function firstText(...values: Array<string | undefined>) {
   return values.map(value => value?.trim()).find(Boolean);
+}
+
+function compactUrl(value?: string) {
+  if (!value)
+    return undefined;
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return value.split(/[?#]/)[0];
+  }
 }
 
 function compactRowText(value?: string) {

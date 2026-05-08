@@ -11,10 +11,16 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
-import { collectUiSemanticContext, semanticAdapterEnabled } from './uiSemantics';
+import { collectUiSemanticContext } from './uiSemantics';
+import { compactSemanticDiagnostic, compactSemanticDisabledDiagnostic, recordSemanticDiagnostic, semanticDiagnostics } from './uiSemantics/diagnostics';
 import type { UiSemanticContext } from './uiSemantics/types';
 
 type ContextEventKind = 'click' | 'input' | 'change' | 'keydown';
+
+type SidecarSemanticOptions = {
+  semanticAdapterEnabled?: boolean;
+  semanticAdapterDiagnosticsEnabled?: boolean;
+};
 
 const installKey = '__playwrightCrxBusinessFlowPageContextSidecar';
 const maxAncestorDepth = 10;
@@ -94,6 +100,7 @@ const tablePointerDedupeMs = 220;
 
 if (!(window as any)[installKey]) {
   (window as any)[installKey] = true;
+  exposeSemanticDiagnosticsForDebugging();
   document.addEventListener('click', event => recordEvent('click', event), true);
   document.addEventListener('pointerdown', event => {
     recordDropdownOptionPointerEvent(event);
@@ -106,6 +113,17 @@ if (!(window as any)[installKey]) {
   document.addEventListener('input', event => recordEvent('input', event), true);
   document.addEventListener('change', event => recordEvent('change', event), true);
   document.addEventListener('keydown', event => recordEvent('keydown', event), true);
+}
+
+function readSidecarSemanticOptions(): SidecarSemanticOptions {
+  return ((globalThis as typeof globalThis & { __playwrightCrxSemanticAdapterOptions?: SidecarSemanticOptions }).__playwrightCrxSemanticAdapterOptions) ?? {
+    semanticAdapterEnabled: true,
+    semanticAdapterDiagnosticsEnabled: false,
+  };
+}
+
+function exposeSemanticDiagnosticsForDebugging() {
+  (globalThis as typeof globalThis & { __playwrightCrxSemanticDiagnostics?: typeof semanticDiagnostics }).__playwrightCrxSemanticDiagnostics = semanticDiagnostics;
 }
 
 function recordDropdownOptionPointerEvent(event: Event) {
@@ -225,7 +243,12 @@ function eventPointTarget(event: Event, fallback: Element) {
 
 function collectPageContext(target: Element) {
   const anchor = actionAnchorForElement(target);
-  const baseUi = semanticAdapterEnabled ? collectUiSemanticContext(anchor, document) : undefined;
+  const semanticOptions = readSidecarSemanticOptions();
+  const baseUi = semanticOptions.semanticAdapterEnabled !== false ? collectUiSemanticContext(anchor, document) : undefined;
+  if (semanticOptions.semanticAdapterDiagnosticsEnabled === true) {
+    recordSemanticDiagnostic(baseUi ? compactSemanticDiagnostic(baseUi) : compactSemanticDisabledDiagnostic());
+    exposeSemanticDiagnosticsForDebugging();
+  }
   const form = collectForm(target, anchor);
   const section = collectSection(target, anchor);
   const directDialog = collectDialog(target, anchor);

@@ -38,6 +38,8 @@ export const PreferencesForm: React.FC = ({}) => {
       initialSettings.playInIncognito !== settings.playInIncognito ||
       initialSettings.experimental !== settings.experimental ||
       initialSettings.businessFlowEnabled !== settings.businessFlowEnabled ||
+      initialSettings.semanticAdapterEnabled !== settings.semanticAdapterEnabled ||
+      initialSettings.semanticAdapterDiagnosticsEnabled !== settings.semanticAdapterDiagnosticsEnabled ||
       initialSettings.defaultApp !== settings.defaultApp ||
       initialSettings.defaultRepo !== settings.defaultRepo ||
       initialSettings.defaultRole !== settings.defaultRole ||
@@ -128,6 +130,28 @@ export const PreferencesForm: React.FC = ({}) => {
         checked={settings.businessFlowEnabled}
         onChange={e => setSettings({ ...settings, businessFlowEnabled: e.target.checked })}
       />
+    </div>
+    <div>
+      <label htmlFor='semanticAdapterEnabled' className='row'>启用 AntD / ProComponents 语义识别：</label>
+      <input
+        type='checkbox'
+        id='semanticAdapterEnabled'
+        name='semanticAdapterEnabled'
+        checked={settings.semanticAdapterEnabled !== false}
+        onChange={e => setSettings({ ...settings, semanticAdapterEnabled: e.target.checked })}
+      />
+      <div className='note'>关闭后仍会采集基础 target / form / table / dialog，但不会写入 PageContextSnapshot.ui 或新增 FlowStep.uiRecipe。</div>
+    </div>
+    <div>
+      <label htmlFor='semanticAdapterDiagnosticsEnabled' className='row'>启用语义识别诊断日志：</label>
+      <input
+        type='checkbox'
+        id='semanticAdapterDiagnosticsEnabled'
+        name='semanticAdapterDiagnosticsEnabled'
+        checked={settings.semanticAdapterDiagnosticsEnabled === true}
+        onChange={e => setSettings({ ...settings, semanticAdapterDiagnosticsEnabled: e.target.checked })}
+      />
+      <div className='note'>诊断日志仅用于本地调试，不进入 flow export / compact YAML / AI input。</div>
     </div>
     <div>
       <label htmlFor='redactSensitiveData' className='row'>导出前脱敏：</label>

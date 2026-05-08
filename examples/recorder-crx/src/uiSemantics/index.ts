@@ -8,8 +8,6 @@ import { collectProComponentsContext } from './proComponents';
 import { buildUiRecipe } from './recipes';
 import type { UiSemanticContext } from './types';
 
-export const semanticAdapterEnabled = true;
-
 export function collectUiSemanticContext(target: Element, document: Document = target.ownerDocument): UiSemanticContext {
   const antd = collectAntdSemanticContext(target, document);
   const merged = collectProComponentsContext(target, antd);

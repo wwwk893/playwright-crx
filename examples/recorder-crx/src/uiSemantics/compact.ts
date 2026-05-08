@@ -6,19 +6,22 @@
 import type { UiActionRecipe, UiSemanticContext } from './types';
 
 export interface CompactUiSemanticContext {
-  [key: string]: string | boolean | undefined;
+  [key: string]: string | number | boolean | undefined;
   library?: string;
   component?: string;
   recipe?: string;
   formKind?: string;
   fieldKind?: string;
   field?: string;
+  fieldName?: string;
   option?: string;
   table?: string;
   row?: string;
   column?: string;
   overlay?: string;
   target?: string;
+  targetTestId?: string;
+  confidence?: number;
   weak?: boolean;
 }
 
@@ -32,12 +35,15 @@ export function compactUiSemanticContext(ui?: UiSemanticContext, recipe?: UiActi
     formKind: recipe?.formKind || ui?.form?.formKind,
     fieldKind: recipe?.fieldKind || ui?.form?.fieldKind,
     field: recipe?.fieldLabel || ui?.form?.label,
+    fieldName: recipe?.fieldName || ui?.form?.name,
     option: recipe?.optionText || ui?.option?.text,
     table: recipe?.tableTitle || ui?.table?.title,
     row: recipe?.rowKey || ui?.table?.rowKey,
     column: recipe?.columnTitle || ui?.table?.columnTitle,
     overlay: recipe?.overlayTitle || ui?.overlay?.title,
     target: recipe?.targetText || ui?.targetText,
+    targetTestId: ui?.targetTestId,
+    confidence: ui?.confidence,
     weak: ui?.weak || undefined,
   });
 }

@@ -5,6 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
+import { compactSemanticDiagnostic, createSemanticDiagnosticsBuffer } from '../uiSemantics/diagnostics';
 import type { UiActionRecipe, UiComponentKind } from '../uiSemantics/types';
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
@@ -4853,6 +4854,149 @@ test('demo', async ({ page }) => {
       assertEqual(redacted.artifacts?.playwrightCode, longCode);
       assertEqual((redacted.artifacts as any)?.authorization, '***');
       assert(!redacted.artifacts?.playwrightCode?.includes('***truncated***'), 'playwrightCode must not be truncated by redaction');
+    },
+  },
+  {
+    name: 'legacy flows without semantic ui remain exportable compactable and usable for AI input',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        navigateAction('https://example.test/users?token=secret#frag'),
+        clickAction('保存'),
+      ], [], {});
+      const legacyFlow: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          uiRecipe: undefined,
+          context: step.context ? {
+            ...step.context,
+            before: {
+              ...step.context.before,
+              url: 'https://example.test/users?token=secret#frag',
+              ui: undefined,
+            },
+          } : undefined,
+          target: step.target ? {
+            ...step.target,
+            raw: { selector: '#legacy-secret-selector', recorder: { selector: '#nested-secret-selector' } },
+          } : undefined,
+        })),
+      };
+
+      const exported = prepareBusinessFlowForExport(legacyFlow, 'await page.getByText("保存").click();');
+      const yaml = toCompactFlow(exported);
+      const aiInput = buildAiIntentInput(exported, exported.steps);
+      assert(!yaml.includes('\n    ui:'), 'legacy compact yaml should not emit empty ui blocks');
+      assert(!JSON.stringify(aiInput).includes('locatorHints'), 'legacy AI input should not contain semantic internals');
+      assert(!JSON.stringify(exported).includes('#legacy-secret-selector'), 'legacy raw selector should be stripped from export');
+      assert(!JSON.stringify(exported).includes('#nested-secret-selector'), 'nested legacy raw selector should be stripped from export');
+      assertEqual(exported.steps.length, legacyFlow.steps.length);
+    },
+  },
+  {
+    name: 'semantic export compact yaml and AI input use compact whitelist only',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('保存')], [], {});
+      const ui = {
+        ...semanticUi({
+          library: 'antd',
+          component: 'select',
+          recipe: 'select-option',
+          fieldLabel: '角色',
+          optionText: '管理员',
+          targetText: '管理员',
+        }),
+        targetTestId: 'role-select',
+        form: { formKind: 'antd-form', fieldKind: 'select', label: '角色', name: 'role', valuePreview: 'secret-visible-value' },
+        table: { title: '用户表', rowKey: 'user-42', rowText: 'user-42 admin@example.com token=secret 编辑', columnTitle: '操作' },
+        overlay: { type: 'select-dropdown', title: '角色下拉', text: 'overlay secret text token=secret', visible: true },
+        option: { text: '管理员', value: 'role-admin-secret-value' },
+        locatorHints: [{ kind: 'css', value: '.ant-select-item-option[title="管理员-secret"]', score: 0.2, reason: 'fallback css secret reason' }],
+        reasons: ['contains secret diagnostic reason'],
+      } as any;
+      const flowWithUi: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          sourceCode: 'await page.locator("#raw-secret").click();',
+          rawAction: { selector: '#raw-secret' },
+          uiRecipe: {
+            ...ui.recipe,
+            optionValue: 'recipe-secret-value',
+            locatorHints: ui.locatorHints,
+            reasons: ui.reasons,
+          } as any,
+          target: {
+            ...step.target,
+            raw: { ui, sourceCode: 'raw source secret' },
+          },
+          context: {
+            eventId: 'ctx-semantic-hardening',
+            capturedAt: Date.now(),
+            before: {
+              title: '用户页',
+              url: 'https://example.test/users?token=secret&debug=true#frag',
+              target: { tag: 'button', text: '保存', selector: '#raw-secret' } as any,
+              ui,
+            },
+            after: { url: 'https://example.test/users?token=secret#after' } as any,
+          },
+        })),
+      };
+
+      const exported = prepareBusinessFlowForExport(flowWithUi, 'await page.getByTestId("role-select").click();');
+      const exportedJson = JSON.stringify(exported);
+      const yaml = toCompactFlow(exported);
+      const aiJson = JSON.stringify(buildAiIntentInput(exported, exported.steps));
+
+      for (const text of [exportedJson, yaml, aiJson]) {
+        assert(!text.includes('locatorHints'), 'compact surfaces should omit locatorHints');
+        assert(!text.includes('reasons'), 'compact surfaces should omit reasons');
+        assert(!text.includes('admin@example.com'), 'compact surfaces should omit table rowText internals');
+        assert(!text.includes('overlay secret text'), 'compact surfaces should omit overlay.text internals');
+        assert(!text.includes('role-admin-secret-value'), 'compact surfaces should omit option.value internals');
+        assert(!text.includes('recipe-secret-value'), 'compact surfaces should omit uiRecipe non-whitelisted fields');
+        assert(!text.includes('rawAction'), 'compact surfaces should omit rawAction');
+        assert(!text.includes('#raw-secret'), 'compact surfaces should omit raw selectors');
+      }
+      assert(aiJson.includes('https://example.test/users'), 'AI input should keep URL origin/path');
+      assert(!aiJson.includes('token=secret'), 'AI input URL should strip query');
+      assert(!aiJson.includes('#frag'), 'AI input URL should strip hash');
+      assert(yaml.includes('field: "角色"') || yaml.includes('field: 角色'), 'compact yaml should retain useful compact semantic field');
+      assert(yaml.includes('option: "管理员"') || yaml.includes('option: 管理员'), 'compact yaml should retain useful compact semantic option');
+    },
+  },
+  {
+    name: 'semantic diagnostics ring buffer stores only compact redacted fields',
+    run: () => {
+      const buffer = createSemanticDiagnosticsBuffer(3);
+      const ui = {
+        ...semanticUi({
+          library: 'unknown',
+          component: 'unknown',
+          recipe: 'raw-dom-action',
+          targetText: '普通文本',
+        }),
+        weak: true,
+        table: { rowText: 'admin@example.com secret row text' },
+        overlay: { text: 'secret overlay text token=abc', title: '提示' },
+        option: { text: '管理员', value: 'secret-option-value' },
+        locatorHints: [
+          { kind: 'css', value: '.secret-selector-with-token-abcdef', score: 0.1, reason: 'fallback css raw selector' },
+        ],
+      } as any;
+      for (let i = 0; i < 5; i++)
+        buffer.push(compactSemanticDiagnostic(ui));
+      const entries = buffer.entries();
+      const json = JSON.stringify(entries);
+      assertEqual(entries.length, 3);
+      assert(entries.every(entry => entry.event === 'semantic.weak' || entry.event === 'semantic.fallback-css'), 'diagnostics should classify weak/fallback events');
+      assert(json.includes('valuePreview'), 'diagnostics should keep truncated locator valuePreview');
+      assert(!json.includes('"value"'), 'diagnostics should not keep full locator hint value');
+      assert(!json.includes('admin@example.com'), 'diagnostics should not keep rowText internals');
+      assert(!json.includes('secret overlay text'), 'diagnostics should not keep overlay text internals');
+      assert(!json.includes('secret-option-value'), 'diagnostics should not keep option values');
+      assert(!json.includes('abc'), 'diagnostics should redact token values, not only token keys');
     },
   },
   {
