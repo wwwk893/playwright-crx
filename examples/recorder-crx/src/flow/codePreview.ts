@@ -1021,12 +1021,12 @@ function preferredTargetLocator(step: FlowStep) {
     activeDropdownOptionLocator(step) ||
     tableScopedLocator(step) ||
     choiceControlLocator(step) ||
-	    fieldLocator(step) ||
-	    popoverConfirmButtonLocator(step) ||
-	    dialogScopedLocator(step) ||
-	    sectionScopedLocator(step) ||
-	    globalRoleLocator(step) ||
-	    fallbackTextLocator(step);
+    fieldLocator(step) ||
+    popoverConfirmButtonLocator(step) ||
+    dialogScopedLocator(step) ||
+    sectionScopedLocator(step) ||
+    globalRoleLocator(step) ||
+    fallbackTextLocator(step);
 }
 
 function popoverConfirmButtonLocator(step: FlowStep) {

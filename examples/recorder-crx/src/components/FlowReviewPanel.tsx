@@ -143,84 +143,84 @@ export const FlowReviewPanel: React.FC<{
       onOpenSettings={onOpenSettings}
     />}
     {mode === 'steps' && <>
-    <div className='review-summary-grid'>
-      <div><strong>{repeatStats.segmentCount ? repeatStats.rowCount : stats.stepCount}</strong><span>{repeatStats.segmentCount ? '循环次数' : '步骤'}</span></div>
-      <div><strong>{repeatStats.segmentCount ? repeatStats.expandedStepCount : stats.assertionCount}</strong><span>{repeatStats.segmentCount ? '展开步骤' : '断言'}</span></div>
-      <div className={stats.missingAssertionCount && !repeatStats.segmentCount ? 'warning' : ''}><strong>{repeatStats.segmentCount ? repeatStats.parameterCount : stats.missingAssertionCount}</strong><span>{repeatStats.segmentCount ? '参数' : '缺少断言'}</span></div>
-      <div className='ok'><strong>{redactionEnabled ? '开启' : '关闭'}</strong><span>{repeatStats.segmentCount ? '模板断言' : '敏感数据脱敏'}</span></div>
-    </div>
-    {!repeatStats.segmentCount && visibleSteps.length > 1 && <div className={selectionState.canCreate ? 'repeat-create-banner ready' : 'repeat-create-banner'}>
-      <div>
-        <strong>{selectionState.selectedCount ? `已选择 ${selectionState.selectedCount} 个步骤` : '选择要循环的步骤'}</strong>
-        <span>{selectionState.message}</span>
+      <div className='review-summary-grid'>
+        <div><strong>{repeatStats.segmentCount ? repeatStats.rowCount : stats.stepCount}</strong><span>{repeatStats.segmentCount ? '循环次数' : '步骤'}</span></div>
+        <div><strong>{repeatStats.segmentCount ? repeatStats.expandedStepCount : stats.assertionCount}</strong><span>{repeatStats.segmentCount ? '展开步骤' : '断言'}</span></div>
+        <div className={stats.missingAssertionCount && !repeatStats.segmentCount ? 'warning' : ''}><strong>{repeatStats.segmentCount ? repeatStats.parameterCount : stats.missingAssertionCount}</strong><span>{repeatStats.segmentCount ? '参数' : '缺少断言'}</span></div>
+        <div className='ok'><strong>{redactionEnabled ? '开启' : '关闭'}</strong><span>{repeatStats.segmentCount ? '模板断言' : '敏感数据脱敏'}</span></div>
       </div>
-      <div className='repeat-create-actions'>
-        <button type='button' onClick={() => setSelectedRepeatStepIds(visibleSteps.map(step => step.id))}>选择全部</button>
-        <button type='button' onClick={() => setSelectedRepeatStepIds([])}>清空</button>
-        <button type='button' className='danger-outline' disabled={!selectionState.selectedCount} onClick={deleteSelectedSteps}>删除选中</button>
-        <button type='button' className='primary' disabled={!selectionState.canCreate} onClick={() => setEditingRepeatSegment(createRepeatSegment(flow, selectedRepeatStepIds))}>设为循环片段</button>
+      {!repeatStats.segmentCount && visibleSteps.length > 1 && <div className={selectionState.canCreate ? 'repeat-create-banner ready' : 'repeat-create-banner'}>
+        <div>
+          <strong>{selectionState.selectedCount ? `已选择 ${selectionState.selectedCount} 个步骤` : '选择要循环的步骤'}</strong>
+          <span>{selectionState.message}</span>
+        </div>
+        <div className='repeat-create-actions'>
+          <button type='button' onClick={() => setSelectedRepeatStepIds(visibleSteps.map(step => step.id))}>选择全部</button>
+          <button type='button' onClick={() => setSelectedRepeatStepIds([])}>清空</button>
+          <button type='button' className='danger-outline' disabled={!selectionState.selectedCount} onClick={deleteSelectedSteps}>删除选中</button>
+          <button type='button' className='primary' disabled={!selectionState.canCreate} onClick={() => setEditingRepeatSegment(createRepeatSegment(flow, selectedRepeatStepIds))}>设为循环片段</button>
+        </div>
+      </div>}
+      <div className='section-heading row'>
+        <span>步骤检查</span>
+        <span className='review-inline-note'>可逐条补断言</span>
       </div>
-    </div>}
-    <div className='section-heading row'>
-      <span>步骤检查</span>
-      <span className='review-inline-note'>可逐条补断言</span>
-    </div>
-    <div className='review-step-list'>
-      {(flow.repeatSegments ?? []).map(segment => <RepeatSegmentCard
-        key={segment.id}
-        flow={flow}
-        segment={segment}
-        onEdit={() => setEditingRepeatSegment(segment)}
-        onDelete={() => onDeleteRepeatSegment(segment.id)}
-      />)}
-      {visibleSteps.map((step, index) => {
-        const assertionCount = step.assertions.filter(assertion => assertion.enabled).length;
-        const selectedForRepeat = selectedRepeatStepIds.includes(step.id);
-        return <React.Fragment key={step.id}>
-          <div
-            className={selectedForRepeat ? 'review-step-row selected-for-repeat' : 'review-step-row'}
-            onPointerDown={event => beginDragSelect(event, step.id)}
-            onPointerEnter={() => extendDragSelect(step.id)}
-          >
-            <button type='button' className={selectedForRepeat ? 'repeat-step-selector selected' : 'repeat-step-selector'} onClick={() => toggleRepeatStep(step.id)} aria-label={`选择 ${step.id} 作为循环步骤`}>
-              <span></span>
-            </button>
-            <span className='review-step-index'>{step.order}</span>
-            <span className='review-step-id'>{step.id}</span>
-            <span className='review-step-main'>
-              <strong>{actionLabel[step.action]}</strong>
-              <span>{summarizeStepSubject(step)}</span>
-            </span>
-            <span className='review-step-actions'>
-              {assertionCount > 0 ? <span className='review-badge ok'>{assertionCount} 个断言</span> : <button className='review-badge warning' type='button' onClick={() => onAddAssertion(step.id)}>添加断言</button>}
-              <button className='review-delete-button' type='button' onClick={() => {
-                if (window.confirm(`删除 ${step.id}？删除后会同时移除该步骤的断言。`))
-                  onDeleteStep(step.id);
-              }}>删除</button>
-            </span>
-          </div>
-          {index < visibleSteps.length - 1 && <div className={activeInsertStepId === step.id ? 'review-insert-slot active' : 'review-insert-slot'}>
-            <button type='button' onClick={() => setActiveInsertStepId(activeInsertStepId === step.id ? undefined : step.id)}>
-              <span>+</span> 在这里插入操作
-            </button>
-            {activeInsertStepId === step.id && <div className='review-insert-popover'>
-              <div>在当前位置与下一步之间插入新操作</div>
-              <div className='review-insert-actions'>
-                <button type='button' className='primary' onClick={() => insertFrom(step.id)}>从这里继续录制</button>
-                <button type='button' onClick={() => insertWait(step.id)}>插入等待</button>
-                <button type='button' onClick={() => insertEmpty(step.id)}>插入空步骤</button>
-              </div>
+      <div className='review-step-list'>
+        {(flow.repeatSegments ?? []).map(segment => <RepeatSegmentCard
+          key={segment.id}
+          flow={flow}
+          segment={segment}
+          onEdit={() => setEditingRepeatSegment(segment)}
+          onDelete={() => onDeleteRepeatSegment(segment.id)}
+        />)}
+        {visibleSteps.map((step, index) => {
+          const assertionCount = step.assertions.filter(assertion => assertion.enabled).length;
+          const selectedForRepeat = selectedRepeatStepIds.includes(step.id);
+          return <React.Fragment key={step.id}>
+            <div
+              className={selectedForRepeat ? 'review-step-row selected-for-repeat' : 'review-step-row'}
+              onPointerDown={event => beginDragSelect(event, step.id)}
+              onPointerEnter={() => extendDragSelect(step.id)}
+            >
+              <button type='button' className={selectedForRepeat ? 'repeat-step-selector selected' : 'repeat-step-selector'} onClick={() => toggleRepeatStep(step.id)} aria-label={`选择 ${step.id} 作为循环步骤`}>
+                <span></span>
+              </button>
+              <span className='review-step-index'>{step.order}</span>
+              <span className='review-step-id'>{step.id}</span>
+              <span className='review-step-main'>
+                <strong>{actionLabel[step.action]}</strong>
+                <span>{summarizeStepSubject(step)}</span>
+              </span>
+              <span className='review-step-actions'>
+                {assertionCount > 0 ? <span className='review-badge ok'>{assertionCount} 个断言</span> : <button className='review-badge warning' type='button' onClick={() => onAddAssertion(step.id)}>添加断言</button>}
+                <button className='review-delete-button' type='button' onClick={() => {
+                  if (window.confirm(`删除 ${step.id}？删除后会同时移除该步骤的断言。`))
+                    onDeleteStep(step.id);
+                }}>删除</button>
+              </span>
+            </div>
+            {index < visibleSteps.length - 1 && <div className={activeInsertStepId === step.id ? 'review-insert-slot active' : 'review-insert-slot'}>
+              <button type='button' onClick={() => setActiveInsertStepId(activeInsertStepId === step.id ? undefined : step.id)}>
+                <span>+</span> 在这里插入操作
+              </button>
+              {activeInsertStepId === step.id && <div className='review-insert-popover'>
+                <div>在当前位置与下一步之间插入新操作</div>
+                <div className='review-insert-actions'>
+                  <button type='button' className='primary' onClick={() => insertFrom(step.id)}>从这里继续录制</button>
+                  <button type='button' onClick={() => insertWait(step.id)}>插入等待</button>
+                  <button type='button' onClick={() => insertEmpty(step.id)}>插入空步骤</button>
+                </div>
+              </div>}
             </div>}
-          </div>}
-        </React.Fragment>;
-      })}
-    </div>
-    {showStepToolbar && <div className='review-toolbar'>
-      <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
-      <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
-      <button type='button' className='danger-outline' onClick={onClearSteps}>清空步骤</button>
-      <span>继续录制会接在当前步骤后；也可以在步骤之间插入操作。</span>
-    </div>}
+          </React.Fragment>;
+        })}
+      </div>
+      {showStepToolbar && <div className='review-toolbar'>
+        <button type='button' className='primary' onClick={onContinueRecording}>继续录制</button>
+        <button type='button' className='save-record' onClick={onSaveRecord}>保存记录</button>
+        <button type='button' className='danger-outline' onClick={onClearSteps}>清空步骤</button>
+        <span>继续录制会接在当前步骤后；也可以在步骤之间插入操作。</span>
+      </div>}
     </>}
   </div>;
 };
