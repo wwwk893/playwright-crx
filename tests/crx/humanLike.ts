@@ -55,9 +55,7 @@ export async function humanClick(locator: Locator, options?: { delayMs?: number,
 
   await page.mouse.move(x, y, { steps: 8 });
   await page.waitForTimeout(options?.delayMs ?? 80);
-  await page.mouse.down();
-  await page.waitForTimeout(40);
-  await page.mouse.up();
+  await page.mouse.click(x, y, { delay: 40 });
 }
 
 export async function humanClickUntil(locator: Locator, condition: () => Promise<boolean>, options?: HumanClickUntilOptions) {
@@ -154,11 +152,10 @@ async function humanClickVisible(locator: Locator, options?: HumanClickVisibleOp
   const x = options?.position === 'left' ? box.x + Math.min(12, box.width / 3) :
     options?.position === 'right' ? box.x + box.width - Math.min(12, box.width / 3) :
       box.x + box.width / 2;
-  await page.mouse.move(x, box.y + box.height / 2, { steps: 6 });
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 6 });
   await page.waitForTimeout(options?.delayMs ?? 60);
-  await page.mouse.down();
-  await page.waitForTimeout(35);
-  await page.mouse.up();
+  await page.mouse.click(x, y, { delay: 35 });
 }
 
 async function stableBoundingBox(locator: Locator) {
@@ -388,7 +385,7 @@ export async function visibleStepTexts(recorderPage: Page) {
 }
 
 export async function createRepeatSegmentLikeUser(recorderPage: Page, options: { fromStepText: string, toStepText: string, segmentName: string, minSteps?: number, expectedDataText?: string | RegExp, requiredSelectedTexts?: string[] }) {
-  await expect(recorderPage.locator('.review-step-list, .flow-step-list').first()).toBeVisible({ timeout: 10_000 });
+  await openStepCheckPanelLikeUser(recorderPage);
   await selectVisibleRepeatRange(recorderPage, options.fromStepText, options.toStepText);
   for (const text of options.requiredSelectedTexts ?? [])
     await ensureRepeatRowSelectedContainingText(recorderPage, text);
@@ -503,14 +500,11 @@ function normalized(value: string) {
 }
 
 export async function exportBusinessFlowJsonLikeUser(recorderPage: Page) {
-  const startedOnExportPanel = await recorderPage.locator('.export-review-panel').isVisible().catch(() => false);
   await openExportPanelLikeUser(recorderPage);
   const exportedJson = await downloadTextAfterHumanClick(
       recorderPage,
       recorderPage.getByRole('button', { name: '导出流程 JSON' }).last(),
   );
-  if (!startedOnExportPanel)
-    await openStepCheckPanelLikeUser(recorderPage);
   return JSON.parse(exportedJson);
 }
 
@@ -522,9 +516,29 @@ async function openExportPanelLikeUser(recorderPage: Page) {
   await expect(recorderPage.locator('.export-review-panel')).toBeVisible();
 }
 
-async function openStepCheckPanelLikeUser(recorderPage: Page) {
-  await humanClick(recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+export async function openReplayPanelLikeUser(recorderPage: Page) {
+  const replayCardButton = recorderPage.locator('.review-card').filter({ hasText: /Replay 代码|回放代码/ }).getByRole('button', { name: '查看' }).first();
+  if (await replayCardButton.count().catch(() => 0)) {
+    await replayCardButton.click({ timeout: 10_000 });
+  } else {
+    const replayNavButton = recorderPage.locator('.side-panel-nav.segmented button').nth(3);
+    await expect(replayNavButton).toBeVisible({ timeout: 10_000 });
+    await replayNavButton.click({ timeout: 10_000 });
+  }
+  await expect(recorderPage.getByTitle('Resume (F8)')).toBeVisible({ timeout: 10_000 });
+}
+
+export async function openStepCheckPanelLikeUser(recorderPage: Page) {
+  const status = recorderPage.locator('.recording-status');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true }).click();
+    if (await status.getByText('步骤检查').isVisible().catch(() => false))
+      break;
+    if (await status.getByText('录制中').isVisible().catch(() => false))
+      await recorderPage.getByRole('button', { name: '停止录制' }).click({ timeout: 10_000 }).catch(() => {});
+    await recorderPage.waitForTimeout(200);
+  }
+  await expect(status).toContainText('步骤检查', { timeout: 15_000 });
   await expect(recorderPage.locator('.review-step-list')).toBeVisible();
 }
 

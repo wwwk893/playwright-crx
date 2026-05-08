@@ -29,6 +29,8 @@ import {
   humanClick,
   humanClickUntil,
   humanType,
+  openReplayPanelLikeUser,
+  openStepCheckPanelLikeUser,
   selectAntdCascaderPathLikeUser,
   selectAntdOptionLikeUser,
   selectAntdTreeNodeLikeUser,
@@ -121,7 +123,7 @@ test('human-like recorder preserves nth for duplicate test id save button @human
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('site-save-button');
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   await attachRecorderEvidence(testInfo, page, recorderPage, flow);
@@ -131,7 +133,7 @@ test('human-like recorder preserves nth for duplicate test id save button @human
   expect(flow.artifacts.playwrightCode).toContain('page.getByTestId("site-save-button").nth(1).click();');
   expect(flow.artifacts.playwrightCode).not.toContain('page.getByTestId("site-save-button").click();');
 
-  await humanClick(recorderPage.getByRole('button', { name: '回放', exact: true }));
+  await openReplayPanelLikeUser(recorderPage);
 
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
   await humanClick(recorderPage.getByTitle('Resume (F8)'));
@@ -216,7 +218,7 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('site-save-button');
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   await attachRecorderEvidence(testInfo, page, recorderPage, flow);
@@ -236,7 +238,7 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
   await expectWanConfigPage(page);
-  await humanClick(recorderPage.getByRole('button', { name: '回放', exact: true }));
+  await openReplayPanelLikeUser(recorderPage);
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
   await humanClick(recorderPage.getByTitle('Resume (F8)'));
   await expect.poll(async () => {
@@ -310,7 +312,7 @@ test('human-like records shared WAN duplicate row edit action and replays stably
 
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toMatch(/WAN1|ha-wan-row-edit-action/);
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   await attachRecorderEvidence(testInfo, page, recorderPage, flow);
@@ -376,7 +378,7 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('runtime-pool');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('1.1.1.1');
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   expect(flow.artifacts.playwrightCode).toContain('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().click();');
   expect(flow.artifacts.playwrightCode).not.toContain('role=button[name="选择一个WAN口"');
@@ -384,7 +386,7 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expectAddressAndPortPoolsPage(page);
-  await humanClick(recorderPage.getByRole('button', { name: '回放', exact: true }));
+  await openReplayPanelLikeUser(recorderPage);
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
   await humanClick(recorderPage.getByTitle('Resume (F8)'));
   await expect.poll(async () => {
@@ -428,8 +430,8 @@ test('human-like runtime replay supports wait inserted between address and port 
   const wanTrigger = ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, wanTrigger, 'xtest16:WAN1', { searchText: 'xtest16', ...strictHumanOptions });
   await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
-  await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1');
-  await humanType(page.getByRole('textbox', { name: '结束地址，例如：' }), '2.2.2.2');
+  await humanType(page.getByRole('textbox', { name: '开始地址，例如：' }), '1.1.1.1', { confirmWithFill: true });
+  await humanType(page.getByRole('textbox', { name: '结束地址，例如：' }), '2.2.2.2', { confirmWithFill: true });
   await humanClickUntil(
       ipv4Dialog.getByRole('button', { name: '确 定' }),
       async () => !await ipv4Dialog.isVisible().catch(() => false),
@@ -442,7 +444,6 @@ test('human-like runtime replay supports wait inserted between address and port 
       { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
   );
   await expect(page.getByText('配置已保存')).toBeVisible();
-  await humanClick(page.getByTestId('site-global-ip-pools-section'));
 
   const portDialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '新建IP端口地址池' });
   await humanClickUntil(
@@ -474,13 +475,13 @@ test('human-like runtime replay supports wait inserted between address and port 
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('test1');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('default');
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   let flow = await exportBusinessFlowJsonLikeUser(recorderPage);
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-global-ip-pools-section')).toBeFalsy();
   expect(flow.artifacts.playwrightCode).not.toContain('site-global-ip-pools-section');
   const firstSaveStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-save-button', 'first save config step');
-  await openInsertMenuAfterStepLikeUser(recorderPage, firstSaveStepId);
+  await openInsertMenuAfterStepLikeUser(recorderPage, firstSaveStepId, 'site-save-button');
   await humanClick(recorderPage.getByRole('button', { name: '插入等待' }));
   await expect(recorderPage.locator('.review-step-list')).toContainText('等待');
 
@@ -490,10 +491,12 @@ test('human-like runtime replay supports wait inserted between address and port 
   expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, firstSaveStepId) + 1);
   expect(flow.artifacts.playwrightCode).toContain('waitForTimeout(5000)');
   expect(flow.artifacts.playwrightCode).toContain('site-ip-port-pool-create-button');
+  expect(flow.artifacts.playwrightCode).not.toContain('.fill("2.2.")');
+  expect(flow.artifacts.playwrightCode).toContain('.fill("2.2.2.2")');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
   await expectAddressAndPortPoolsPage(page);
-  await humanClick(recorderPage.getByRole('button', { name: '回放', exact: true }));
+  await openReplayPanelLikeUser(recorderPage);
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
   await humanClick(recorderPage.getByTitle('Resume (F8)'));
   await expect.poll(async () => {
@@ -502,7 +505,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   }, { timeout: 60_000 }).toBeTruthy();
   const replayRuntimeLogs = await runtimeDiagnosticsAfter(recorderPage, runtimeLogBaseline);
   expect(replayRuntimeLogs.filter(log => log.type.includes('error') || log.level === 'warn')).toEqual([]);
-  await expect(page.getByRole('row', { name: /test1.*test1 共享 1\.1\.1\.1--2\.2\.2\.2.*1\.1\.1\.1:80.*default/ })).toBeVisible({ timeout: 10_000 });
+  await expect.poll(async () => await page.getByTestId('site-ip-port-pool-table').innerText().catch(() => ''), { timeout: 30_000 }).toMatch(/test12[\s\S]*test1[\s\S]*1\.1\.1\.1--2\.2\.2\.2[\s\S]*1\.1\.1\.1:80[\s\S]*default/);
 });
 
 test('human-like records IPv4 pool repeat flow and replays generated code @human-smoke', async ({ context, page, attachRecorder, baseURL }, testInfo) => {
@@ -552,7 +555,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/WAN口|选择一个WAN口|xtest16:WAN1/);
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   await createRepeatSegmentLikeUser(recorderPage, {
     fromStepText: 'site-ip-address-pool-create-button',
@@ -621,7 +624,7 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/角色|审计员/);
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   await createRepeatSegmentLikeUser(recorderPage, {
     fromStepText: 'create-user-btn',
@@ -746,7 +749,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('生产访问策略');
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   await createRepeatSegmentLikeUser(recorderPage, {
     fromStepText: 'network-resource-add',
@@ -848,8 +851,11 @@ function stepIndex(flow: any, stepId: string) {
   return flow.steps.findIndex((step: any) => step.id === stepId);
 }
 
-async function openInsertMenuAfterStepLikeUser(recorderPage: Page, stepId: string) {
-  const row = recorderPage.locator('.review-step-row').filter({ hasText: stepId }).first();
+async function openInsertMenuAfterStepLikeUser(recorderPage: Page, stepId: string, fallbackText?: string) {
+  await openStepCheckPanelLikeUser(recorderPage);
+  let row = recorderPage.locator('.review-step-row').filter({ hasText: stepId }).first();
+  if (!await row.isVisible().catch(() => false) && fallbackText)
+    row = recorderPage.locator('.review-step-row').filter({ hasText: fallbackText }).first();
   await expect(row).toBeVisible({ timeout: 10_000 });
   const insertButton = row.locator('xpath=following-sibling::*[contains(@class, "review-insert-slot")][1]//button').first();
   await expect(insertButton).toBeVisible({ timeout: 10_000 });

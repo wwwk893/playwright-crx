@@ -398,10 +398,16 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
         incognito,
       });
     } catch (error: any) {
-      this._sendRuntimeEvent('runtime.attach-active-tab-failed', '回放前附加当前业务页失败', {
+      const incognito = this._playInIncognito;
+      const existingCrxApp = await this._crx.get({ incognito }).catch(() => undefined) ?? await this._crx.get({ incognito: !incognito }).catch(() => undefined);
+      const existingPage = existingCrxApp?.activePage();
+      this._sendRuntimeEvent('runtime.attach-active-tab-failed', existingPage ? '回放前重新附加当前业务页失败，沿用已附加页面' : '回放前附加当前业务页失败', {
         message: error?.message ?? String(error),
         stack: error?.stack,
-      }, 'warn');
+        incognito: existingCrxApp?.isIncognito() ?? incognito,
+        tabId: existingPage ? existingCrxApp?.tabIdForPage(existingPage) : undefined,
+        url: existingPage?.mainFrame().url(),
+      }, existingPage ? 'info' : 'warn');
     }
   }
 

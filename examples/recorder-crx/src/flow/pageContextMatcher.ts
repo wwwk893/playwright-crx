@@ -16,6 +16,7 @@ import type { PageContextEvent } from './pageContextTypes';
 
 const beforeWindowMs = 300;
 const afterWindowMs = 800;
+const exactTestIdFallbackWindowMs = 5000;
 
 export function matchPageContextEvent(step: FlowStep, events: PageContextEvent[]): PageContextEvent | undefined {
   const timing = actionTiming(step.rawAction);
@@ -25,10 +26,12 @@ export function matchPageContextEvent(step: FlowStep, events: PageContextEvent[]
   const compatibleEvents = events.filter(event => isCompatible(step.action, event.kind));
   const windowStart = timing.start - beforeWindowMs;
   const windowEnd = timing.end + afterWindowMs;
-  const candidates = compatibleEvents.filter(event => {
+  const targetTestId = step.target?.testId;
+  const primaryCandidates = compatibleEvents.filter(event => {
     const eventTime = timing.clock === 'wall' ? event.wallTime : event.time;
     return eventTime !== undefined && eventTime >= windowStart && eventTime <= windowEnd;
   });
+  const candidates = primaryCandidates.length ? primaryCandidates : exactTestIdFallbackCandidates(step, compatibleEvents, timing, targetTestId);
   if (!candidates.length)
     return undefined;
 
@@ -44,6 +47,19 @@ export function matchPageContextEvent(step: FlowStep, events: PageContextEvent[]
       return scoreDiff;
     return Math.abs(eventTimeFor(a.event, timing.clock) - timing.end) - Math.abs(eventTimeFor(b.event, timing.clock) - timing.end);
   })[0].event;
+}
+
+function exactTestIdFallbackCandidates(step: FlowStep, events: PageContextEvent[], timing: NonNullable<ReturnType<typeof actionTiming>>, targetTestId?: string) {
+  if (!targetTestId)
+    return [];
+  return events.filter(event => {
+    if (event.before.target?.testId !== targetTestId)
+      return false;
+    const eventTime = eventTimeFor(event, timing.clock);
+    if (eventTime === undefined)
+      return false;
+    return Math.abs(eventTime - timing.end) <= exactTestIdFallbackWindowMs;
+  });
 }
 
 function candidateScore(step: FlowStep, event: PageContextEvent) {

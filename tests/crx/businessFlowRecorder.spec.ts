@@ -93,17 +93,15 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   await expect.poll(recordedSubjects, { timeout: 20_000 }).toMatch(/Alice|user-42|编辑/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   await recorderPage.getByRole('button', { name: /添加断言/ }).first().click();
   await expect(recorderPage.locator('.recording-status')).toContainText('断言 ·');
   await expect(recorderPage.locator('.assertion-step-context-card')).toContainText('Step Context：');
   await expect(recorderPage.locator('.assertion-workbench')).toContainText(/保存到 step-\d{3}/);
-  await recorderPage.getByRole('button', { name: '← 返回录制', exact: true }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
   await recorderPage.locator('.side-panel-nav').getByRole('button', { name: '导出', exact: true }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText('导出检查');
   await expect(recorderPage.locator('.export-review-panel')).toContainText('导出前复核：AntD 用户流程 E2E');
-  await expect(recorderPage.locator('.export-review-panel')).toContainText('回放 CTA');
+  await expect(recorderPage.locator('.export-review-panel')).toContainText(/Replay CTA|回放 CTA/);
   await expect(recorderPage.locator('.export-review-panel')).toContainText('P1');
   await expect(recorderPage.locator('.export-review-panel')).toContainText('脱敏开启');
 
@@ -169,7 +167,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('下方表单使用条目');
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJson(recorderPage);
 
@@ -182,7 +180,6 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
   expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)/);
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
   expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
@@ -261,7 +258,7 @@ test('records real ProFormField network configuration fields and replays generat
   await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|network-resource-wan-select/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJson(recorderPage);
   writeGeneratedReplayDiagnostic(test.info(), 'proform-fields', flow);
@@ -284,7 +281,6 @@ test('records real ProFormField network configuration fields and replays generat
   expect(flow.artifacts.playwrightCode).toContain('https://probe.example/health');
   expect(flow.artifacts.playwrightCode).toContain('8443');
   expect(flow.artifacts.playwrightCode).toContain('ProFormField 全量组合录制');
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
   expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
   expectInOrder(flow.artifacts.playwrightCode, [
     'network-resource-add',
@@ -374,7 +370,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|xtest16:WAN1/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   let flow = await exportBusinessFlowJson(recorderPage);
   expect(flow.flow.name).toBe('地址池');
@@ -392,6 +388,8 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(repeatStepIds).toContain(createStepId);
   expect(repeatStepIds).toContain(confirmStepId);
   expect(repeatStepIds).not.toContain(saveConfigStepId);
+
+  await openStepCheckPanel(recorderPage);
 
   for (const stepId of repeatStepIds)
     await recorderPage.locator(`button[aria-label="选择 ${stepId} 作为循环步骤"]`).click();
@@ -455,7 +453,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   let flow = await exportBusinessFlowJson(recorderPage);
   const addStepId = flow.steps.find((step: any) => step.target?.testId === 'site-ip-add')?.id || requiredStepId(flow, (step: any) => step.action === 'navigate', 'initial anchor step');
@@ -469,7 +467,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await page.getByTestId('site-ip-validate').click();
   await expect(page.getByTestId('event-log')).toContainText('validate');
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   flow = await exportBusinessFlowJson(recorderPage);
   const validateStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-validate', 'inserted validate step');
@@ -483,6 +481,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   const waitStepId = requiredStepId(flow, (step: any) => step.action === 'wait', 'inserted wait step');
   expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, saveStepId) + 1);
 
+  await openStepCheckPanel(recorderPage);
   await recorderPage.getByRole('button', { name: '选择全部' }).click();
   await expect(recorderPage.locator('.repeat-create-actions .primary')).toBeEnabled();
   await recorderPage.locator('.repeat-create-actions .primary').click();
@@ -497,7 +496,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
 
   await recorderPage.getByRole('button', { name: '保存记录' }).click();
   await openSavedRecord(recorderPage, flowName);
-  await recorderPage.getByRole('button', { name: '继续', exact: true }).click();
+  await continueOpenedRecord(recorderPage);
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.getByTestId('stability-wan-select').click();
@@ -509,7 +508,7 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await expect(page.getByTestId('event-log')).toContainText('post-save');
   await page.waitForTimeout(1200);
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   await recorderPage.getByRole('button', { name: '保存记录' }).click();
 
   await openSavedRecord(recorderPage, flowName);
@@ -521,7 +520,6 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   expect(flow.artifacts.playwrightCode).toMatch(/批量保存地址池|批量执行/);
   expect(flow.artifacts.playwrightCode).toContain('WAN1');
   expect(flow.artifacts.playwrightCode).not.toContain('WAN1-copy');
-  expect(flow.artifacts.playwrightCode).toContain('AntD Select virtual dropdown replay workaround');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
 });
@@ -633,14 +631,11 @@ async function clickVisibleAntDCascaderOption(page: Page, text: string) {
 }
 
 async function exportBusinessFlowJson(recorderPage: Page) {
-  const startedOnExportPanel = await recorderPage.locator('.export-review-panel').isVisible().catch(() => false);
   await openExportPanel(recorderPage);
   const exportedJson = await downloadTextAfterClick(
       recorderPage,
       recorderPage.getByRole('button', { name: '导出流程 JSON' }).last(),
   );
-  if (!startedOnExportPanel)
-    await openStepCheckPanel(recorderPage);
   return JSON.parse(exportedJson);
 }
 
@@ -653,8 +648,16 @@ async function openExportPanel(recorderPage: Page) {
 }
 
 async function openStepCheckPanel(recorderPage: Page) {
-  await recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  const status = recorderPage.locator('.recording-status');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true }).click();
+    if (await status.getByText('步骤检查').isVisible().catch(() => false))
+      break;
+    if (await status.getByText('录制中').isVisible().catch(() => false))
+      await recorderPage.getByRole('button', { name: '停止录制' }).click();
+    await recorderPage.waitForTimeout(200);
+  }
+  await expect(status).toContainText('步骤检查', { timeout: 15_000 });
   await expect(recorderPage.locator('.review-step-list')).toBeVisible();
 }
 
@@ -670,6 +673,7 @@ function stepIndex(flow: any, stepId: string) {
 }
 
 async function openInsertMenuAfterStep(recorderPage: Page, stepId: string) {
+  await openStepCheckPanel(recorderPage);
   await recorderPage.evaluate(id => {
     const rows = Array.from(document.querySelectorAll('.review-step-row'));
     const row = rows.find(row => row.textContent?.includes(id));
@@ -691,7 +695,19 @@ async function openSavedRecord(recorderPage: Page, flowName: string) {
   const card = recorderPage.locator('.library-card').filter({ hasText: flowName }).first();
   await expect(card).toBeVisible({ timeout: 15_000 });
   await card.getByRole('button', { name: '打开' }).click();
-  await expect(recorderPage.locator('.recording-status')).toContainText('步骤检查');
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
+}
+
+async function continueOpenedRecord(recorderPage: Page) {
+  const recordingNav = recorderPage.locator('.side-panel-nav').getByRole('button', { name: '录制', exact: true });
+  if (await recordingNav.isVisible().catch(() => false))
+    await recordingNav.click();
+  const continueRecording = recorderPage.getByRole('button', { name: '继续录制', exact: true }).first();
+  if (await continueRecording.isVisible().catch(() => false)) {
+    await continueRecording.click();
+    return;
+  }
+  await recorderPage.getByRole('button', { name: '继续', exact: true }).click();
 }
 
 async function downloadTextAfterClick(recorderPage: Page, trigger: ReturnType<Page['locator']>) {

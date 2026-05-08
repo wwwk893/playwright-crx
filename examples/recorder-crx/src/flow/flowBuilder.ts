@@ -808,10 +808,10 @@ function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: Page
   if (diff > 2000)
     return false;
   const target = extractTarget(action);
-  if (targetsLikelySame(target, event.before.target))
-    return true;
   if (isDropdownOptionContext(event.before.target))
     return false;
+  if (targetsLikelySame(target, event.before.target))
+    return true;
   if (isFormLabeledChoiceContext(event))
     return false;
   if (diff < 800 && isWeakPageContextClickTarget(event.before.target))
@@ -878,8 +878,8 @@ function flowTargetFromPageContext(target?: ElementContext, formLabel?: string, 
   return {
     testId: ui?.targetTestId || (bestHint?.kind === 'testid' ? bestHint.value : undefined) || target?.testId,
     role: target?.role,
-    name: target?.ariaLabel || ui?.targetText || contextText || target?.title,
-    displayName: ui?.recipe?.optionText || ui?.recipe?.targetText || ui?.targetText || contextText || target?.ariaLabel || target?.placeholder || target?.testId || formLabel,
+    name: target?.ariaLabel || ui?.targetText || ui?.table?.rowKey || contextText || target?.title,
+    displayName: ui?.recipe?.optionText || ui?.recipe?.targetText || ui?.targetText || ui?.table?.rowKey || contextText || target?.ariaLabel || target?.placeholder || target?.testId || formLabel,
     label: ui?.form?.label || formLabel,
     placeholder: ui?.form?.placeholder || target?.placeholder,
     text: ui?.option?.text || ui?.targetText || contextText,

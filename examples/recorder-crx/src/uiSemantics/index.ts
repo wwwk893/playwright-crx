@@ -4,13 +4,15 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { collectAntdSemanticContext } from './antd';
+import { mergeBusinessHints } from './businessHints';
 import { collectProComponentsContext } from './proComponents';
 import { buildUiRecipe } from './recipes';
 import type { UiSemanticContext } from './types';
 
 export function collectUiSemanticContext(target: Element, document: Document = target.ownerDocument): UiSemanticContext {
   const antd = collectAntdSemanticContext(target, document);
-  const merged = collectProComponentsContext(target, antd);
+  const pro = collectProComponentsContext(target, antd);
+  const merged = mergeBusinessHints(target, pro);
   const recipe = buildUiRecipe(merged);
   return {
     ...merged,

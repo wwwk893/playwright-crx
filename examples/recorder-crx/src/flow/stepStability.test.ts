@@ -187,6 +187,161 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'code preview omits intermediate prefix fills on the same field',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'fill',
+            value: '2.2.',
+            target: { label: '结束地址，例如：192.168.1.254', displayName: '* 结束地址，例如：' },
+            context: { eventId: 'ctx-end-prefix', capturedAt: 1000, before: { form: { label: '结束地址，例如：192.168.1.254', testId: 'ipv4-address-pool-form' } } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            value: '2.2.2.2',
+            target: { label: '结束地址，例如：192.168.1.254', displayName: '* 结束地址，例如：' },
+            context: { eventId: 'ctx-end-final', capturedAt: 1100, before: { form: { label: '结束地址，例如：192.168.1.254', testId: 'ipv4-address-pool-form' } } },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+
+      assert(!code.includes('.fill("2.2.");'), 'exported code should not replay a prefix value that is superseded by a final same-field fill');
+      assert(code.includes('.fill("2.2.2.2");'), 'exported code should keep the final fill value');
+      assert(!playbackCode.includes('.fill("2.2.");'), 'runtime playback should also omit superseded prefix fills');
+      assert(playbackCode.includes('.fill("2.2.2.2");'), 'runtime playback should keep the final fill value');
+    },
+  },
+  {
+    name: 'code preview omits placeholder select option clicks before the real option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { role: 'option', text: '选择一个VRF', displayName: 'option 选择一个VRF' },
+            rawAction: { name: 'click' } as any,
+            sourceCode: 'await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text=\\"选择一个VRF\\"i").click();',
+            context: {
+              eventId: 'ctx-vrf-placeholder',
+              capturedAt: 1000,
+              before: {
+                form: { label: '关联VRF' },
+                target: { role: 'option' as any, text: '选择一个VRF', normalizedText: '选择一个VRF', optionPath: ['选择一个VRF'] },
+                dialog: { type: 'modal', title: '新建IP端口地址池', visible: true },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: { role: 'option', text: 'default', displayName: 'default' },
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="default"i' } as any,
+            context: {
+              eventId: 'ctx-vrf-default',
+              capturedAt: 1100,
+              before: {
+                form: { label: '关联VRF' },
+                target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] },
+                dialog: { type: 'modal', title: '新建IP端口地址池', visible: true },
+              },
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+
+      for (const generated of [code, playbackCode]) {
+        assert(!generated.includes('选择一个VRF'), 'placeholder option text should not be emitted as a replay click');
+        assert(generated.includes('default'), 'real selected option should still be emitted');
+      }
+      const repeatFlow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { role: 'option', text: 'default', displayName: 'default' },
+            rawAction: { name: 'click' } as any,
+            sourceCode: 'await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text=\\"default\\"i").click();',
+            context: { eventId: 'ctx-vrf-default-repeat', capturedAt: 1200, before: { form: { label: '关联VRF' }, target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] } } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: { role: 'option', text: 'default', displayName: 'default' },
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="default"i' } as any,
+            context: { eventId: 'ctx-vrf-default-repeat-real', capturedAt: 1300, before: { form: { label: '关联VRF' }, target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] } } },
+            assertions: [],
+          },
+        ],
+        repeatSegments: [{
+          id: 'segment-vrf',
+          name: 'VRF rows',
+          stepIds: ['s001', 's002'],
+          parameters: [{ id: 'param-vrf', variableName: 'vrf', label: 'VRF', sourceStepId: 's001', currentValue: 'default', enabled: true }],
+          rows: [{ id: 'row-placeholder', values: { 'param-vrf': '选择一个VRF' } }],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+      const repeatPlayback = generateBusinessFlowPlaybackCode(repeatFlow);
+      assert(!repeatPlayback.includes('internal:has-text=\\"选择一个VRF\\"i'), 'placeholder produced only after repeat row parameterization should still be dropped');
+      assert(!repeatPlayback.includes('选择一个VRF'), 'parameterized placeholder text should not leak into runtime playback');
+    },
+  },
+  {
+    name: 'page context matcher falls back to exact test id when table action timing is delayed',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'ha-wan-row-edit-action', displayName: 'WAN1 HS专线 HS Internet IPv4' },
+            rawAction: { name: 'click', selector: 'internal:testid=[data-testid="ha-wan-row-edit-action"s]', wallTime: 10_000, endWallTime: 10_010 } as any,
+            assertions: [],
+          },
+        ],
+      };
+      const merged = mergePageContextIntoFlow(flow, [{
+        id: 'ctx-delayed-row-action',
+        kind: 'click',
+        time: 1000,
+        wallTime: 13_500,
+        before: {
+          target: { testId: 'ha-wan-row-edit-action', role: 'button', text: 'WAN1 HS专线 HS Internet IPv4' },
+          table: { testId: 'wan-config-table', rowKey: '1', rowIdentity: { stable: true } },
+        },
+      } as PageContextEvent]);
+
+      assertEqual(merged.steps[0].target?.scope?.table?.testId, 'wan-config-table');
+      assertEqual(merged.steps[0].target?.scope?.table?.rowKey, '1');
+      assert(generateBusinessFlowPlaywrightCode(merged).includes('wan-config-table'), 'row-scoped code should survive delayed exact-testid page context');
+    },
+  },
+  {
     name: 'same label fills in different dialogs stay as separate business steps',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -1579,11 +1734,19 @@ test('demo', async ({ page }) => {
             id: 's002',
             order: 2,
             action: 'click',
-            target: { testId: 'wan-config-confirm', displayName: '确定' },
+            target: {
+              role: 'tooltip',
+              displayName: 'tooltip 确 定',
+              name: 'tooltip 确 定',
+            },
+            sourceCode: 'await page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();',
             context: {
-              eventId: 'ctx-confirm',
-              capturedAt: 2000,
-              before: { target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' } },
+              eventId: 'ctx-popconfirm-ok',
+              capturedAt: 1500,
+              before: {
+                dialog: { type: 'popover', title: '删除此行？', visible: true },
+                target: { tag: 'div', role: 'tooltip', framework: 'antd', controlType: 'button', text: '确 定' },
+              },
             },
             assertions: [],
           },
@@ -1591,11 +1754,44 @@ test('demo', async ({ page }) => {
             id: 's003',
             order: 3,
             action: 'click',
+            target: { testId: 'wan-config-confirm', displayName: '确定' },
+            context: {
+              eventId: 'ctx-confirm',
+              capturedAt: 2000,
+              before: {
+                dialog: { type: 'modal', title: '编辑WAN2', visible: true },
+                target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
             target: { testId: 'wan-config-confirm', displayName: 'testId wan-config-confirm' },
             context: {
               eventId: 'ctx-confirm-echo',
               capturedAt: 2050,
-              before: { target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' } },
+              before: {
+                dialog: { type: 'modal', title: '编辑WAN2', visible: true },
+                target: { tag: 'button', testId: 'wan-config-confirm', framework: 'antd', controlType: 'button' },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's005',
+            order: 5,
+            action: 'click',
+            target: { role: 'button', displayName: 'button 确 定', name: '确 定' },
+            context: {
+              eventId: 'ctx-dialog-confirm-echo',
+              capturedAt: 2100,
+              before: {
+                dialog: { type: 'modal', title: '编辑WAN2', visible: true },
+                target: { tag: 'button', role: 'button', framework: 'antd', controlType: 'button', text: '确 定' },
+              },
             },
             assertions: [],
           },
@@ -1608,7 +1804,10 @@ test('demo', async ({ page }) => {
       assert(!code.includes('page.getByTestId("wan-transport-row-delete-action").nth(1).click();'), 'dialog-owned delete action should not keep a page-level duplicate ordinal');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'delete action should confirm the visible AntD popconfirm with the captured confirm label');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});'), 'delete action should wait for the AntD popconfirm to close before the next step');
-      assertEqual((code.match(/page\.getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
+      assertEqual((code.match(/ant-popover[^\n]+getByRole\("button", \{ name: \/\^\(确定\|确 定\)\$\/ \}\)\.click\(\);/g) || []).length, 1);
+      assert(!code.includes('.last().getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'explicit recorded popconfirm confirmation should be skipped when the delete action already synthesized it');
+      assert(!code.includes('page.getByRole("button", { name: "确 定" }).click();'), 'dialog confirm echo should not fall back to a page-global ambiguous role locator');
+      assertEqual((code.match(/getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
       assert(playbackCode.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'runtime playback should keep the dialog-scoped delete click');
       assert(playbackCode.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'runtime playback should still confirm the visible AntD popconfirm');
       assert(!playbackCode.includes('.catch('), 'runtime playback should not include unsupported catch continuations');
@@ -1684,6 +1883,8 @@ test('demo', async ({ page }) => {
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
 
+      assert(code.includes('page.locator("tr, [role=\\"row\\"], .ant-table-row, .ant-list-item, .ant-descriptions-row, .ant-space, .ant-card, .ant-table-cell").filter({ hasText: /Nova专线[\\s\\S]*default/ }).getByTestId("wan-transport-row-delete-action").first().click();'), 'row delete with reusable test id should fall back to row text scope instead of global test id when rowKey is missing');
+      assert(!code.includes('await page.getByTestId("wan-transport-row-delete-action").click();'), 'reusable row delete should not replay as an ambiguous global test id');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'AntD row delete should use the captured opened popover to confirm');
     },
   },
@@ -5310,6 +5511,87 @@ test('demo', async ({ page }) => {
       assert(![exportedJson, yaml, aiJson].some(text => text.includes('about:blank?') || text.includes('chrome://extensions/?') || text.includes('#after')), 'compact URLs should still strip query and hash for opaque schemes');
       assert(yaml.includes('field: "角色"') || yaml.includes('field: 角色'), 'compact yaml should retain useful compact semantic field');
       assert(yaml.includes('option: "管理员"') || yaml.includes('option: 管理员'), 'compact yaml should retain useful compact semantic option');
+    },
+  },
+  {
+    name: 'business semantic hints export compact yaml and AI input keep generic contract only',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('编辑')], [], {});
+      const businessUi = {
+        library: 'pro-components',
+        component: 'pro-table',
+        componentPath: ['pro-table'],
+        targetText: '编辑',
+        targetTestId: 'site-ip-port-pool-row-edit-action',
+        form: {
+          formKind: 'modal-form',
+          fieldKind: 'select',
+          name: 'destVrfId',
+          label: '目的 VRF',
+          testId: 'site-ip-port-pool-vrf-field',
+          valuePreview: 'internal-sensitive-preview',
+        },
+        table: {
+          tableKind: 'pro-table',
+          tableId: 'ip-port-pool',
+          testId: 'site-ip-port-pool-table',
+          rowKey: 'pool-42',
+          rowText: 'pool-42 admin@example.com secret row text',
+          columnKey: 'option',
+        },
+        overlay: { type: 'modal', title: 'IP 端口地址池', text: 'secret overlay text' },
+        locatorHints: [{ kind: 'testid', value: 'site-ip-port-pool-row-edit-action', score: 0.99, reason: 'business test id' }],
+        reasons: ['matched business hints with secret diagnostic reason'],
+        confidence: 0.96,
+      } as any;
+      const flowWithBusinessHints: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          uiRecipe: {
+            kind: 'table-row-action',
+            library: 'pro-components',
+            component: 'pro-table',
+            fieldKind: 'select',
+            fieldName: 'destVrfId',
+            tableTitle: 'ip-port-pool',
+            rowKey: 'pool-42',
+            columnTitle: 'option',
+            targetText: '编辑',
+            reasons: businessUi.reasons,
+          } as any,
+          target: { ...step.target, raw: { ui: businessUi, selector: '#business-secret-selector' } },
+          context: {
+            eventId: 'ctx-business-hints',
+            capturedAt: Date.now(),
+            before: {
+              title: 'IP 池页面',
+              url: 'https://example.test/networking/site/ip-pools?token=***#frag',
+              target: { tag: 'button', text: '编辑', testId: 'site-ip-port-pool-row-edit-action' },
+              ui: businessUi,
+            },
+          },
+        })),
+      };
+
+      const exported = prepareBusinessFlowForExport(flowWithBusinessHints, 'await page.getByTestId("site-ip-port-pool-row-edit-action").click();');
+      const exportedJson = JSON.stringify(exported);
+      const yaml = toCompactFlow(exported);
+      const aiJson = JSON.stringify(buildAiIntentInput(exported, exported.steps));
+
+      for (const text of [exportedJson, yaml, aiJson]) {
+        assert(text.includes('site-ip-port-pool-row-edit-action'), 'business target test id should remain useful');
+        assert(text.includes('destVrfId'), 'business field name should remain useful');
+        assert(text.includes('pool-42'), 'business row key should remain useful');
+        assert(!text.includes('admin@example.com'), 'business rowText internals should not leak');
+        assert(!text.includes('secret overlay text'), 'business overlay text should not leak');
+        assert(!text.includes('internal-sensitive-preview'), 'business form value previews should not leak');
+        assert(!text.includes('business test id'), 'business locator hint reasons should not leak');
+        assert(!text.includes('#business-secret-selector'), 'business raw selector should not leak');
+      }
+      assert(yaml.includes('table: ip-port-pool') || yaml.includes('table: "ip-port-pool"'), 'compact yaml should preserve business table id');
+      assert(yaml.includes('column: option') || yaml.includes('column: "option"'), 'compact yaml should preserve business column key fallback');
+      assert(!aiJson.includes('token='), 'business AI input URL should strip query');
     },
   },
   {

@@ -614,9 +614,6 @@ export const CrxRecorder: React.FC = ({
     const requestedEventsById = new Map(requestedEvents.map(event => [event.id, event]));
     const queuedEventsAfterSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
-    const lastKnownContextEventId = lastDiagnosticContextEventIdRef.current;
-    const lastKnownIndex = lastKnownContextEventId ? requestedEvents.findIndex(event => event.id === lastKnownContextEventId) : -1;
-    const newRequestedEvents = lastKnownContextEventId ? (lastKnownIndex >= 0 ? requestedEvents.slice(lastKnownIndex + 1) : requestedEvents) : requestedEvents;
     const eventsById = new Map<string, PageContextEvent>();
     for (const event of [...queuedEventsBeforeSettle, ...queuedEventsAfterSettle]) {
       const latestEvent = requestedEventsById.get(event.id) || event;
@@ -624,7 +621,7 @@ export const CrxRecorder: React.FC = ({
       if (latestEvent.kind === 'click' && latestEvent.wallTime)
         scheduledSyntheticContextEventIdsRef.current.add(latestEvent.id);
     }
-    for (const event of newRequestedEvents) {
+    for (const event of requestedEvents) {
       eventsById.set(event.id, event);
       if (event.kind === 'click' && event.wallTime)
         scheduledSyntheticContextEventIdsRef.current.add(event.id);
@@ -854,17 +851,20 @@ export const CrxRecorder: React.FC = ({
       const runtimeEvent = runtimeDispatchDiagnostic(data);
       if (runtimeEvent)
         appendDiagnosticLog(runtimeEvent);
-      if ((data.event === 'resume' || data.event === 'step') && businessFlowEnabledRef.current && businessFlowPlaybackCodeRef.current) {
+      const latestBusinessFlowPlaybackCode = businessFlowEnabledRef.current ? generateBusinessFlowPlaybackCode(flowDraftRef.current) : '';
+      if ((data.event === 'resume' || data.event === 'step') && businessFlowEnabledRef.current && latestBusinessFlowPlaybackCode) {
         postRecorderEvent({
           event: 'activeTabAttachRequested',
           params: { source: data.event },
         });
         await chrome.runtime.sendMessage({ event: 'activeTabAttachRequested' }).then(result => {
-          const skipped = !result?.ok && result?.reason === '没有找到可附加的当前业务页';
+          const reason = String(result?.reason || '');
+          const browserGestureDenied = !result?.ok && reason.includes('sidePanel.open') && reason.includes('user gesture');
+          const skipped = !result?.ok && (result?.reason === '没有找到可附加的当前业务页' || browserGestureDenied);
           appendDiagnosticLog({
             type: result?.ok ? 'runtime.attach-active-tab' : skipped ? 'runtime.attach-active-tab-skipped' : 'runtime.attach-active-tab-failed',
             level: result?.ok || skipped ? undefined : 'warn',
-            message: result?.ok ? '回放前已确认当前业务页附加到 recorder' : skipped ? '回放前未找到新的当前业务页，沿用已附加页面' : '回放前附加当前业务页失败',
+            message: result?.ok ? '回放前已确认当前业务页附加到 recorder' : browserGestureDenied ? '浏览器限制当前时机打开 side panel，继续沿用 recorder 已附加页面' : skipped ? '回放前未找到新的当前业务页，沿用已附加页面' : '回放前附加当前业务页失败',
             data: result,
           });
         }).catch(error => {
@@ -877,7 +877,7 @@ export const CrxRecorder: React.FC = ({
         });
         postRecorderEvent({
           event: 'businessFlowCodeChanged',
-          params: { code: businessFlowPlaybackCodeRef.current },
+          params: { code: latestBusinessFlowPlaybackCode },
         });
       }
       postRecorderEvent(data);

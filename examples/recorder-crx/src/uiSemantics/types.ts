@@ -73,6 +73,7 @@ export interface UiFormContext {
   formKind?: 'antd-form' | 'pro-form' | 'modal-form' | 'drawer-form' | 'steps-form' | 'beta-schema-form';
   formTitle?: string;
   formName?: string;
+  testId?: string;
   fieldKind?: string;
   label?: string;
   name?: string;
@@ -87,6 +88,8 @@ export interface UiFormContext {
 export interface UiTableContext {
   tableKind?: 'antd-table' | 'pro-table' | 'editable-pro-table' | 'pro-list';
   title?: string;
+  tableId?: string;
+  testId?: string;
   rowKey?: string;
   rowText?: string;
   columnKey?: string;

@@ -6,7 +6,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 type CapturedContextEvent = {
   before?: {
@@ -16,11 +16,13 @@ type CapturedContextEvent = {
       componentPath?: string[];
       library?: string;
       targetText?: string;
-      form?: { label?: string; formKind?: string; fieldKind?: string };
-      table?: { title?: string; rowKey?: string; columnTitle?: string; region?: string; tableKind?: string };
+      targetTestId?: string;
+      targetRole?: string;
+      form?: { label?: string; name?: string; formKind?: string; fieldKind?: string; testId?: string };
+      table?: { title?: string; testId?: string; tableId?: string; rowKey?: string; columnKey?: string; columnTitle?: string; region?: string; tableKind?: string };
       overlay?: { type?: string; title?: string; text?: string };
       option?: { text?: string; path?: string[] };
-      recipe?: { kind?: string; component?: string; formKind?: string; fieldLabel?: string; optionText?: string; tableTitle?: string; rowKey?: string; columnTitle?: string; overlayTitle?: string; targetText?: string };
+      recipe?: { kind?: string; component?: string; formKind?: string; fieldLabel?: string; fieldName?: string; optionText?: string; tableTitle?: string; rowKey?: string; columnTitle?: string; overlayTitle?: string; targetText?: string };
       locatorHints?: Array<{ kind?: string; score?: number; reason?: string }>;
       confidence?: number;
       weak?: boolean;
@@ -151,6 +153,146 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
     expect(json).not.toContain('option.value');
   });
 
+  test('maps generic business e2e hints into UiSemanticContext without networking hardcoding', async ({ page }) => {
+    await installSidecarFixture(page);
+
+    const toolbarEvent = await captureAfterSequence(page, ['#business-create']);
+    expect(toolbarEvent.before?.ui?.library).toBe('pro-components');
+    expect(toolbarEvent.before?.ui?.component).toBe('pro-table-toolbar');
+    expect(toolbarEvent.before?.ui?.targetTestId).toBe('site-ip-port-pool-create-button');
+    expect(toolbarEvent.before?.ui?.table?.tableId || toolbarEvent.before?.ui?.table?.title).toBe('ip-port-pool');
+    expect(toolbarEvent.before?.ui?.recipe?.kind).toBe('protable-toolbar-action');
+
+    const fieldEvent = await captureAfterSequence(page, ['#business-vrf-select .ant-select-selector']);
+    expect(fieldEvent.before?.ui?.library).toBe('antd');
+    expect(fieldEvent.before?.ui?.component).toBe('select');
+    expect(fieldEvent.before?.ui?.targetTestId).toBe('site-ip-port-pool-vrf-select');
+    expect(fieldEvent.before?.ui?.form?.name).toBe('destVrfId');
+    expect(fieldEvent.before?.ui?.form?.fieldKind).toBe('select');
+    expect(fieldEvent.before?.ui?.form?.testId).toBe('site-ip-port-pool-vrf-field');
+    expect(fieldEvent.before?.ui?.recipe?.fieldName).toBe('destVrfId');
+
+    const unmappedComponentEvent = await captureAfterSequence(page, ['#business-unmapped-select .ant-select-selector']);
+    expect(unmappedComponentEvent.before?.ui?.library).toBe('antd');
+    expect(unmappedComponentEvent.before?.ui?.component).toBe('select');
+    expect(unmappedComponentEvent.before?.ui?.targetTestId).toBe('site-unmapped-select');
+    expect(unmappedComponentEvent.before?.ui?.form?.name).toBe('unmappedSelect');
+
+    const fallbackTableEvent = await captureAfterSequence(page, ['#business-alt-table-edit']);
+    expect(fallbackTableEvent.before?.ui?.component).toBe('pro-table');
+    expect(fallbackTableEvent.before?.ui?.table?.testId).toBe('business-alt-table');
+    expect(fallbackTableEvent.before?.ui?.table?.rowKey).toBe('alt-1');
+    expect(fallbackTableEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+
+    const nonTableCreateEvent = await captureAfterSequence(page, ['#business-non-table-create']);
+    expect(nonTableCreateEvent.before?.ui?.targetTestId).toBe('business-non-table-create');
+    expect(nonTableCreateEvent.before?.ui?.table).toBeUndefined();
+    expect(nonTableCreateEvent.before?.ui?.recipe?.kind).not.toBe('protable-toolbar-action');
+
+    const rowEvent = await captureAfterSequence(page, ['#business-row-edit']);
+    expect(rowEvent.before?.ui?.library).toBe('pro-components');
+    expect(rowEvent.before?.ui?.component).toBe('pro-table');
+    expect(rowEvent.before?.ui?.table?.rowKey).toBe('pool-42');
+    expect(rowEvent.before?.ui?.table?.columnKey).toBe('option');
+    expect(rowEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+
+    const unknownEvent = await captureAfterSequence(page, ['#business-unknown-hint']);
+    expect(unknownEvent.before?.ui?.component).toBe('unknown');
+    expect(unknownEvent.before?.ui?.library).toBe('unknown');
+    expect(unknownEvent.before?.ui?.targetTestId).toBe('custom-widget-root');
+  });
+
+  test('records a realistic IP Pools pilot flow with human-like interactions', async ({ page }) => {
+    await page.setContent(businessPilotFixtureHtml());
+    await installSidecarOnCurrentPage(page);
+
+    const createEvent = await userClickAndRead(page, '#site-ip-port-pool-create-button');
+    expect(createEvent.before?.ui?.component).toBe('pro-table-toolbar');
+    expect(createEvent.before?.ui?.table?.tableId).toBe('ip-port-pool');
+    expect(createEvent.before?.ui?.recipe?.kind).toBe('protable-toolbar-action');
+
+    const nameEvent = await userFillAndRead(page, '#site-ip-port-pool-name-input', 'pool-e2e');
+    expect(nameEvent.before?.ui?.form?.name).toBe('name');
+    expect(nameEvent.before?.ui?.form?.fieldKind).toBe('text');
+    expect(nameEvent.before?.ui?.form?.testId).toBe('site-ip-port-pool-name-field');
+    expect(nameEvent.before?.ui?.recipe?.kind).toBe('fill-form-field');
+
+    const vrfTriggerEvent = await userClickAndRead(page, '#site-ip-port-pool-vrf-select .ant-select-selector');
+    expect(vrfTriggerEvent.before?.ui?.component).toBe('select');
+    expect(vrfTriggerEvent.before?.ui?.form?.name).toBe('destVrfId');
+    expect(vrfTriggerEvent.before?.ui?.form?.fieldKind).toBe('select');
+
+    const vrfOptionEvent = await userClickAndRead(page, '#site-ip-port-pool-vrf-option-default');
+    expect(vrfOptionEvent.before?.ui?.component).toBe('select');
+    expect(vrfOptionEvent.before?.ui?.option?.text).toBe('默认 VRF');
+    expect(vrfOptionEvent.before?.ui?.recipe?.kind).toBe('select-option');
+
+    const okEvent = await userClickAndRead(page, '#site-ip-port-pool-modal-ok-button');
+    expect(okEvent.before?.ui?.targetTestId).toBe('site-ip-port-pool-modal-ok-button');
+    expect(okEvent.before?.ui?.overlay?.type).toBe('modal');
+    expect(okEvent.before?.ui?.form?.formKind).toBe('modal-form');
+
+    const rowEditEvent = await userClickAndRead(page, '#site-ip-port-pool-row-edit-action');
+    expect(rowEditEvent.before?.ui?.targetTestId).toBe('site-ip-port-pool-row-edit-action');
+    expect(rowEditEvent.before?.ui?.table?.rowKey).toBe('pool-42');
+    expect(rowEditEvent.before?.ui?.table?.columnKey).toBe('option');
+    expect(rowEditEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+  });
+
+  test('records a realistic WAN transport network configuration flow with real AntD ProComponents', async ({ page, baseURL }) => {
+    await page.goto(`${baseURL}/antd-wan-transport-real.html`);
+    await expect(page.getByTestId('wan-transport-table')).toBeVisible();
+    await installSidecarOnCurrentPage(page);
+
+    const addEvent = await userClickAndRead(page, '[data-testid="wan-transport-add-button"]');
+    expect(addEvent.before?.ui?.component).toBe('pro-table-toolbar');
+    expect(addEvent.before?.ui?.targetTestId).toBe('wan-transport-add-button');
+    expect(addEvent.before?.ui?.table?.tableId).toBe('wan-transport');
+    expect(addEvent.before?.ui?.recipe?.kind).toBe('protable-toolbar-action');
+    await expect(page.getByRole('dialog', { name: '增加传输网络' })).toBeVisible();
+
+    const transportEvent = await userClickAndRead(page, '[data-testid="wan-transport-select"] .ant-select-selector');
+    expect(transportEvent.before?.ui?.component).toBe('select');
+    expect(transportEvent.before?.ui?.form?.name).toBe('transport');
+    expect(transportEvent.before?.ui?.form?.fieldKind).toBe('select');
+
+    const transportOptionEvent = await userClickAndRead(page, '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="Nova 私网"]');
+    expect(transportOptionEvent.before?.ui?.recipe?.kind).toBe('select-option');
+    expect(transportOptionEvent.before?.ui?.option?.text).toBe('Nova 私网');
+
+    const tagEvent = await userClickAndRead(page, '[data-testid="wan-transport-tags-select"] .ant-select-selector');
+    expect(tagEvent.before?.ui?.form?.name).toBe('tags');
+    expect(tagEvent.before?.ui?.form?.fieldKind).toBe('multi-select');
+    await userClickAndRead(page, '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="controller"]');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')).toHaveCount(0);
+
+    const fecEvent = await userClickAndRead(page, '.ant-radio-wrapper:has-text("自动")');
+    expect(fecEvent.before?.ui?.component).toBe('radio-group');
+    expect(fecEvent.before?.ui?.form?.name).toBe('wanTransportFec.enableEgressFec');
+    expect(fecEvent.before?.ui?.recipe?.kind).toBe('toggle-control');
+
+    const thresholdEvent = await userFillAndRead(page, '[data-testid="wan-transport-egress-disable-threshold-input"]', '3');
+    expect(thresholdEvent.before?.ui?.form?.name).toBe('wanTransportFec.engressThres.disableThres');
+    expect(thresholdEvent.before?.ui?.recipe?.kind).toBe('fill-form-field');
+
+    const okEvent = await userClickAndRead(page, '[data-testid="wan-transport-modal-ok-button"]');
+    expect(okEvent.before?.ui?.targetTestId).toBe('wan-transport-modal-ok-button');
+    expect(okEvent.before?.ui?.form?.formKind).toBe('modal-form');
+    expect(okEvent.before?.ui?.recipe?.kind).toBe('submit-form');
+    await expect(page.getByRole('row', { name: /Nova 私网/ })).toBeVisible();
+
+    const deleteEvent = await userClickAndRead(page, 'tr[data-row-key="nova_private"] [data-testid="wan-transport-row-delete-action"]');
+    expect(deleteEvent.before?.ui?.targetTestId).toBe('wan-transport-row-delete-action');
+    expect(deleteEvent.before?.ui?.table?.rowKey).toBe('nova_private');
+    expect(deleteEvent.before?.ui?.recipe?.kind).toBe('table-row-action');
+
+    const confirmEvent = await userClickAndRead(page, '[data-testid="wan-transport-delete-confirm-ok"]');
+    expect(confirmEvent.before?.ui?.componentPath).toContain('popconfirm');
+    expect(confirmEvent.before?.ui?.recipe?.kind).toBe('confirm-popconfirm');
+    await expect(page.getByRole('row', { name: /Nova 私网/ })).toHaveCount(0);
+  });
+
   test('focused semantic stress stays stable across repeated portal overlay table interactions', async ({ page }) => {
     for (let i = 0; i < 3; i++) {
       await installSidecarFixture(page, { semanticAdapterDiagnosticsEnabled: true });
@@ -175,6 +317,10 @@ test.describe('MVP 0.1.4 AntD / ProComponents semantic adapter', () => {
 async function installSidecarFixture(page: Page, options: SidecarFixtureOptions = {}) {
   await page.goto(`data:text/html,<html><body>reset-${Date.now()}-${Math.random()}</body></html>`);
   await page.setContent(semanticFixtureHtml());
+  await installSidecarOnCurrentPage(page, options);
+}
+
+async function installSidecarOnCurrentPage(page: Page, options: SidecarFixtureOptions = {}) {
   await page.evaluate(sidecarOptions => {
     document.addEventListener('submit', event => event.preventDefault(), true);
     document.addEventListener('click', event => {
@@ -261,6 +407,93 @@ async function dispatchClickAndRead(page: Page, selector: string): Promise<Captu
   return events[start];
 }
 
+async function userClickAndRead(page: Page, selector: string): Promise<CapturedContextEvent> {
+  return await performUserActionAndRead(page, selector, async locator => {
+    await locator.hover();
+    await locator.click();
+  });
+}
+
+async function userFillAndRead(page: Page, selector: string, value: string): Promise<CapturedContextEvent> {
+  return await performUserActionAndRead(page, selector, async locator => {
+    await locator.click();
+    await locator.fill(value);
+  });
+}
+
+async function performUserActionAndRead(page: Page, selector: string, action: (locator: Locator) => Promise<void>): Promise<CapturedContextEvent> {
+  const locator = page.locator(selector);
+  await locator.scrollIntoViewIfNeeded();
+  const expected = await locator.evaluate(element => {
+    const nearestTestId = (current: Element | null): string | undefined => {
+      for (let node = current; node; node = node.parentElement) {
+        const value = node.getAttribute('data-testid') || node.getAttribute('data-test-id') || node.getAttribute('data-e2e');
+        if (value)
+          return value;
+      }
+      return undefined;
+    };
+    const nearestAttr = (current: Element | null, attr: string): string | undefined => {
+      for (let node = current; node; node = node.parentElement) {
+        const value = node.getAttribute(attr);
+        if (value)
+          return value;
+      }
+      return undefined;
+    };
+    return {
+      testId: nearestTestId(element),
+      fieldName: nearestAttr(element, 'data-e2e-field-name'),
+      action: nearestAttr(element, 'data-e2e-action'),
+      text: element.textContent?.trim(),
+    };
+  });
+  const start = await page.evaluate(() => (window as any).__semanticEvents.length as number);
+  await action(locator);
+  await expect.poll(async () => page.evaluate(length => (window as any).__semanticEvents.length > length, start), { message: `semantic event for ${selector}`, timeout: 2000 }).toBe(true);
+  const events = await page.evaluate(startIndex => ((window as any).__semanticEvents as CapturedContextEvent[]).slice(startIndex), start);
+  return events.slice().reverse().find(event =>
+    (!!expected.testId && (event.before?.target?.testId === expected.testId || event.before?.ui?.targetTestId === expected.testId || event.before?.ui?.form?.testId === expected.testId || event.before?.ui?.table?.testId === expected.testId)) ||
+    (!!expected.fieldName && event.before?.ui?.form?.name === expected.fieldName) ||
+    (!!expected.action && event.before?.ui?.table?.region === 'row-action') ||
+    (!!expected.text && (event.before?.ui?.targetText === expected.text || event.before?.ui?.option?.text === expected.text || event.before?.ui?.recipe?.optionText === expected.text || event.before?.target?.text === expected.text))
+  ) ?? events[events.length - 1];
+}
+
+function businessPilotFixtureHtml() {
+  return `<!doctype html>
+<html><head><style>
+body { font-family: sans-serif; padding: 20px; }
+.ant-pro-table,.ant-modal,.ant-select-dropdown { border:1px solid #ddd; margin:8px; padding:8px; }
+.ant-modal,.ant-select-dropdown { display:block; visibility:visible; }
+.ant-table-row, tr { height:32px; }
+.ant-form-item { margin:8px 0; }
+.ant-select-selector { border:1px solid #999; padding:4px; display:inline-block; min-width:160px; }
+</style></head><body>
+<section class="ant-pro-table" data-testid="site-ip-port-pool-table" data-e2e-component="pro-table" data-e2e-table="ip-port-pool">
+  <div class="ant-pro-table-list-toolbar">
+    <button id="site-ip-port-pool-create-button" class="ant-btn ant-btn-primary" data-testid="site-ip-port-pool-create-button" data-e2e-component="pro-table-toolbar" data-e2e-action="create">新建 IP 端口池</button>
+  </div>
+  <table class="ant-table"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody>
+    <tr class="ant-table-row" data-testid="site-ip-port-pool-row" data-row-key="pool-42"><td>pool-a</td><td data-column-key="option"><button id="site-ip-port-pool-row-edit-action" class="ant-btn" data-testid="site-ip-port-pool-row-edit-action" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr>
+  </tbody></table>
+</section>
+<div class="ant-modal ant-pro-form modal-form" role="dialog" data-testid="site-ip-port-pool-modal" data-e2e-overlay="modal" data-e2e-component="modal-form">
+  <div class="ant-modal-title">IP 端口地址池</div>
+  <form class="ant-form ant-pro-form">
+    <div class="ant-form-item" data-testid="site-ip-port-pool-name-field" data-e2e-component="pro-form-field" data-e2e-field-name="name" data-e2e-field-kind="text" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label for="site-ip-port-pool-name-input">名称</label></div><input id="site-ip-port-pool-name-input" name="name" data-e2e-component="input" data-e2e-field-name="name" data-e2e-field-kind="text" /></div>
+    <div class="ant-form-item" data-testid="site-ip-port-pool-address-pool-field" data-e2e-component="pro-form-field" data-e2e-field-name="snatId" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>地址池</label></div><div id="site-ip-port-pool-address-pool-select" class="ant-select" data-testid="site-ip-port-pool-address-pool-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox"><span>请选择地址池</span></div></div></div>
+    <div class="ant-form-item" data-testid="site-ip-port-pool-vrf-field" data-e2e-component="pro-form-field" data-e2e-field-name="destVrfId" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>目的 VRF</label></div><div id="site-ip-port-pool-vrf-select" class="ant-select" data-testid="site-ip-port-pool-vrf-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox"><span>请选择 VRF</span></div></div></div>
+    <button id="site-ip-port-pool-modal-ok-button" type="button" class="ant-btn ant-btn-primary" data-testid="site-ip-port-pool-modal-ok-button" data-e2e-component="modal-form" data-e2e-action="submit">确 定</button>
+    <button id="site-ip-port-pool-modal-cancel-button" type="button" class="ant-btn" data-testid="site-ip-port-pool-modal-cancel-button" data-e2e-component="modal-form" data-e2e-action="cancel">取 消</button>
+  </form>
+</div>
+<div class="ant-select-dropdown" data-e2e-overlay="select-dropdown">
+  <div id="site-ip-port-pool-vrf-option-default" class="ant-select-item-option" role="option" title="默认 VRF"><div>默认 VRF</div></div>
+</div>
+</body></html>`;
+}
+
 function semanticFixtureHtml() {
   return `<!doctype html>
 <html><head><style>
@@ -302,5 +535,11 @@ body { font-family: sans-serif; }
 <form class="ant-pro-form beta-schema-form"><div class="ant-form-item"><div class="ant-form-item-label"><label for="schema-field">Schema 字段</label></div><input id="schema-field" name="schemaField" /></div></form>
 <section class="ant-pro-descriptions"><h2>租户详情</h2><div id="desc-status" class="ant-descriptions-item"><span class="ant-descriptions-item-label">状态</span><span class="ant-descriptions-item-content">启用</span></div></section>
 <section class="ant-pro-list"><h2>工单列表</h2><div class="ant-list-item" data-row-key="list-1"><span>工单 A</span><button id="list-action" class="ant-btn">处理</button></div></section>
+<section class="ant-pro-table" data-testid="business-ip-port-pool-table" data-e2e-component="pro-table" data-e2e-table="ip-port-pool"><div class="ant-pro-table-list-toolbar"><button id="business-create" class="ant-btn ant-btn-primary" data-testid="site-ip-port-pool-create-button" data-e2e-component="pro-table-toolbar" data-e2e-action="create">新建地址池</button></div><table class="ant-table"><thead><tr><th>名称</th><th>操作</th></tr></thead><tbody><tr class="ant-table-row" data-testid="site-ip-port-pool-row" data-row-key="pool-42"><td>pool-a</td><td data-column-key="option"><button id="business-row-edit" class="ant-btn" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr></tbody></table></section>
+<div class="ant-form-item" data-testid="site-ip-port-pool-vrf-field" data-e2e-component="pro-form-field" data-e2e-field-name="destVrfId" data-e2e-field-kind="select" data-e2e-form-kind="modal-form"><div class="ant-form-item-label"><label>目的 VRF</label></div><div id="business-vrf-select" class="ant-select" data-testid="site-ip-port-pool-vrf-select" data-e2e-component="select"><div class="ant-select-selector" role="combobox" aria-label="目的 VRF"><span>请选择 VRF</span></div></div></div>
+<div id="business-unknown-hint" data-testid="custom-widget-root" data-e2e-component="company-owned-widget"><span>自定义业务控件</span></div>
+<div class="ant-form-item" data-testid="site-unmapped-select-field" data-e2e-field-name="unmappedSelect" data-e2e-field-kind="select"><div class="ant-form-item-label"><label>未映射选择器</label></div><div id="business-unmapped-select" class="ant-select" data-testid="site-unmapped-select" data-e2e-component="company-select"><div class="ant-select-selector" role="combobox"><span>请选择</span></div></div></div>
+<button id="business-non-table-create" data-testid="business-non-table-create" data-e2e-role="page-action" data-e2e-action="create">全局创建</button>
+<section class="ant-pro-table" data-test-id="business-alt-table" data-e2e-component="pro-table"><table class="ant-table"><tbody><tr class="ant-table-row" data-row-key="alt-1"><td>Alt</td><td data-column-key="option"><button id="business-alt-table-edit" class="ant-btn" data-e2e-component="pro-table" data-e2e-action="edit">编辑</button></td></tr></tbody></table></section>
 </body></html>`;
 }
