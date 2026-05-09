@@ -27,4 +27,3 @@ For every PR, reviewers must ask:
 - `src/server/recorder/crxPlayer.ts`: runtime bridge only.
 - `interactions/*`: transaction composition.
 - `replay/*`: recipe-based rendering.
-```

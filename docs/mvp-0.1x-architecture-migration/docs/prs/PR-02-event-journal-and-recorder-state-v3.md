@@ -13,9 +13,12 @@ Current `artifacts.recorder.actionLog` is useful but only models Playwright reco
 Add:
 
 ```text
-examples/recorder-crx/src/flow/eventTypes.ts
+examples/recorder-crx/src/capture/eventEnvelope.ts
+examples/recorder-crx/src/capture/recorderActionNormalizer.ts
 examples/recorder-crx/src/flow/eventJournal.ts
 ```
+
+Path decision: raw event envelope and recorder action normalization belong under `capture/`; the flow layer owns the journal/state/projection. Do not create `examples/recorder-crx/src/flow/eventTypes.ts` as the raw event type entry point.
 
 Modify:
 
@@ -43,8 +46,9 @@ Do not remove `actionLog` yet. Journal is additive.
 
 ## Implementation steps
 
-1. Add event envelope types.
-2. Add helpers:
+1. Add event envelope types under `capture/eventEnvelope.ts`.
+2. Add recorder action normalization under `capture/recorderActionNormalizer.ts`.
+3. Add helpers:
 
 ```ts
 ensureEventJournal(recorder)
@@ -53,9 +57,9 @@ appendPageContextEvents(recorder, events)
 eventJournalStats(recorder)
 ```
 
-3. Update `mergeActionsIntoFlow()` to append recorder action entries to journal in addition to actionLog.
-4. Update `appendSyntheticPageContextStepsWithResult()` to append consumed page context event refs to journal if available.
-5. Migration: legacy recorder state gets `version: 3` and empty journal.
+4. Update `mergeActionsIntoFlow()` to append recorder action entries to journal in addition to actionLog.
+5. Update `appendSyntheticPageContextStepsWithResult()` to append consumed page context event refs to journal if available.
+6. Migration: legacy recorder state gets `version: 3` and empty journal.
 
 ## Do not
 

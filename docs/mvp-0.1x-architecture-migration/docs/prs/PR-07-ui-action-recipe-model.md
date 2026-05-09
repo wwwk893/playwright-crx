@@ -6,21 +6,18 @@ Introduce UiActionRecipe as the shared semantic contract between FlowStep and re
 
 ## Files
 
-Add:
+Create/modify:
 
 ```text
-examples/recorder-crx/src/replay/recipes.ts
+examples/recorder-crx/src/uiSemantics/recipes.ts
+examples/recorder-crx/src/replay/types.ts
 examples/recorder-crx/src/replay/recipeBuilder.ts
-```
-
-Modify:
-
-```text
 examples/recorder-crx/src/flow/types.ts
 examples/recorder-crx/src/flow/businessFlowProjection.ts
-examples/recorder-crx/src/uiSemantics/**
 examples/recorder-crx/src/flow/stepStability.test.ts
 ```
+
+Path decision: `UiActionRecipe` domain types live in `uiSemantics/recipes.ts`. `replay/types.ts` may re-export recipe types and define renderer-specific types such as `RenderOptions`, `RenderedAction`, and `RuntimeBridgeKind`. `replay/recipeBuilder.ts` builds recipes from FlowStep / transaction / semantic context. Do not create a separate `replay/recipes.ts` model unless a later architecture review explicitly changes this decision.
 
 ## Type
 
@@ -39,8 +36,11 @@ export interface UiActionRecipe {
 
 ## Implementation
 
-1. Add `uiRecipe?: UiActionRecipe` to FlowStep.
-2. Build recipe during projection for:
+1. Define or extend `UiActionRecipe` in `uiSemantics/recipes.ts`.
+2. Add `uiRecipe?: UiActionRecipe` to FlowStep.
+3. Re-export renderer-facing recipe types from `replay/types.ts` if needed.
+4. Add `replay/recipeBuilder.ts` as the single recipe construction entry point.
+5. Build recipe during projection for:
    - Input fill
    - AntD Select option
    - TreeSelect
@@ -48,7 +48,7 @@ export interface UiActionRecipe {
    - Table row action
    - Popconfirm confirm
    - Switch/Checkbox
-3. Do not yet fully rewrite codePreview; allow renderer to fallback to old logic if no recipe.
+6. Do not yet fully rewrite codePreview; allow renderer to fallback to old logic if no recipe.
 
 ## Tests
 

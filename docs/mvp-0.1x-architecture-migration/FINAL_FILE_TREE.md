@@ -136,4 +136,3 @@ By the end of PR-12:
 - `crxRecorder.tsx` must not contain session finalization or transaction logic.
 - Low-level typing events must not directly become business steps.
 - Exported Playwright and parser-safe runtime playback must share `UiActionRecipe`.
-```
