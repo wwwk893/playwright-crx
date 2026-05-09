@@ -305,7 +305,7 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
           this._sendRuntimeEvent('runtime.playback-request', event === 'step' ? '请求单步执行 Playwright 代码' : '请求运行 Playwright 代码', {
             event,
             filename: this._filename,
-            playerAlreadyRunning: this._crx.player.isPlaying(),
+            playerAlreadyRunning: this._playbackRunning || this._crx.player.isPlaying(),
           });
           this._run().catch(error => this._sendRuntimeEvent('runtime.playback-error', 'Playwright 回放启动失败', {
             message: error?.message ?? String(error),
@@ -326,36 +326,42 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
   }
 
   async _run() {
-    if (this._crx.player.isPlaying()) {
+    if (this._playbackRunning || this._crx.player.isPlaying()) {
       this._sendRuntimeEvent('runtime.playback-skip', 'Playwright 正在回放，本次运行请求已忽略', undefined, 'warn');
       return;
     }
-    const activeTabAttach = this._pendingReplayAttach;
-    await activeTabAttach?.catch(() => {});
-    const incognito = this._playInIncognito;
-    if (incognito && !activeTabAttach) {
-      const incognitoCrxApp = await this._crx.get({ incognito });
-      await incognitoCrxApp?.close({ closeWindows: true });
+    this._playbackRunning = true;
+    try {
+      const activeTabAttach = this._pendingReplayAttach;
+      await activeTabAttach?.catch(() => {});
+      const incognito = this._playInIncognito;
+      if (incognito && !activeTabAttach) {
+        const incognitoCrxApp = await this._crx.get({ incognito });
+        await incognitoCrxApp?.close({ closeWindows: true });
+      }
+      const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito }, serverSideCallMetadata());
+      const actions = this._getActions();
+      this._sendRuntimeEvent('runtime.playback-actions', actions.length ? `准备执行 ${actions.length} 个 Playwright action` : '没有可执行的 Playwright action', {
+        actionCount: actions.length,
+        filename: this._filename,
+        editedCodeLoaded: this._editedCode?.hasLoaded(),
+        editedCodeHasErrors: this._editedCode?.hasErrors(),
+        editedCodeError: this._editedCode?.loadError(),
+        actions: actions.map(actionSummary),
+      }, actions.length ? 'info' : 'warn');
+      if (!actions.length)
+        return;
+      const playbackPage = crxApp.activePage();
+      this._sendRuntimeEvent('runtime.playback-target', playbackPage ? 'Playwright 回放将运行在最近附加的业务页面' : 'Playwright 回放未找到已附加业务页面，将回退到浏览器上下文', {
+        tabId: playbackPage ? crxApp.tabIdForPage(playbackPage) : undefined,
+        url: playbackPage?.mainFrame().url(),
+        contextPageCount: crxApp._context.pages().length,
+      }, playbackPage ? 'info' : 'warn');
+      await this._crx.player.run(playbackPage ?? crxApp._context, actions);
+    } finally {
+      if (!this._crx.player.isPlaying())
+        this._playbackRunning = false;
     }
-    const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito }, serverSideCallMetadata());
-    const actions = this._getActions();
-    this._sendRuntimeEvent('runtime.playback-actions', actions.length ? `准备执行 ${actions.length} 个 Playwright action` : '没有可执行的 Playwright action', {
-      actionCount: actions.length,
-      filename: this._filename,
-      editedCodeLoaded: this._editedCode?.hasLoaded(),
-      editedCodeHasErrors: this._editedCode?.hasErrors(),
-      editedCodeError: this._editedCode?.loadError(),
-      actions: actions.map(actionSummary),
-    }, actions.length ? 'info' : 'warn');
-    if (!actions.length)
-      return;
-    const playbackPage = crxApp.activePage();
-    this._sendRuntimeEvent('runtime.playback-target', playbackPage ? 'Playwright 回放将运行在最近附加的业务页面' : 'Playwright 回放未找到已附加业务页面，将回退到浏览器上下文', {
-      tabId: playbackPage ? crxApp.tabIdForPage(playbackPage) : undefined,
-      url: playbackPage?.mainFrame().url(),
-      contextPageCount: crxApp._context.pages().length,
-    }, playbackPage ? 'info' : 'warn');
-    await this._crx.player.run(playbackPage ?? crxApp._context, actions);
   }
 
   private async _attachActiveTabForReplay() {
