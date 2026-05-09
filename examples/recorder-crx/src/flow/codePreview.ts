@@ -843,7 +843,8 @@ function emitStep(lines: string[], step: FlowStep, indent: string, segment?: Flo
     lines.push(`${indent}// ${step.id} has no runnable Playwright action source.`);
   }
 
-  for (const assertion of step.assertions.filter(assertion => assertion.enabled && (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion))))
+  const emittedAssertions = stepAssertionsForEmission(step, options);
+  for (const assertion of emittedAssertions)
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
 }
 
@@ -851,12 +852,48 @@ function countStepActions(step: FlowStep, options: EmitStepOptions = {}) {
   const sourceActionCount = sourceCodeForStep(step, options)
       ?.filter(line => isRunnableLine(line))
       .length ?? 0;
-  const assertionActionCount = step.assertions
-      .filter(assertion => assertion.enabled && !isTerminalAssertionParserUnsafe(assertion))
+  const assertionActionCount = stepAssertionsForEmission(step, options)
       .map(renderAssertion)
       .filter(line => isRunnableLine(line))
       .length;
   return sourceActionCount + assertionActionCount;
+}
+
+function stepAssertionsForEmission(step: FlowStep, options: EmitStepOptions = {}) {
+  return step.assertions.filter(assertion => assertion.enabled && (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion)) && !isNoisyDropdownOptionSelectedValueAssertion(step, assertion));
+}
+
+function isNoisyDropdownOptionSelectedValueAssertion(step: FlowStep, assertion: FlowAssertion) {
+  if (assertion.type !== 'selected-value-visible')
+    return false;
+  const generatedSource = sourceCodeForStep(step)?.join('\n') || '';
+  const optionLike = isDropdownOptionLikeClick(step) || /ant-select-dropdown|ant-cascader-menu|ant-tree-select-dropdown/.test(generatedSource);
+  if (step.action !== 'click' || !optionLike)
+    return false;
+  const expected = stringParam(assertion.expected || assertion.params?.expected);
+  if (!expected)
+    return false;
+  const optionText = rawSelectOptionTitle(step) || step.context?.before.target?.text || step.context?.before.target?.normalizedText || step.target?.text || step.target?.name || step.target?.displayName || '';
+  const normalizedExpected = normalizeGeneratedText(expected) || '';
+  const normalizedOption = normalizeGeneratedText(optionText) || '';
+  if (!normalizedExpected || normalizedExpected === normalizedOption)
+    return false;
+  const noisyLength = normalizedExpected.length > Math.max(60, normalizedOption.length * 4);
+  if (!noisyLength)
+    return false;
+  return true;
+}
+
+function isDropdownOptionLikeClick(step: FlowStep) {
+  const controlType = step.context?.before.target?.controlType || '';
+  if (/(select|tree-select|cascader)-option/.test(controlType))
+    return true;
+  if (step.target?.role === 'option')
+    return true;
+  if (rawSelectOptionTitle(step))
+    return true;
+  const haystack = JSON.stringify({ rawAction: step.rawAction, raw: step.target?.raw, sourceCode: step.sourceCode }).toLowerCase();
+  return /select-dropdown|tree-select-dropdown|cascader|role=option|internal:attr=\[title=/.test(haystack);
 }
 
 function isRunnableLine(line: string) {

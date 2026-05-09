@@ -5287,7 +5287,14 @@ test('demo', async ({ page }) => {
           },
           rawAction: { action: { name: 'click', selector: 'internal:attr=[title="WAN1"s] >> div' } },
           sourceCode: `await page.locator('[title="WAN1"]').locator('div').click();`,
-          assertions: [],
+          assertions: [{
+            id: 'assert-noisy-selected-value',
+            type: 'selected-value-visible',
+            subject: 'element',
+            target: { testId: 'stability-wan-select' },
+            expected: '业务流程稳定性测试页 新增IP端口池 校验配置 保存配置 保存后动作 地址池名称 共享WAN 使用备注 地址池名称 共享WAN 备注 pool-alpha --...',
+            enabled: true,
+          }],
         }],
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
@@ -5296,6 +5303,7 @@ test('demo', async ({ page }) => {
       assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'noisy option click should replay through the active dropdown');
       assert(optionStep.includes('WAN1'), 'raw option title should survive noisy page-text capture');
       assert(!optionStep.includes('filter({ hasText: "地址池名称" }).locator(".ant-select-selector")'), 'noisy option click should not be misread as another form select trigger');
+      assert(!optionStep.includes('业务流程稳定性测试页 新增IP端口池 校验配置 保存配置 保存后动作'), 'noisy selected-value assertions should not leak page-text capture into generated replay');
     },
   },
   {
