@@ -95,7 +95,7 @@ export function buildSuggestion(steps: FlowStep[], index: number): AssertionEdit
   const rowKeyword = previousValues[0];
 
   if (step.action === 'click' && rowKeyword && /确定|确认|新增|新建|添加|OK/i.test(targetText)) {
-    const tableArea = /wan/i.test(rowKeyword) ? '共享 WAN 表格' : '当前表格/列表';
+    const tableArea = '当前表格/列表';
     return {
       subject: 'table',
       type: 'tableRowExists',

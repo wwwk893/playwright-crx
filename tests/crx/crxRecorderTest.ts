@@ -15,6 +15,8 @@
  */
 
 import path from 'path';
+import { promises as fs } from 'fs';
+import type { TestInfo } from '@playwright/test';
 import type { Page, Locator } from 'playwright-core';
 import { test as crxTest, expect } from './crxTest';
 import { sourceLines } from './utils';
@@ -30,6 +32,133 @@ type RecorderMode = 'legacy' | 'business-flow';
 type AttachRecorderOptions = {
   mode?: RecorderMode;
 };
+
+type RecorderDiagnosticsSnapshot = {
+  recorderJsonl: string;
+  runtimeJsonl: string;
+  recorderCount: number;
+  runtimeCount: number;
+  source: 'window' | 'localStorage' | 'none';
+};
+
+const diagnosticStorageKey = 'playwright-crx:recorder-diagnostics';
+
+async function readRecorderDiagnosticsSnapshot(recorderPage: Page): Promise<RecorderDiagnosticsSnapshot> {
+  if (recorderPage.isClosed()) {
+    return {
+      recorderJsonl: '',
+      runtimeJsonl: '',
+      recorderCount: 0,
+      runtimeCount: 0,
+      source: 'none',
+    };
+  }
+  return await recorderPage.evaluate(key => {
+    type BrowserRecorderDiagnosticLog = {
+      id?: number;
+      time?: string;
+      type?: string;
+      message?: string;
+      level?: string;
+      data?: Record<string, unknown>;
+    };
+    const targetWindow = window as typeof window & {
+      __playwrightCrxRecorderDiagnostics?: BrowserRecorderDiagnosticLog[];
+    };
+    const parseJsonl = (text: string | null): BrowserRecorderDiagnosticLog[] => {
+      if (!text)
+        return [];
+      return text.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as BrowserRecorderDiagnosticLog);
+    };
+    let logs = Array.isArray(targetWindow.__playwrightCrxRecorderDiagnostics) ? targetWindow.__playwrightCrxRecorderDiagnostics : [];
+    let source: 'window' | 'localStorage' | 'none' = logs.length ? 'window' : 'none';
+    if (!logs.length) {
+      logs = parseJsonl(window.localStorage.getItem(key));
+      source = logs.length ? 'localStorage' : 'none';
+    }
+    const jsonl = (entries: BrowserRecorderDiagnosticLog[]) => entries.map(entry => JSON.stringify(entry)).join('\n') + (entries.length ? '\n' : '');
+    const runtimeLogs = logs.filter(log => typeof log.type === 'string' && log.type.startsWith('runtime.'));
+    return {
+      recorderJsonl: jsonl(logs),
+      runtimeJsonl: jsonl(runtimeLogs),
+      recorderCount: logs.length,
+      runtimeCount: runtimeLogs.length,
+      source,
+    };
+  }, diagnosticStorageKey);
+}
+
+async function persistRecorderDiagnosticsArtifacts(testInfo: TestInfo, recorderPages: Page[]) {
+  const uniquePages = recorderPages.filter((page, index) => !page.isClosed() && recorderPages.indexOf(page) === index);
+  if (!uniquePages.length)
+    return;
+  for (let index = 0; index < uniquePages.length; index++) {
+    const suffix = uniquePages.length > 1 ? `-${index + 1}` : '';
+    const snapshot = await readRecorderDiagnosticsSnapshot(uniquePages[index]).catch(error => ({
+      recorderJsonl: '',
+      runtimeJsonl: '',
+      recorderCount: 0,
+      runtimeCount: 0,
+      source: 'none' as const,
+      exportError: error instanceof Error ? error.message : String(error),
+    }));
+    const artifacts = [
+      { name: `playwright-runtime${suffix}.jsonl`, body: snapshot.runtimeJsonl },
+      { name: `recorder-diagnostics${suffix}.jsonl`, body: snapshot.recorderJsonl },
+      {
+        name: `recorder-diagnostics-summary${suffix}.json`,
+        body: JSON.stringify({
+          recorderCount: snapshot.recorderCount,
+          runtimeCount: snapshot.runtimeCount,
+          source: snapshot.source,
+          exportError: 'exportError' in snapshot ? snapshot.exportError : undefined,
+        }, null, 2),
+      },
+    ];
+    for (const artifact of artifacts) {
+      const filePath = testInfo.outputPath(artifact.name);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, artifact.body, 'utf8');
+    }
+  }
+}
+
+async function attachRecorderDiagnosticsOnFailure(testInfo: TestInfo, recorderPages: Page[], failed = false) {
+  if (!failed && testInfo.status === testInfo.expectedStatus && !testInfo.errors.length)
+    return;
+  const uniquePages = recorderPages.filter((page, index) => !page.isClosed() && recorderPages.indexOf(page) === index);
+  if (!uniquePages.length)
+    return;
+  for (let index = 0; index < uniquePages.length; index++) {
+    const suffix = uniquePages.length > 1 ? `-${index + 1}` : '';
+    try {
+      const snapshot = await readRecorderDiagnosticsSnapshot(uniquePages[index]);
+      await testInfo.attach(`playwright-runtime${suffix}.jsonl`, {
+        body: snapshot.runtimeJsonl,
+        contentType: 'application/jsonl',
+      });
+      await testInfo.attach(`recorder-diagnostics${suffix}.jsonl`, {
+        body: snapshot.recorderJsonl,
+        contentType: 'application/jsonl',
+      });
+      await testInfo.attach(`recorder-diagnostics-summary${suffix}.json`, {
+        body: JSON.stringify({
+          recorderCount: snapshot.recorderCount,
+          runtimeCount: snapshot.runtimeCount,
+          source: snapshot.source,
+        }, null, 2),
+        contentType: 'application/json',
+      });
+    } catch (error) {
+      await testInfo.attach(`recorder-diagnostics-summary${suffix}.json`, {
+        body: JSON.stringify({
+          exportError: error instanceof Error ? error.message : String(error),
+        }, null, 2),
+        contentType: 'application/json',
+      });
+    }
+  }
+}
 
 type SettingOptions = {
   testIdAttributeName?: string,
@@ -91,13 +220,14 @@ export const test = crxTest.extend<{
   recordAction<T = void>(action: () => Promise<T>): Promise<T>;
   recordAssertion(locator: Locator, type: AssertAction['name']): Promise<void>;
   configureRecorder: (config: SettingOptions) => Promise<void>;
+  _autoRecorderDiagnosticsOnFailure: void;
       }>({
         extensionPath: path.join(__dirname, '../../examples/recorder-crx/dist'),
 
         attachRecorder: async ({ extensionServiceWorker, extensionId, context }, run) => {
+          const extensionOrigin = `chrome-extension://${extensionId}`;
           await run(async (page: Page, options: AttachRecorderOptions = {}) => {
             const mode = options.mode ?? 'legacy';
-            const extensionOrigin = `chrome-extension://${extensionId}`;
             const expectedSurface = mode === 'legacy' ? '.recorder-editor' : '.business-flow-panel';
             await extensionServiceWorker.evaluate(async mode => {
               await chrome.storage.sync.set({ businessFlowEnabled: mode === 'business-flow' });
@@ -183,8 +313,11 @@ export const test = crxTest.extend<{
 
         recorderPage: async ({ page, attachRecorder }, run) => {
           const recorderPage = await attachRecorder(page);
-          await run(recorderPage);
-          await recorderPage.close();
+          try {
+            await run(recorderPage);
+          } finally {
+            await recorderPage.close();
+          }
         },
 
         recordAction: async ({ recorderPage }, run) => {
@@ -236,6 +369,21 @@ export const test = crxTest.extend<{
             });
           });
         },
+
+        _autoRecorderDiagnosticsOnFailure: [async ({ context, extensionId }, use, testInfo) => {
+          const extensionOrigin = `chrome-extension://${extensionId}`;
+          let failed = false;
+          try {
+            await use();
+          } catch (error) {
+            failed = true;
+            throw error;
+          } finally {
+            const recorderPages = context.pages().filter(page => !page.isClosed() && page.url().startsWith(extensionOrigin));
+            await persistRecorderDiagnosticsArtifacts(testInfo, recorderPages);
+            await attachRecorderDiagnosticsOnFailure(testInfo, recorderPages, failed);
+          }
+        }, { auto: true }],
 
         configureRecorder: async ({ context, extensionId }, run) => {
           await run(async ({ testIdAttributeName, targetLanguage, playInIncognito, experimental, businessFlowEnabled }: SettingOptions) => {

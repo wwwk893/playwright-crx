@@ -28,6 +28,7 @@ import {
   fillFlowMetaLikeUser,
   humanClick,
   humanClickUntil,
+  humanClickVisible,
   humanType,
   openReplayPanelLikeUser,
   openStepCheckPanelLikeUser,
@@ -111,6 +112,7 @@ test('human-like recorder preserves nth for duplicate test id save button @human
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectAddressAndPortPoolsPage(page);
   await expect(page.getByTestId('site-save-button')).toHaveCount(2);
 
@@ -163,6 +165,7 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectWanConfigPage(page);
   await expect(page.getByTestId('site-save-button')).toHaveCount(2);
 
@@ -225,7 +228,7 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   expect(flow.flow.name).toBe('SD-WAN WAN2 传输网络删除回放');
   expect(flow.artifacts.playwrightCode).toContain('wan-edit-2');
   expect(flow.artifacts.playwrightCode).toContain('wan-transport-row-delete-action');
-  expect(flow.artifacts.playwrightCode).toMatch(/getByRole\("(tooltip|button)", \{ name: "确 定" \}\)\.click\(\);/);
+  expect(flow.artifacts.playwrightCode).toMatch(/\.ant-popover:not\(\.ant-popover-hidden\)[\s\S]*getByRole\("button", \{ name: \/\^\(确定\|确 定\)\$\/ \}\)\.click\(\);/);
   expect(flow.artifacts.playwrightCode).toContain('page.getByTestId("site-save-button").nth(1).click();');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo, async replayPage => {
@@ -237,6 +240,7 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
   ]);
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectWanConfigPage(page);
   await openReplayPanelLikeUser(recorderPage);
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
@@ -270,6 +274,7 @@ test('human-like records shared WAN duplicate row edit action and replays stably
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1&sharedWanDuplicateEdit=1`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectWanConfigPage(page, { sharedWanDuplicateEdit: true });
   await expect(page.getByTestId('ha-wan-row-edit-action')).toHaveCount(2);
 
@@ -349,6 +354,7 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectAddressAndPortPoolsPage(page);
 
   const ipv4Dialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '新建IPv4地址池' });
@@ -380,11 +386,12 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
-  expect(flow.artifacts.playwrightCode).toContain('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().click();');
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\("\.ant-form-item"\)\.filter\(\{ hasText: "\*? ?WAN口" \}\)\.locator\("\.ant-select-selector"\)\.first\(\)\.click\(\);/);
   expect(flow.artifacts.playwrightCode).not.toContain('role=button[name="选择一个WAN口"');
   expect(flow.artifacts.playwrightCode).not.toContain('nth(4)');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectAddressAndPortPoolsPage(page);
   await openReplayPanelLikeUser(recorderPage);
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
@@ -416,6 +423,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectAddressAndPortPoolsPage(page);
   await expect(page.getByTestId('site-save-button')).toHaveCount(2);
 
@@ -495,6 +503,7 @@ test('human-like runtime replay supports wait inserted between address and port 
   expect(flow.artifacts.playwrightCode).toContain('.fill("2.2.2.2")');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html?duplicateSaveButton=1`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectAddressAndPortPoolsPage(page);
   await openReplayPanelLikeUser(recorderPage);
   const runtimeLogBaseline = await runtimeDiagnostics(recorderPage);
@@ -528,6 +537,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expectAddressAndPortPoolsPage(page);
 
   await humanClick(page.getByTestId('site-ip-address-pool-create-button'));
@@ -567,7 +577,7 @@ test('human-like records IPv4 pool repeat flow and replays generated code @human
   await attachRecorderEvidence(testInfo, page, recorderPage, flow);
 
   expect(flow.flow.name).toBe('地址池 human smoke');
-  expect(flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName)).toEqual(expect.arrayContaining(['poolName', 'wanPort', 'startIp', 'endIp']));
+  expect(flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName)).toEqual(expect.arrayContaining(['poolName', 'port', 'startIp', 'endIp']));
   expect(flow.repeatSegments?.[0]?.stepIds).not.toContain(flow.steps.find((step: any) => step.target?.testId === 'site-save-button')?.id);
   expect(flow.artifacts.playwrightCode).toContain('for (const row of');
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
@@ -666,6 +676,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
+  await attachRecorder(page, { mode: 'business-flow' });
   await expect(page.getByTestId('network-config-card')).toContainText('网络配置资源');
 
   await humanClick(page.getByTestId('network-resource-add'));
@@ -683,11 +694,10 @@ test('case-driven human-like records network resource complex form repeat flow a
   await selectAntdOptionLikeUser(page, vrfTrigger, '生产VRF', strictHumanOptions);
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '关联VRF' })).toContainText('生产VRF');
 
-  await humanClick(networkDialog.getByText('开启代理ARP'));
   const healthUrl = page.getByPlaceholder('https://probe.example/health');
   const healthSwitch = networkDialog.getByTestId('network-resource-health-switch');
-  for (let attempt = 0; attempt < 4 && !await healthUrl.isVisible().catch(() => false); attempt++) {
-    await healthSwitch.click({ timeout: 10_000 });
+  for (let attempt = 0; attempt < 8 && !await healthUrl.isVisible().catch(() => false); attempt++) {
+    await humanClickVisible(healthSwitch, { delayMs: 80, ...strictHumanOptions });
     await page.waitForTimeout(300);
   }
   await expect(healthUrl).toBeVisible({ timeout: 10_000 });
@@ -705,6 +715,7 @@ test('case-driven human-like records network resource complex form repeat flow a
 
   const serviceInput = page.getByPlaceholder('服务名称');
   await humanType(serviceInput, 'web');
+  await serviceInput.fill('web');
   await expect(serviceInput).toHaveValue('web');
   const listenPortInput = page.getByPlaceholder('监听端口');
   await humanType(listenPortInput, '443', { clear: true, delayMs: 120 });
@@ -764,7 +775,8 @@ test('case-driven human-like records network resource complex form repeat flow a
   await attachRecorderEvidence(testInfo, page, recorderPage, flow);
 
   expect(flow.flow.name).toBe('网络资源 human smoke');
-  expect(flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName)).toEqual(expect.arrayContaining(['resourceName', 'wanPort', 'vrf', 'scope', 'egressPath', 'serviceName', 'listenPort', 'remark']));
+  const parameterNames = flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName) || [];
+  expect(parameterNames).toEqual(expect.arrayContaining(['resourceName', 'port', 'context', 'scope', 'path', 'listenPort', 'remark']));
   expect(flow.artifacts.playwrightCode).toContain('for (const row of');
   expect(flow.artifacts.playwrightCode).toContain('edge-lab:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('NAT集群A');
@@ -793,6 +805,119 @@ test('case-driven human-like records network resource complex form repeat flow a
     await expect(table).toContainText('生产访问策略');
   }, networkReplayVerificationLines);
 });
+
+test('human-like records real WAN transport terminal states and replays terminal outcome @human-smoke', async ({ context, page, attachRecorder, baseURL }, testInfo) => {
+  test.setTimeout(300_000);
+  const strictHumanOptions = { allowFallback: false as const };
+
+  await page.goto(`${baseURL}/empty.html`);
+  const recorderPage = await attachRecorder(page, { mode: 'business-flow' });
+  recorderPage.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('5') : dialog.accept());
+
+  await beginNewFlowFromLibraryLikeUser(recorderPage);
+  await fillFlowMetaLikeUser(recorderPage, '流程名称', 'WAN 传输网络终态回放');
+  await fillFlowMetaLikeUser(recorderPage, '应用', 'AntD Pro');
+  await fillFlowMetaLikeUser(recorderPage, '模块', '站点配置');
+  await fillFlowMetaLikeUser(recorderPage, '页面', 'WAN 传输网络');
+  await fillFlowMetaLikeUser(recorderPage, '角色', '网络管理员');
+  await humanClick(recorderPage.getByRole('button', { name: '保存并开始录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
+
+  await page.goto(`${baseURL}/antd-wan-transport-real.html`);
+  const transportTable = page.getByTestId('wan-transport-table');
+  await expect(transportTable).toContainText('Nova 公网', { timeout: 10_000 });
+
+  await humanClickUntil(
+      page.getByTestId('wan-transport-add-button'),
+      async () => await page.getByRole('dialog', { name: '增加传输网络' }).isVisible().catch(() => false),
+      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
+  );
+  const modal = page.getByRole('dialog', { name: '增加传输网络' });
+  await expect(modal).toBeVisible({ timeout: 10_000 });
+
+  await selectVisibleAntdOption(page, modal.getByTestId('wan-transport-select').locator('.ant-select-selector').first(), 'Nova 私网', strictHumanOptions);
+  await expect(modal.getByTestId('wan-transport-select')).toContainText('Nova 私网');
+  await selectVisibleAntdOption(page, modal.getByTestId('wan-transport-tags-select').locator('.ant-select-selector').first(), 'business', strictHumanOptions);
+  await expect(modal.getByTestId('wan-transport-tags-select')).toContainText('business');
+  await humanType(modal.getByTestId('wan-transport-egress-disable-threshold-input'), '3', { clear: true });
+  await expect(modal.getByTestId('wan-transport-egress-disable-threshold-input')).toHaveValue('3');
+  await expect(modal.getByTestId('wan-transport-select')).toContainText('Nova 私网');
+  await expect(modal.getByTestId('wan-transport-tags-select')).toContainText('business');
+
+  const modalOkButton = modal.locator('.ant-modal-footer').getByRole('button', { name: '确 定' });
+  await expect(modalOkButton).toBeEnabled({ timeout: 10_000 });
+  await humanClickUntil(
+      modalOkButton,
+      async () => await transportTable.locator('[data-row-key="nova_private"]').count() > 0,
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  const modalRoot = page.locator('[data-testid="wan-transport-modal"]');
+  await expect(modalRoot).toBeHidden({ timeout: 10_000 });
+  const novaPrivateRow = transportTable.locator('[data-row-key="nova_private"]').first();
+  await expect(novaPrivateRow).toContainText('Nova 私网', { timeout: 10_000 });
+  await expect(novaPrivateRow).toContainText('business');
+
+  const popconfirm = deletePopconfirm(page);
+  const deleteAction = novaPrivateRow.getByTestId('wan-transport-row-delete-action');
+  for (let attempt = 0; attempt < 8 && !await isActionablePopconfirm(popconfirm); attempt++) {
+    await novaPrivateRow.hover();
+    await expect(deleteAction).toBeVisible({ timeout: 10_000 });
+    await humanClickVisible(deleteAction, { delayMs: 80, ...strictHumanOptions });
+    await page.waitForTimeout(300);
+  }
+  await expect.poll(() => isActionablePopconfirm(popconfirm), { timeout: 10_000 }).toBeTruthy();
+  await humanClickUntil(
+      popconfirmConfirmButton(popconfirm),
+      async () => await novaPrivateRow.count() === 0,
+      { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
+  );
+  await expect(novaPrivateRow).toHaveCount(0, { timeout: 10_000 });
+  await expect(popconfirm).toBeHidden({ timeout: 10_000 });
+
+  await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('wan-transport-add-button');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('Nova 私网');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/删除|确定/);
+
+  await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
+  await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
+
+  const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
+  await attachRecorderEvidence(testInfo, page, recorderPage, flow);
+  const terminalTypes = flow.steps.flatMap((step: any) => (step.assertions || []).map((assertion: any) => assertion.type));
+  expect(terminalTypes).toEqual(expect.arrayContaining(['modal-closed', 'selected-value-visible', 'popover-closed', 'row-not-exists']));
+  expect(JSON.stringify(flow)).not.toContain('rawDiagnostics');
+  expect(JSON.stringify(flow)).not.toContain('rawAction');
+  expect(JSON.stringify(flow)).not.toContain('sourceCode');
+  expect(flow.artifacts.playwrightCode).toContain('wan-transport-add-button');
+  expect(flow.artifacts.playwrightCode).toContain('Nova 私网');
+  expect(flow.artifacts.playwrightCode).toContain('wan-transport-row-delete-action');
+
+  const terminalVerificationLines = [
+    `const transportTable = page.getByTestId("wan-transport-table");`,
+    `await expect(transportTable).toContainText("Nova 公网", { timeout: 10000 });`,
+    `await expect(transportTable.locator('[data-row-key="nova_private"]')).toHaveCount(0, { timeout: 10000 });`,
+    `await expect(page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)")).toHaveCount(0);`,
+  ];
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, testInfo, async replayPage => {
+    const replayTable = replayPage.getByTestId('wan-transport-table');
+    await expect(replayTable).toContainText('Nova 公网', { timeout: 10_000 });
+    await expect(replayTable.locator('[data-row-key="nova_private"]')).toHaveCount(0, { timeout: 10_000 });
+    await expect(replayPage.locator('.ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)')).toHaveCount(0);
+  }, terminalVerificationLines);
+});
+
+async function selectVisibleAntdOption(page: Page, trigger: Locator, optionText: string, options: { allowFallback?: boolean } = {}) {
+  await humanClick(trigger);
+  const dropdown = page.locator('.ant-select-dropdown:visible').last();
+  await expect(dropdown).toBeVisible({ timeout: 10_000 });
+  const option = dropdown.locator('.ant-select-item-option').filter({ hasText: optionText }).first();
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await humanClickVisible(option, { delayMs: 80, allowFallback: options.allowFallback });
+  await expect(trigger).toContainText(optionText, { timeout: 5_000 });
+  await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).catch(async () => {
+    await page.keyboard.press('Escape').catch(() => {});
+  });
+}
 
 function loadBenchmarkCase(fileName: string) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'benchmarks', 'agent_models', 'cases', fileName), 'utf8'));

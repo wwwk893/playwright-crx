@@ -136,7 +136,7 @@ async function openPopupLikeUser(trigger: Locator, popup: Locator, options?: Hum
   await expect(popup).toBeVisible({ timeout: 2_000 });
 }
 
-async function humanClickVisible(locator: Locator, options?: HumanClickVisibleOptions) {
+export async function humanClickVisible(locator: Locator, options?: HumanClickVisibleOptions) {
   await expect(locator).toBeVisible({ timeout: 10_000 });
   const box = await stableBoundingBox(locator);
   if (!box) {

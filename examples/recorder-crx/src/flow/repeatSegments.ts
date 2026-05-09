@@ -117,7 +117,7 @@ function inferRepeatParameters(steps: FlowStep[]): FlowRepeatParameter[] {
 function selectFieldLabelCandidate(step: FlowStep) {
   const label = step.context?.before?.form?.label || step.target?.scope?.form?.label || step.target?.label || step.target?.name || step.target?.text || '';
   const role = step.target?.role || '';
-  if (step.action === 'click' && (/combobox|select/i.test(role) || /选择|select|WAN口|角色|类型|VRF|发布范围|出口路径/.test(label)))
+  if (step.action === 'click' && (/combobox|select/i.test(role) || /选择|select|角色|类型|范围|路径|标签|分类/i.test(label)))
     return label.trim() || undefined;
   return undefined;
 }
@@ -132,7 +132,7 @@ function contextLightSelectOptionValue(step: FlowStep) {
   const role = step.target?.role || '';
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const testId = step.target?.testId || step.context?.before.target?.testId || '';
-  if (/button|link|checkbox|radio|switch/i.test(role) || /checkbox|radio|switch/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
+  if (/button|link|checkbox|radio|switch|combobox|select/i.test(role) || /checkbox|radio|switch|^(select|tree-select|cascader)$/i.test(controlType) || /checkbox|radio|switch/i.test(testId))
     return undefined;
   return optionTextFromStep(step);
 }
@@ -250,21 +250,27 @@ function parameterLabel(step: FlowStep) {
   return step.context?.before?.form?.label ||
     step.target?.scope?.form?.label ||
     step.target?.label ||
-    step.target?.name ||
     step.target?.placeholder ||
+    contextOptionControlType(step) ||
+    step.target?.name ||
     step.target?.text ||
     rawTitleFromSelector(rawActionSelector(step)) ||
     summarizeTarget(step.target);
 }
 
+function contextOptionControlType(step: FlowStep) {
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  return /^(select-option|tree-select-option|cascader-option|menu-item)$/.test(controlType) ? controlType : undefined;
+}
+
 function variableNameFor(label: string, value?: string) {
   const source = `${label} ${value ?? ''}`;
-  if (/发布范围|scope|华东生产区|华南办公区|新加坡边缘区/i.test(source))
+  if (/tree-select|范围|scope|region|area/i.test(source))
     return 'scope';
-  if (/出口路径|egress|NAT集群|一号机房|二号机房|上海|深圳/i.test(source))
-    return 'egressPath';
-  if (/关联?VRF|\bVRF\b|生产VRF|办公VRF|灾备VRF/i.test(source))
-    return 'vrf';
+  if (/cascader-option|路径|path|egress/i.test(source))
+    return 'path';
+  if (/关联|上下文|context|namespace/i.test(source))
+    return 'context';
   if (/资源名称|resourceName/i.test(source) || /^res[-_]/i.test(value ?? ''))
     return 'resourceName';
   if (/服务名称|service/i.test(source))
@@ -285,8 +291,8 @@ function variableNameFor(label: string, value?: string) {
     return 'remark';
   if (/描述|comment|description/i.test(source))
     return 'description';
-  if (/wan/i.test(source))
-    return 'wanPort';
+  if (/接口|端口|口|port/i.test(source))
+    return 'port';
   if (/类型|type/i.test(source))
     return 'type';
   if (/起始|开始|start/i.test(source))
@@ -306,7 +312,7 @@ function sampleValue(parameter: FlowRepeatParameter, rowIndex: number) {
     return value;
   if (parameter.variableName === 'poolName')
     return numberedValue(value, rowIndex + 1, 'pool-test');
-  if (/^(wanPort|role|vrf|scope|egressPath|type)/.test(parameter.variableName))
+  if (/^(port|role|context|scope|path|type)/.test(parameter.variableName))
     return value;
   if (parameter.variableName === 'startIp')
     return ipValue(value, rowIndex + 1, 1);

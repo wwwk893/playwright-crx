@@ -49,6 +49,7 @@ import { mergePageContextIntoFlow, normalizeIntentSources } from './flow/flowCon
 import { deleteRepeatSegment, upsertRepeatSegment } from './flow/repeatSegments';
 import { toCompactFlow } from './flow/compactExporter';
 import { prepareBusinessFlowForExport } from './flow/exportSanitizer';
+import { appendTerminalStateAssertions } from './flow/terminalAssertions';
 import { flowStats } from './flow/display';
 import { downloadText, safeFilename } from './flow/download';
 import { redactBusinessFlow } from './flow/redactor';
@@ -272,14 +273,17 @@ function buildPickedAssertionTarget(pendingPick: PendingAssertionPick, elementIn
 
 function inferPickedLabel(subject: FlowAssertionSubject, elementInfo: ElementInfo) {
   const content = `${elementInfo.selector}\n${elementInfo.ariaSnapshot}`;
+  const testId = firstRegexGroup(content, /(?:data-testid|data-test-id|data-e2e)[^=]*=["']?([^"'\]\s]+)/i);
   if (subject === 'table') {
-    if (/ha-wan-config-table|共享\s*WAN|WAN1|WAN2/i.test(content))
-      return '共享 WAN 表格';
+    if (testId)
+      return testId;
+    const title = cleanupPickedText(firstRegexGroup(content, /title=(?:"([^"]+)"|'([^']+)'|([^\]i]+))/i));
+    if (title)
+      return title;
     if (/table|grid/i.test(content))
       return '选中的表格/列表';
   }
 
-  const testId = firstRegexGroup(elementInfo.selector, /(?:data-testid|data-test-id|data-e2e)[^=]*=["']?([^"'\]\s]+)/i);
   if (testId)
     return testId;
   return cleanupPickedText(firstRegexGroup(elementInfo.selector, /title=(?:"([^"]+)"|'([^']+)'|([^\]i]+))/i)) ||
@@ -289,7 +293,7 @@ function inferPickedLabel(subject: FlowAssertionSubject, elementInfo: ElementInf
 
 function inferPickedRowKeyword(elementInfo: ElementInfo) {
   const content = `${elementInfo.selector}\n${elementInfo.ariaSnapshot}`;
-  return cleanupPickedText(firstRegexGroup(content, /\b(WAN\s*\d+)\b/i))?.replace(/\s+/g, '') ||
+  return cleanupPickedText(firstRegexGroup(content, /(?:data-row-key|row-key)[^=]*=["']?([^"'\]\s]+)/i)) ||
     cleanupPickedText(firstRegexGroup(content, /title=(?:"([^"]+)"|'([^']+)'|([^\]i]+))/i));
 }
 
@@ -361,6 +365,7 @@ type RecorderDiagnosticLog = MergeDiagnosticEvent & {
 };
 
 const diagnosticStorageKey = 'playwright-crx:recorder-diagnostics';
+const diagnosticPersistenceStorageKey = 'playwright-crx:persist-recorder-diagnostics';
 const maxDiagnosticLogEntries = 2000;
 
 function diagnosticLogsToJsonl(logs: RecorderDiagnosticLog[]) {
@@ -385,8 +390,18 @@ function sameNumberSet(left: Set<number>, right: Set<number>) {
   return true;
 }
 
+function shouldPersistDiagnosticLogs() {
+  try {
+    return window.localStorage.getItem(diagnosticPersistenceStorageKey) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 function loadPersistedDiagnosticLogs() {
   try {
+    if (!shouldPersistDiagnosticLogs())
+      return [];
     const text = window.localStorage.getItem(diagnosticStorageKey);
     if (!text)
       return [];
@@ -454,7 +469,10 @@ function exposeDiagnosticLogs(logs: RecorderDiagnosticLog[]) {
   };
   targetWindow.__playwrightCrxRecorderDiagnostics = logs;
   try {
-    window.localStorage.setItem(diagnosticStorageKey, diagnosticLogsToJsonl(logs.slice(-maxDiagnosticLogEntries)));
+    if (shouldPersistDiagnosticLogs())
+      window.localStorage.setItem(diagnosticStorageKey, diagnosticLogsToJsonl(logs.slice(-maxDiagnosticLogEntries)));
+    else
+      window.localStorage.removeItem(diagnosticStorageKey);
   } catch {
   }
 }
@@ -2027,7 +2045,7 @@ export const CrxRecorder: React.FC = ({
       return;
     }
 
-    const flushedFlow = await flushPageContextEventsNow();
+    const flushedFlow = appendTerminalStateAssertions(await flushPageContextEventsNow());
     const exportCodeText = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaywrightCode(flushedFlow);
     const flowWithCode = withPlaywrightCodeForExport(flushedFlow, exportCodeText);
     if (!hasEnabledAssertion(flowWithCode) && !window.confirm('当前流程还没有启用断言，仍然导出吗？'))
@@ -2145,7 +2163,7 @@ export const CrxRecorder: React.FC = ({
           exposeDiagnosticLogs(next);
           return next;
         })} disabled={!diagnosticLogs.length}>清空</button>
-        <span>刷新后保留；DevTools: window.__playwrightCrxRecorderDiagnostics</span>
+        <span>当前页面内保留；测试失败会自动导出，localStorage 持久化需显式开启</span>
       </div>
       {diagnosticLogs.length === 0 && <div className='business-flow-empty compact'>暂无诊断日志。</div>}
       {diagnosticLogs.slice().reverse().map(entry => <details className={`diagnostic-log-row ${entry.level === 'warn' ? 'warn' : ''}`} key={entry.id}>
@@ -2282,7 +2300,7 @@ export const CrxRecorder: React.FC = ({
               <FlowMetaPanel flow={flowDraft} onChange={updateFlowDraft} />
               <div className='template-chips'>
                 <span>从模板开始</span>
-                {['站点配置', 'WAN 配置', 'QoS 策略'].map(template => <button
+                {['资源配置', '网络配置', '策略配置'].map(template => <button
                   type='button'
                   key={template}
                   onClick={() => updateFlowDraft({

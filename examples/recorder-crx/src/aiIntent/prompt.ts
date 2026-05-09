@@ -35,18 +35,18 @@ export function buildTestConnectionInput(): AiIntentInput {
   return {
     flow: {
       name: 'AI Intent 测试',
-      module: '站点配置',
-      page: '共享 WAN',
+      module: '资源配置',
+      page: '资源列表',
       role: '管理员',
-      businessGoal: '创建共享 WAN',
+      businessGoal: '创建业务资源',
     },
     steps: [{
       stepId: 'test-001',
       order: 1,
       action: 'click',
       target: { role: 'button', text: '新建' },
-      before: { section: '共享 WAN' },
-      after: { dialog: '新建共享 WAN' },
+      before: { section: '资源列表' },
+      after: { dialog: '新建业务资源' },
     }],
   };
 }

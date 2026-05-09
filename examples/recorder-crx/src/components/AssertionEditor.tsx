@@ -247,7 +247,7 @@ export const AssertionEditor: React.FC<{
       </label>
       {subject === 'page' && <label>
         URL 期望
-        <input type='text' value={pageUrl} onChange={e => setPageUrl(e.target.value)} placeholder='/site/edit/testSharedWan' />
+        <input type='text' value={pageUrl} onChange={e => setPageUrl(e.target.value)} placeholder='/resource/edit/example' />
       </label>}
       {subject === 'element' && <>
         <label>
@@ -263,7 +263,7 @@ export const AssertionEditor: React.FC<{
         <label>
           目标
           <div className='assertion-inline-control'>
-            <input ref={tableInputRef} type='text' value={tableArea} onChange={e => setTableArea(e.target.value)} placeholder='共享 WAN 表格' />
+            <input ref={tableInputRef} type='text' value={tableArea} onChange={e => setTableArea(e.target.value)} placeholder='资源列表表格' />
             <button type='button' onClick={() => onPickTarget('table')}>{isPickingTarget ? '选择中...' : '重新选择'}</button>
           </div>
         </label>
@@ -273,7 +273,7 @@ export const AssertionEditor: React.FC<{
         </div>}
         <label>
           期望值
-          <input type='text' value={rowKeyword} onChange={e => setRowKeyword(e.target.value)} placeholder='WAN2' />
+          <input type='text' value={rowKeyword} onChange={e => setRowKeyword(e.target.value)} placeholder='资源A' />
         </label>
         {!!suggestion?.candidates?.length && <div className='assertion-candidates'>
           <span>候选值</span>
@@ -305,7 +305,7 @@ export const AssertionEditor: React.FC<{
             </label>
             <label>
               匹配值
-              <input type='text' value={columnValue} onChange={e => setColumnValue(e.target.value)} placeholder='WAN2' />
+              <input type='text' value={columnValue} onChange={e => setColumnValue(e.target.value)} placeholder='资源A' />
             </label>
           </div>}
         </details>
@@ -337,7 +337,7 @@ export const AssertionEditor: React.FC<{
         </label>
         {type === 'apiRequestContains' && <label>
           请求参数包含
-          <input type='text' value={requestContains} onChange={e => setRequestContains(e.target.value)} placeholder='WAN2' />
+          <input type='text' value={requestContains} onChange={e => setRequestContains(e.target.value)} placeholder='资源A' />
         </label>}
       </>}
       {subject === 'custom' && <label>
