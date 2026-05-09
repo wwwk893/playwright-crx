@@ -12,6 +12,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 import { suggestIntent, stepContextFromEvent } from './intentRules';
+import { appendTerminalStateAssertions } from './terminalAssertions';
 import { matchPageContextEvent } from './pageContextMatcher';
 import type { ElementContext, PageContextEvent, StepContextSnapshot } from './pageContextTypes';
 import type { UiSemanticContext } from '../uiSemantics/types';
@@ -21,7 +22,7 @@ const autoIntentThreshold = 0.6;
 
 export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContextEvent[]): BusinessFlow {
   if (!events.length)
-    return normalizeIntentSources(flow);
+    return appendTerminalStateAssertions(normalizeIntentSources(flow));
 
   let changed = false;
   const usedEventIds = new Set<string>();
@@ -47,13 +48,12 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
     return nextStep;
   });
 
-  if (!changed)
-    return { ...flow, steps };
-  return {
+  const withContext = changed ? {
     ...flow,
     steps,
     updatedAt: new Date().toISOString(),
-  };
+  } : { ...flow, steps };
+  return appendTerminalStateAssertions(withContext);
 }
 
 export function normalizeIntentSources(flow: BusinessFlow): BusinessFlow {

@@ -30,16 +30,24 @@ export const actionLabel: Record<FlowActionType, string> = {
 };
 
 export const assertionLabel: Record<FlowAssertionType, string> = {
-  visible: '可见',
-  textContains: '文本包含',
-  textEquals: '文本等于',
-  valueEquals: '值等于',
-  urlMatches: 'URL 匹配',
-  toastContains: '包含',
-  tableRowExists: '行存在',
-  apiStatus: '接口状态',
-  apiRequestContains: '请求参数包含',
-  custom: '自定义',
+  'visible': '可见',
+  'textContains': '文本包含',
+  'textEquals': '文本等于',
+  'valueEquals': '值等于',
+  'urlMatches': 'URL 匹配',
+  'toastContains': '包含',
+  'tableRowExists': '行存在',
+  'row-exists': '终态：行存在',
+  'row-not-exists': '终态：行不存在',
+  'modal-closed': '终态：弹窗关闭',
+  'drawer-closed': '终态：抽屉关闭',
+  'popover-closed': '终态：气泡确认关闭',
+  'selected-value-visible': '终态：选中值可见',
+  'form-validation-visible': '终态：表单校验可见',
+  'toast-visible': '终态：提示可见',
+  'apiStatus': '接口状态',
+  'apiRequestContains': '请求参数包含',
+  'custom': '自定义',
 };
 
 export const assertionSubjectLabel: Record<FlowAssertionSubject, string> = {

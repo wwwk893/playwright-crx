@@ -39,7 +39,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       continue;
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]))
+    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -85,7 +85,7 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
       continue;
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]))
+    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -137,7 +137,7 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
       continue;
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]))
+    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -315,6 +315,7 @@ function sameBusinessRow(previous: { rowText?: string; stepText?: string }, step
 function normalizedRowComparable(value?: string) {
   return normalizeGeneratedText(value)?.replace(/\s+/g, '') || '';
 }
+
 
 function withInheritedDialogContext(flow: BusinessFlow): BusinessFlow {
   let activeDialog: FlowDialogScope | undefined;
@@ -496,9 +497,9 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
 }
 
 function inheritedPopupOptionControlType(label?: string) {
-  if (/发布范围/.test(label || ''))
+  if (/范围/.test(label || ''))
     return 'tree-select-option';
-  if (/出口路径/.test(label || ''))
+  if (/路径/.test(label || ''))
     return 'cascader-option';
   return 'select-option';
 }
@@ -530,7 +531,7 @@ function popupFieldLabelFromName(value?: string) {
       .trim();
   if (!text)
     return undefined;
-  if (/发布范围|出口路径|关联VRF|WAN口|IP地址池/.test(text))
+  if (/选择|select|范围|路径|角色|类型|标签|分类|名称|端口|地址/i.test(text))
     return text;
   return undefined;
 }
@@ -695,6 +696,20 @@ function isRedundantSelectSearchClear(step: FlowStep, previousStep?: FlowStep) {
   return looksLikeSelectSearch && sameFieldIdentityIgnoringDialog(step, previousStep);
 }
 
+function isRedundantDropdownEscape(step: FlowStep, previousStep?: FlowStep) {
+  if (step.action !== 'press' || step.value !== 'Escape')
+    return false;
+  if (!previousStep || !looksLikeDropdownOptionStepForDedup(previousStep))
+    return false;
+  if (step.assertions.some(assertion => assertion.enabled))
+    return false;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
+  const looksLikeSelectEscape = controlType === 'select' || role === 'combobox' || /ant-select|combobox/i.test(source);
+  return looksLikeSelectEscape && sameFieldIdentityIgnoringDialog(step, previousStep);
+}
+
 function sameFieldIdentity(left: FlowStep, right: FlowStep) {
   const leftDialog = left.target?.scope?.dialog?.title || left.context?.before.dialog?.title;
   const rightDialog = right.target?.scope?.dialog?.title || right.context?.before.dialog?.title;
@@ -755,7 +770,7 @@ function emitStep(lines: string[], step: FlowStep, indent: string, segment?: Flo
     lines.push(`${indent}// ${step.id} has no runnable Playwright action source.`);
   }
 
-  for (const assertion of step.assertions.filter(assertion => assertion.enabled))
+  for (const assertion of step.assertions.filter(assertion => assertion.enabled && (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion))))
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
 }
 
@@ -764,7 +779,7 @@ function countStepActions(step: FlowStep, options: EmitStepOptions = {}) {
       ?.filter(line => isRunnableLine(line))
       .length ?? 0;
   const assertionActionCount = step.assertions
-      .filter(assertion => assertion.enabled)
+      .filter(assertion => assertion.enabled && !isTerminalAssertionParserUnsafe(assertion))
       .map(renderAssertion)
       .filter(line => isRunnableLine(line))
       .length;
@@ -1003,9 +1018,12 @@ function antdPopoverConfirmAfterClickSource(step: FlowStep, options: EmitStepOpt
   if (!isDeleteOrRemoveTestId(testId))
     return undefined;
   const popover = popoverOpenedAfterClick(step);
-  if (!popover?.title)
+  if (!popover)
     return undefined;
-  const root = dialogRootLocator({ type: 'popover', title: popover.title, visible: true });
+  const visibleRoot = `page.locator(${stringLiteral(popconfirmRootSelector())}).last()`;
+  const root = !options.parserSafe && popover.title
+    ? `page.locator(${stringLiteral(dialogRootSelector({ type: 'popover', visible: true }))}).filter({ hasText: ${stringLiteral(popover.title)} })`
+    : visibleRoot;
   const clickSource = `await ${root}.getByRole("button", { name: /^(确定|确 定)$/ }).click();`;
   if (options.parserSafe)
     return clickSource;
@@ -1017,10 +1035,10 @@ function antdPopoverConfirmAfterClickSource(step: FlowStep, options: EmitStepOpt
 
 function popoverOpenedAfterClick(step: FlowStep) {
   const opened = step.context?.after?.openedDialog;
-  if (opened?.type === 'popover' && opened.title)
+  if (opened?.type === 'popover')
     return opened;
   const dialog = step.context?.after?.dialog;
-  if (dialog?.type === 'popover' && dialog.title)
+  if (dialog?.type === 'popover')
     return dialog;
   return undefined;
 }
@@ -1036,14 +1054,26 @@ function isDeleteOrRemoveTestId(testId: string) {
   return /(^|[-_])(delete|remove)([-_]|$)/i.test(testId);
 }
 
+function stepSynthesizesPopoverConfirm(step?: FlowStep, options: EmitStepOptions = { parserSafe: true }) {
+  return !!step && !!antdPopoverConfirmAfterClickSource(step, options);
+}
+
 function isRedundantExplicitPopoverConfirmStep(step: FlowStep, previous?: FlowStep) {
   if (!previous || step.action !== 'click' || previous.action !== 'click')
     return false;
-  const previousTestId = previous.target?.testId || previous.context?.before.target?.testId || testIdFromSource(previous.sourceCode) || testIdFromSource(JSON.stringify(rawAction(previous.rawAction))) || '';
-  if (!isDeleteOrRemoveTestId(previousTestId))
+  if (!stepSynthesizesPopoverConfirm(previous, { parserSafe: true }))
     return false;
   const popover = popoverOpenedAfterClick(previous);
-  if (!popover?.title)
+  if (!popover)
+    return false;
+  const currentTestId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(step.sourceCode) || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || '';
+  if (/(^|[-_])delete-confirm-(?:ok|confirm)([-_]|$)/i.test(currentTestId))
+    return true;
+  const currentSource = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
+  const currentLabel = normalizeGeneratedText(step.target?.name || step.target?.text || step.target?.displayName || step.context?.before.target?.text || step.context?.before.target?.normalizedText || '');
+  if (/\.ant-popover|internal:role=tooltip|role=\\?"tooltip\\?/i.test(currentSource) && isLikelyPopconfirmConfirmButton(currentLabel || ''))
+    return true;
+  if (!popover.title)
     return false;
   return isExplicitPopoverConfirmStep(step, popover.title);
 }
@@ -1053,7 +1083,8 @@ function isExplicitPopoverConfirmStep(step: FlowStep | undefined, title: string)
     return false;
   const dialog = step.context?.before.dialog || step.target?.scope?.dialog;
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
-  const sourceMentionsPopover = /\.ant-popover|role=\\?"tooltip\\?"|internal:role=tooltip/i.test(source) || step.target?.role === 'tooltip' || step.context?.before.target?.role === 'tooltip';
+  const currentTestId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(step.sourceCode) || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || '';
+  const sourceMentionsPopover = /\.ant-popover|role=\\?"tooltip\\?"|internal:role=tooltip/i.test(source) || step.target?.role === 'tooltip' || step.context?.before.target?.role === 'tooltip' || /(^|[-_])(popover|confirm|ok)([-_]|$)/i.test(currentTestId);
   if (dialog?.type !== 'popover' && !sourceMentionsPopover)
     return false;
   if (dialog?.title && dialog.title !== title)
@@ -1078,11 +1109,14 @@ function isRedundantExplicitDialogConfirmStep(step: FlowStep, previous?: FlowSte
   const previousTestId = previous.target?.testId || previous.context?.before.target?.testId || testIdFromSource(previous.sourceCode) || '';
   if (!/(^|[-_])(confirm|ok|save|submit|apply)([-_]|$)/i.test(previousTestId))
     return false;
+  const currentLabel = normalizeGeneratedText(step.target?.name || step.target?.text || step.target?.displayName || step.context?.before.target?.text || step.context?.before.target?.normalizedText || '');
   const previousDialog = previous.target?.scope?.dialog || previous.context?.before.dialog;
   const currentDialog = step.target?.scope?.dialog || step.context?.before.dialog;
   if (!isPersistentDialog(previousDialog) || !isPersistentDialog(currentDialog) || !sameDialogScope(previousDialog, currentDialog))
     return false;
-  const currentLabel = normalizeGeneratedText(step.target?.name || step.target?.text || step.target?.displayName || step.context?.before.target?.text || step.context?.before.target?.normalizedText || '');
+  const afterDialog = previous.context?.after?.openedDialog || previous.context?.after?.dialog;
+  if (isPersistentDialog(afterDialog) && !sameDialogScope(afterDialog, previousDialog))
+    return false;
   return isLikelyDialogConfirmButton(currentLabel || '');
 }
 
@@ -1148,6 +1182,7 @@ function preferredTargetLocator(step: FlowStep) {
     dialogScopedLocator(step) ||
     visibleDialogConfirmButtonLocator(step) ||
     sectionScopedLocator(step) ||
+    modalConfirmButtonLocator(step) ||
     globalRoleLocator(step) ||
     fallbackTextLocator(step);
 }
@@ -1179,7 +1214,31 @@ function popoverConfirmButtonLocator(step: FlowStep) {
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
   if (dialog?.type === 'popover' && dialog.title)
     return `${dialogRootLocator(dialog)}.getByRole("button", { name: /^(确定|确 定)$/ })`;
-  return `page.locator(${stringLiteral(dialogRootSelector({ type: 'popover', visible: true }))}).last().getByRole("button", { name: /^(确定|确 定)$/ })`;
+  return `page.locator(${stringLiteral(popconfirmRootSelector())}).last().getByRole("button", { name: /^(确定|确 定)$/ })`;
+}
+
+function modalConfirmButtonLocator(step: FlowStep) {
+  const currentTestId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(step.sourceCode) || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || '';
+  if (currentTestId)
+    return undefined;
+  const role = step.target?.role || step.context?.before.target?.role || 'button';
+  if (role !== 'button')
+    return undefined;
+  const label = dialogConfirmLabel(step);
+  if (!label || !isLikelyDialogConfirmButton(label))
+    return undefined;
+  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  if (dialog?.testId)
+    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole("button", { name: ${stringLiteral(label)} })`;
+  if (isPersistentDialog(dialog) && dialog?.title)
+    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).filter({ hasText: ${stringLiteral(dialog.title)} }).getByRole("button", { name: ${stringLiteral(label)} })`;
+  return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).last().getByRole("button", { name: ${stringLiteral(label)} })`;
+}
+
+function dialogConfirmLabel(step: FlowStep) {
+  return normalizeGeneratedText(targetNameForLocator(step) || step.context?.before.target?.text || step.context?.before.target?.normalizedText || '')
+      ?.replace(/^(button|link)\s+/i, '')
+      .trim();
 }
 
 function antdSelectOptionLocator(step: FlowStep) {
@@ -1684,8 +1743,18 @@ function sameDialogScope(left?: FlowDialogScope, right?: FlowDialogScope) {
 
 function testIdLocatorWithOrdinal(step: FlowStep, testId: string, source: 'target' | 'context') {
   const locator = `page.getByTestId(${stringLiteral(testId)})`;
+  if (shouldIgnoreDuplicateOrdinalForStableControl(step, testId))
+    return locator;
   const pageIndex = duplicatePageIndex(step, testId, source);
   return pageIndex === undefined ? locator : `${locator}.nth(${pageIndex})`;
+}
+
+function shouldIgnoreDuplicateOrdinalForStableControl(step: FlowStep, testId: string) {
+  if (isReusableRowActionTestId(testId) || /(^|[-_])(button|btn|save|delete|remove|edit|confirm|cancel|submit|ok)([-_]|$)/i.test(testId))
+    return false;
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  return /^(combobox|textbox|spinbutton)$/i.test(role) || /^(select|tree-select|cascader|input|textarea|number)$/i.test(controlType) || /(^|[-_])(select|input|field|cascader)([-_]|$)/i.test(testId);
 }
 
 function rowScopedActionTestIdLocator(step: FlowStep, testId: string) {
@@ -1859,6 +1928,8 @@ function dialogScopedLocator(step: FlowStep) {
   const role = dialog.type === 'popover' && step.target?.role === 'tooltip' ? 'button' : step.target?.role || 'button';
   if (dialog.testId)
     return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+  if (dialog.type === 'popover')
+    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).last().getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
   if (!dialog.title)
     return undefined;
   return `page.locator(${stringLiteral(dialogRootSelector(dialog))})` +
@@ -1874,6 +1945,10 @@ function dialogRootSelector(dialog?: FlowDialogScope) {
   if (dialog?.type === 'drawer')
     return '.ant-drawer, [role="dialog"]';
   return '.ant-modal, .ant-drawer, [role="dialog"]';
+}
+
+function popconfirmRootSelector() {
+  return `${dialogRootSelector({ type: 'popover', visible: true })}:has(.ant-popconfirm-buttons)`;
 }
 
 function sectionScopedLocator(step: FlowStep) {
@@ -2006,7 +2081,94 @@ export function generateAssertionCodePreview(flow: BusinessFlow) {
   return lines.join('\n');
 }
 
+function isTerminalAssertionParserUnsafe(assertion: FlowAssertion) {
+  return assertion.type === 'row-exists' ||
+    assertion.type === 'row-not-exists' ||
+    assertion.type === 'modal-closed' ||
+    assertion.type === 'drawer-closed' ||
+    assertion.type === 'popover-closed' ||
+    assertion.type === 'selected-value-visible' ||
+    assertion.type === 'form-validation-visible' ||
+    assertion.type === 'toast-visible';
+}
+
+function renderTerminalStateAssertion(assertion: FlowAssertion) {
+  switch (assertion.type) {
+    case 'row-exists': {
+      const row = terminalRowLocator(assertion);
+      const columnText = stringParam(assertion.params?.columnText || assertion.params?.columnValue || assertion.expected);
+      if (columnText)
+        return `await expect(${row}).toContainText(${stringLiteral(columnText)});`;
+      return `await expect(${row}).toBeVisible();`;
+    }
+    case 'row-not-exists':
+      return `await expect(${terminalRowLocator(assertion)}).not.toBeVisible();`;
+    case 'modal-closed':
+      return `await ${terminalOverlayLocator('modal', assertion)}.waitFor({ state: "hidden", timeout: ${numberParam(assertion.params?.timeout, 10000)} });`;
+    case 'drawer-closed':
+      return `await ${terminalOverlayLocator('drawer', assertion)}.waitFor({ state: "hidden", timeout: ${numberParam(assertion.params?.timeout, 10000)} });`;
+    case 'popover-closed':
+      return `await ${terminalOverlayLocator('popover', assertion)}.waitFor({ state: "hidden", timeout: ${numberParam(assertion.params?.timeout, 5000)} });`;
+    case 'selected-value-visible': {
+      const target = assertion.params?.targetTestId || assertion.target?.testId;
+      const locator = target ? `page.getByTestId(${stringLiteral(target)})` : locatorExpressionForSelector(assertion.target?.selector) || `page.getByText(${stringLiteral(assertion.expected || assertion.params?.expected || '选中值')})`;
+      return `await expect(${locator}).toContainText(${stringLiteral(assertion.expected || assertion.params?.expected || '')});`;
+    }
+    case 'form-validation-visible': {
+      const message = assertion.expected || assertion.params?.message || '';
+      return `await expect(page.locator(${stringLiteral('.ant-form-item-explain-error, [role="alert"]')}).filter({ hasText: ${stringLiteral(message)} }).first()).toBeVisible();`;
+    }
+    case 'toast-visible': {
+      const message = assertion.expected || assertion.params?.message || '';
+      return `await expect(page.locator(${stringLiteral('.ant-message, .ant-notification, [role="alert"], .ant-form-item-explain-error')}).filter({ hasText: ${stringLiteral(message)} }).first()).toBeVisible();`;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function terminalRowLocator(assertion: FlowAssertion) {
+  const tableTestId = stringParam(assertion.params?.tableTestId || assertion.target?.scope?.table?.testId);
+  const tableLocator = tableTestId ? `page.getByTestId(${stringLiteral(tableTestId)})` : locatorExpressionForSelector(assertion.params?.tableSelector) || `page.getByText(${stringLiteral(assertion.params?.tableArea || '表格/列表')}).locator('..')`;
+  const rowKey = stringParam(assertion.params?.rowKey || assertion.target?.scope?.table?.rowKey);
+  if (rowKey)
+    return `${tableLocator}.locator(${stringLiteral(`tr[data-row-key="${cssAttributeValue(rowKey)}"], [role="row"][data-row-key="${cssAttributeValue(rowKey)}"]`)})`;
+  const rowText = stringParam(assertion.params?.rowKeyword || assertion.target?.scope?.table?.rowText || assertion.expected);
+  if (rowText)
+    return `${tableLocator}.getByRole('row').filter({ hasText: ${rowTextRegexLiteral(rowText)} })`;
+  return `${tableLocator}.getByRole('row').first()`;
+}
+
+function terminalOverlayLocator(kind: 'modal' | 'drawer' | 'popover', assertion: FlowAssertion) {
+  const testId = stringParam(assertion.params?.testId || assertion.target?.scope?.dialog?.testId);
+  if (testId)
+    return `page.getByTestId(${stringLiteral(testId)})`;
+  const title = stringParam(assertion.params?.title || assertion.target?.scope?.dialog?.title || assertion.expected);
+  const selector = kind === 'popover'
+    ? '.ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)'
+    : kind === 'drawer'
+      ? '.ant-drawer, [role="dialog"]'
+      : '.ant-modal, [role="dialog"]';
+  const locator = `page.locator(${stringLiteral(selector)})`;
+  return title ? `${locator}.filter({ hasText: ${stringLiteral(title)} })` : `${locator}.last()`;
+}
+
+function numberParam(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function stringParam(value: unknown) {
+  return typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : undefined;
+}
+
+function cssAttributeValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 function renderAssertion(assertion: FlowAssertion) {
+  const terminalAssertion = renderTerminalStateAssertion(assertion);
+  if (terminalAssertion)
+    return terminalAssertion;
   switch (assertion.subject) {
     case 'page':
       return `// assert page URL matches ${stringLiteral(assertion.expected || assertion.params?.url || '')}`;
@@ -2053,7 +2215,7 @@ function parameterizeLine(line: string, step: FlowStep, segment: FlowRepeatSegme
   if (!parameter?.currentValue)
     return line;
   const replacement = rowValues ? stringLiteral(rowValues[parameter.id] ?? parameter.currentValue) : `String(row.${parameter.variableName})`;
-  const activePopupReplacement = parameterizedActivePopupOptionClick(line, parameter.variableName, replacement);
+  const activePopupReplacement = parameterizedActivePopupOptionClick(line, step, replacement);
   if (activePopupReplacement)
     return activePopupReplacement;
   return line
@@ -2062,12 +2224,32 @@ function parameterizeLine(line: string, step: FlowStep, segment: FlowRepeatSegme
       .replaceAll(`"${parameter.currentValue.replace(/"/g, '\\"')}"`, replacement);
 }
 
-function parameterizedActivePopupOptionClick(line: string, variableName: string, replacement: string) {
+function parameterizedActivePopupOptionClick(line: string, step: FlowStep, replacement: string) {
   if (!/\.getByText\([^)]*\)\.click\(\);/.test(line))
     return undefined;
-  if (!/^(wan|wanPort|vrf|scope|egressPath|role)$/i.test(variableName))
+  if (!isPopupOptionStep(step))
     return undefined;
   return activePopupOptionDispatchSource('page.locator(' + stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item') + ')', replacement);
+}
+
+function isPopupOptionStep(step: FlowStep) {
+  const contextTarget = step.context?.before?.target;
+  const ui = step.context?.before?.ui;
+  const joined = [
+    step.target?.role,
+    step.target?.scope?.form?.label,
+    contextTarget?.role,
+    contextTarget?.controlType,
+    contextTarget?.ariaLabel,
+    ui?.component,
+    ui?.form?.fieldKind,
+    ui?.overlay?.type,
+    ui?.recipe?.kind,
+    ui?.recipe?.component,
+    ui?.recipe?.fieldKind,
+    ui?.option?.text ? 'option' : undefined,
+  ].filter(Boolean).join('|');
+  return /option|select|tree-select|cascader|dropdown|listbox|combobox/i.test(joined);
 }
 
 function activePopupOptionDispatchSource(locator: string, expectedExpression: string) {

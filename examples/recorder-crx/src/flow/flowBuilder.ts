@@ -450,7 +450,7 @@ function isDropdownTriggerStepForLabel(step: FlowStep, normalizedLabel: string) 
   const role = target?.role || '';
   const raw = recorderSelectorForStep(step);
   const labels = dropdownTriggerLabels(step);
-  if (!/combobox|select/i.test(role) && !/combobox|select|ant-select|ant-cascader/i.test(raw) && !labels.some(label => /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(String(label || ''))))
+  if (!/combobox|select/i.test(role) && !/combobox|select|ant-select|ant-cascader/i.test(raw) && !labels.some(label => /选择|select|角色|类型|范围|路径|标签|分类/i.test(String(label || ''))))
     return false;
   return labels.some(label => normalizedComparableText(label || '').includes(normalizedLabel));
 }
@@ -462,15 +462,15 @@ function isDropdownTriggerStepForControlType(step: FlowStep, controlType: string
   const role = target?.role || '';
   const raw = recorderSelectorForStep(step);
   const labels = dropdownTriggerLabels(step).join(' ');
-  const isTrigger = /combobox|select/i.test(role) || /combobox|select|ant-select|ant-cascader/i.test(raw) || /选择|select|WAN|角色|类型|VRF|发布范围|出口路径/.test(labels);
+  const isTrigger = /combobox|select/i.test(role) || /combobox|select|ant-select|ant-cascader/i.test(raw) || /选择|select|角色|类型|范围|路径|标签|分类/i.test(labels);
   if (!isTrigger)
     return false;
   if (controlType === 'cascader-option')
-    return /cascader|出口路径|地域路径|路径/.test(raw) || /出口路径|地域路径|路径/.test(labels);
+    return /cascader|路径/.test(raw) || /路径/.test(labels);
   if (controlType === 'tree-select-option')
-    return /tree|发布范围/.test(raw) || /发布范围/.test(labels);
+    return /tree|范围/.test(raw) || /范围/.test(labels);
   if (controlType === 'select-option')
-    return !/cascader|tree|出口路径|发布范围/.test(raw) && !/出口路径|发布范围/.test(labels);
+    return !/cascader|tree|路径|范围/.test(raw) && !/路径|范围/.test(labels);
   return false;
 }
 

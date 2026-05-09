@@ -90,7 +90,7 @@ export const FlowFormSheet: React.FC<{
       <div className='sheet-body'>
         <label className='flow-form-field full'>
           <span><span className='required'>*</span>流程名称</span>
-          <input autoFocus required type='text' value={draft.flow.name} placeholder='例如：站点配置 / 新增共享 WAN' onChange={event => updateMeta({ name: event.target.value })} />
+          <input autoFocus required type='text' value={draft.flow.name} placeholder='例如：资源配置 / 新增业务资源' onChange={event => updateMeta({ name: event.target.value })} />
         </label>
 
         <div className='flow-sheet-two-col'>
@@ -140,7 +140,7 @@ export const FlowFormSheet: React.FC<{
         <div className='flow-sheet-two-col'>
           <label className='flow-form-field'>
             <span>标签</span>
-            <input type='text' value={(draft.flow.tags ?? []).join(', ')} placeholder='smoke, site, wan' onChange={event => updateMeta({ tags: splitList(event.target.value) })} />
+            <input type='text' value={(draft.flow.tags ?? []).join(', ')} placeholder='smoke, resource, regression' onChange={event => updateMeta({ tags: splitList(event.target.value) })} />
           </label>
           <label className='flow-form-field'>
             <span>AI Intent 模式</span>

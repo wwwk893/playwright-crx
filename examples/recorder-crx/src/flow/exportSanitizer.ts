@@ -5,7 +5,8 @@
  * you may not use this file except in compliance with the License.
  */
 import type { StepContextSnapshot } from './pageContextTypes';
-import type { BusinessFlow, FlowTarget } from './types';
+import type { BusinessFlow, FlowAssertion, FlowAssertionParams, FlowTarget } from './types';
+import { sanitizeTerminalAssertionParams } from './terminalAssertions';
 import type { UiActionRecipe, UiSemanticContext } from '../uiSemantics/types';
 
 export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string): BusinessFlow {
@@ -27,6 +28,7 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
         uiRecipe: sanitizeUiRecipe(step.uiRecipe),
         target: sanitizeFlowTarget(step.target),
         context: sanitizeStepContext(step.context),
+        assertions: step.assertions.map(sanitizeFlowAssertion),
         url: compactUrl(step.url),
       };
     }),
@@ -36,6 +38,27 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
     },
     updatedAt: new Date().toISOString(),
   };
+}
+
+function sanitizeFlowAssertion(assertion: FlowAssertion): FlowAssertion {
+  return {
+    ...assertion,
+    target: sanitizeFlowTarget(assertion.target),
+    params: sanitizeAssertionParams(assertion.params),
+  };
+}
+
+function sanitizeAssertionParams(params?: FlowAssertionParams): FlowAssertionParams | undefined {
+  if (!params)
+    return undefined;
+  const terminal = sanitizeTerminalAssertionParams(params) || {};
+  const legacyAllowed = ['url', 'targetSummary', 'message', 'method', 'status', 'requestContains'];
+  for (const key of legacyAllowed) {
+    const value = params[key];
+    if (value !== undefined && value !== '')
+      terminal[key] = value;
+  }
+  return compactObject(terminal) as FlowAssertionParams;
 }
 
 function sanitizeFlowTarget(target?: FlowTarget): FlowTarget | undefined {
