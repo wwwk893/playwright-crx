@@ -491,8 +491,8 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
   let activeSelectStep: FlowStep | undefined;
   let activeSelectQuery = '';
   let changed = false;
-  const steps = flow.steps.map(step => {
-    if (isAntdSelectFieldStep(step)) {
+  const steps = flow.steps.map((step, index) => {
+    if (isAntdSelectFieldStep(step, flow.steps[index + 1])) {
       const query = selectQueryForStep(step);
       if (query)
         activeSelectQuery = query;
@@ -517,7 +517,7 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
 function inheritedAntdSelectOptionStep(step: FlowStep, activeSelectStep: FlowStep, activeSelectQuery = '') {
   const rawOptionTitle = rawSelectOptionTitle(step);
   const query = activeSelectQuery || selectQueryForStep(activeSelectStep);
-  const optionText = completeOptionTextFromSelectQuery(step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle || '', query) || step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle;
+  const optionText = completeOptionTextFromSelectQuery(rawOptionTitle || step.target?.text || step.target?.name || step.target?.displayName || '', query) || rawOptionTitle || step.target?.text || step.target?.name || step.target?.displayName;
   const activeForm = selectStepFormContext(activeSelectStep);
   return {
     ...step,
@@ -559,7 +559,7 @@ function inheritedPopupOptionControlType(label?: string) {
   return 'select-option';
 }
 
-function isAntdSelectFieldStep(step: FlowStep) {
+function isAntdSelectFieldStep(step: FlowStep, nextStep?: FlowStep) {
   const controlType = step.context?.before.target?.controlType;
   const framework = step.context?.before.target?.framework;
   const label = selectStepFormContext(step)?.label;
@@ -569,6 +569,11 @@ function isAntdSelectFieldStep(step: FlowStep) {
   const sourceCombobox = !explicitTextField && (/getByRole\(["']combobox["']/.test(source) || /role=combobox/.test(selector));
   const isAntdLike = framework === 'antd' || framework === 'procomponents' || step.target?.role === 'combobox' || sourceCombobox;
   const isPopupField = !explicitTextField && (controlType === 'select' || controlType === 'tree-select' || controlType === 'cascader' || step.target?.role === 'combobox' || sourceCombobox);
+  if (step.action === 'fill' && isPopupField && !explicitTextField && !(nextStep && looksLikeDropdownOptionStepForDedup(nextStep))) {
+    const hasOnlyWeakSelectEvidence = !step.target?.role && !/getByRole\(["']combobox["']|role=combobox/.test(source) && !/role=combobox/.test(selector);
+    if (hasOnlyWeakSelectEvidence)
+      return false;
+  }
   return !!label && isAntdLike && isPopupField && (step.action === 'click' || step.action === 'fill');
 }
 
@@ -616,7 +621,8 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
     return false;
   if (/^(tree-select-option|cascader-option|menu-item)$/.test(controlType))
     return false;
-  const optionText = step.target?.text || step.target?.name || step.target?.displayName || rawSelectOptionTitle(step);
+  const rawTitle = rawSelectOptionTitle(step);
+  const optionText = rawTitle || step.target?.text || step.target?.name || step.target?.displayName;
   if (!optionText)
     return false;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
@@ -1051,11 +1057,11 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     }
     case 'fill': {
       const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
-      const isComboboxFill = step.target?.role === 'combobox' || /^(select|tree-select|cascader)$/.test(step.context?.before.target?.controlType || '');
+      const isComboboxFill = isAntdSelectFieldStep(step, options.nextStep);
       const selectTrigger = isComboboxFill ? antdSelectFieldLocator(step) : undefined;
       if (selectTrigger)
-        return `await ${options.parserSafe ? parserSafeLocator(selectTrigger) : selectTrigger}.locator(${stringLiteral('input')})${options.parserSafe ? '' : '.first()'}.fill(${value});`;
-      const preferred = fieldLocator(step);
+        return `await ${options.parserSafe ? parserSafeLocator(selectTrigger) : selectTrigger}.locator(${stringLiteral('input:visible')})${options.parserSafe ? '' : '.first()'}.fill(${value});`;
+      const preferred = fieldLocator(step, { allowSelectLike: !!selectTrigger });
       const testIdLocator = fillTestIdLocator(step);
       if (testIdLocator)
         return `await ${testIdLocator}.fill(${value});`;
@@ -1749,7 +1755,7 @@ function antdSelectOptionDispatchSource(locator: string, optionName?: string, op
 
 function rawSelectOptionTitle(step: FlowStep) {
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
-  const match = selector.match(/internal:attr=\[title=(?:\\"|\")([^\\"]+)(?:\\"|")i\]/) || selector.match(/\[title=["']([^"']+)["']\]/);
+  const match = selector.match(/internal:attr=\[title=(?:\\"|\")([^\\"]+)(?:\\"|")(?:i|s)?\]/) || selector.match(/\[title=["']([^"']+)["']\]/);
   return match?.[1];
 }
 
@@ -2098,7 +2104,7 @@ function isContainerTestIdForFill(step: FlowStep, testId: string) {
   return looksLikeStructuralContainerTestId(testId);
 }
 
-function fieldLocator(step: FlowStep) {
+function fieldLocator(step: FlowStep, options: { allowSelectLike?: boolean } = {}) {
   const targetText = step.target?.name || step.target?.text || step.target?.displayName;
   const label = step.target?.label ||
     step.target?.scope?.form?.label ||
@@ -2106,7 +2112,7 @@ function fieldLocator(step: FlowStep) {
     popupFieldLabelFromName(targetText);
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
-  const isSelectLikeField = !hasExplicitTextFieldContext(step) && (/^(select|tree-select|cascader)$/.test(controlType) || step.target?.role === 'combobox' || /ant-select|ant-cascader|role=combobox/.test(source));
+  const isSelectLikeField = options.allowSelectLike !== false && !hasExplicitTextFieldContext(step) && (/^(select|tree-select|cascader)$/.test(controlType) || step.target?.role === 'combobox' || /ant-select|ant-cascader|role=combobox/.test(source));
   if ((step.target?.role === 'button' || controlType === 'button') && !isSelectLikeField)
     return undefined;
   if (label && isSelectLikeField)

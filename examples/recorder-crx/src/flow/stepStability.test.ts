@@ -4960,7 +4960,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input").first().fill("WAN-extra-18");'), 'search fill should target the input inside the scoped ProFormSelect trigger');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input:visible").first().fill("WAN-extra-18");'), 'search fill should target the visible input inside the scoped ProFormSelect trigger');
       assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'search fill should not rely on brittle combobox accessible name');
       assert(!firstStep.includes('internal:role=combobox'), 'search fill should not replay the raw combobox selector');
     },
@@ -5071,6 +5071,62 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'text fill without following option ignores stale AntD Select metadata',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            label: '地址池名称',
+            displayName: '地址池名称',
+            scope: { form: { label: '地址池名称', name: 'poolName' } },
+          },
+          value: 'pool-alpha',
+          context: {
+            eventId: 'ctx-address-pool-name-fill',
+            capturedAt: 1000,
+            before: {
+              form: { label: '地址池名称', name: 'poolName' },
+              target: {
+                framework: 'antd',
+                controlType: 'select',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: '.ant-form-item:has-text("地址池名称") .ant-select-selector input',
+              text: 'pool-alpha',
+            },
+          },
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "地址池名称" }).locator(".ant-select-selector").first().locator("input").first().fill("pool-alpha");`,
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: { testId: 'site-save-button', name: '保存配置' },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="site-save-button"s]' } },
+          sourceCode: `await page.getByTestId('site-save-button').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('getByLabel("地址池名称").fill("pool-alpha")'), 'text field fill should use label fallback when no dropdown option follows');
+      assert(!firstStep.includes('.ant-select-selector'), 'stale select source should not force a text fill through an AntD Select trigger');
+    },
+  },
+  {
     name: 'input focus click ignores stale AntD Select selector metadata',
     run: () => {
       const flow: BusinessFlow = {
@@ -5169,6 +5225,77 @@ test('demo', async ({ page }) => {
 
       assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'context-light option should use the active dropdown locator');
       assert(!optionStep.includes('getByText(\'生产VRF\')') && !optionStep.includes('getByText("生产VRF")'), 'context-light option should not replay as a page-global text click');
+    },
+  },
+  {
+    name: 'contextless option with noisy page text prefers raw title for select inheritance',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            role: 'combobox',
+            label: '共享WAN',
+            text: '选择共享 WAN',
+            displayName: '选择共享 WAN',
+            scope: { form: { label: '共享WAN', name: 'wanPort' } },
+          },
+          value: 'WAN1',
+          context: {
+            eventId: 'ctx-shared-wan-fill',
+            capturedAt: 1000,
+            before: {
+              form: { label: '共享WAN', name: 'wanPort' },
+              target: { framework: 'antd', controlType: 'select', text: '选择共享 WAN' },
+            },
+          },
+          rawAction: { action: { name: 'fill', selector: 'internal:role=combobox[name="共享WAN"i]', text: 'WAN1' } },
+          sourceCode: `await page.getByRole('combobox', { name: '共享WAN' }).fill('WAN1');`,
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: {
+            label: '地址池名称',
+            placeholder: '地址池名称',
+            text: '业务流程稳定性测试页 新增IP端口池 地址池名称 共享WAN 备注 pool-alpha --...',
+            displayName: '业务流程稳定性测试页 新增IP端口池 地址池名称 共享WAN 备注 pool-alpha --...',
+            scope: { dialog: { type: 'dropdown', visible: true }, form: { label: '地址池名称', name: 'root' } },
+          },
+          context: {
+            eventId: 'ctx-noisy-option-click',
+            capturedAt: 1100,
+            before: {
+              dialog: { type: 'dropdown', visible: true },
+              form: { label: '地址池名称', name: 'root' },
+              target: {
+                tag: 'html',
+                framework: 'generic',
+                controlType: 'select',
+                placeholder: '地址池名称',
+                text: '业务流程稳定性测试页 新增IP端口池 地址池名称 共享WAN 备注 pool-alpha --...',
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:attr=[title="WAN1"s] >> div' } },
+          sourceCode: `await page.locator('[title="WAN1"]').locator('div').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+
+      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'noisy option click should replay through the active dropdown');
+      assert(optionStep.includes('WAN1'), 'raw option title should survive noisy page-text capture');
+      assert(!optionStep.includes('filter({ hasText: "地址池名称" }).locator(".ant-select-selector")'), 'noisy option click should not be misread as another form select trigger');
     },
   },
   {
