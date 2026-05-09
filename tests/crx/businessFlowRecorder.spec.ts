@@ -201,8 +201,10 @@ test('records real ProFormField network configuration fields and replays generat
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expect(page.getByText('网络配置资源')).toBeVisible();
   await attachRecorder(page, { mode: 'business-flow' });
+  const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
   await page.getByTestId('network-resource-add').click();
-  await expect(page.getByRole('dialog', { name: '新建网络资源' })).toBeVisible();
+  const networkResourceDialog = page.getByRole('dialog', { name: '新建网络资源' });
+  await expect(networkResourceDialog).toBeVisible();
 
   await page.getByTestId('network-resource-save').click();
   await expect(page.locator('.ant-form-item-explain-error').filter({ hasText: '请输入资源名称' })).toBeVisible();
@@ -213,17 +215,18 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-wan-select').locator('input').fill('WAN-extra-18');
   await clickVisibleAntDOption(page, 'edge-lab:WAN-extra-18');
   await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN-extra-18');
-  await page.getByText('独享地址池').click();
-  await page.waitForTimeout(250);
+  await networkResourceDialog.getByText('独享地址池').click();
+  await expect(networkResourceDialog.locator('input[type="radio"][value="dedicated"]')).toBeChecked();
+  await expect.poll(stepSubjects, { timeout: 20_000 }).toMatch(/类型|独享地址池|poolType/);
   await page.getByTestId('network-resource-vrf-select').click();
   await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
   await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
-  const networkResourceDialog = page.getByRole('dialog', { name: '新建网络资源' });
   const arpProxyItem = networkResourceDialog.locator('.ant-form-item').filter({ hasText: '能力开关' });
   const arpProxyCheckbox = arpProxyItem.getByRole('checkbox', { name: '开启代理ARP' });
-  await arpProxyItem.getByText('开启代理ARP').click();
+  await arpProxyItem.locator('.ant-checkbox-wrapper').filter({ hasText: '开启代理ARP' }).click();
   await expect(arpProxyCheckbox).toBeChecked();
+  await expect.poll(stepSubjects, { timeout: 20_000 }).toMatch(/开启代理ARP|arpProxy/);
   await page.getByText('启用健康检查').click();
   await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
   await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
@@ -235,20 +238,23 @@ test('records real ProFormField network configuration fields and replays generat
   await clickVisibleAntDCascaderOption(page, '一号机房');
   await clickVisibleAntDCascaderOption(page, 'NAT集群A');
   await expect(page.getByTestId('network-resource-egress-cascader')).toContainText('NAT集群A');
+  await expect.poll(stepSubjects, { timeout: 20_000 }).toMatch(/NAT集群A|出口路径|egressPath/);
   await page.getByPlaceholder('服务名称').fill('https-admin');
   await page.getByPlaceholder('监听端口').fill('8443');
-  await page.waitForTimeout(250);
+  await expect(page.getByPlaceholder('监听端口')).toHaveValue('8443');
   await page.getByTestId('network-resource-source-port').fill('8443');
-  await page.waitForTimeout(250);
+  await expect(page.getByTestId('network-resource-source-port')).toHaveValue('8443');
   await page.getByPlaceholder('填写策略备注').fill('ProFormField 全量组合录制：showSearch/TreeSelect/Cascader/List/Dependency/Switch');
   await page.getByTestId('network-resource-save').click();
   await expect(page.getByRole('row', { name: /pool-proform-alpha/ })).toBeVisible({ timeout: 10_000 });
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(9);
-  const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
   await expect.poll(stepSubjects).toContain('network-resource-add');
   await expect.poll(stepSubjects).toContain('pool-proform-alpha');
   await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|network-resource-wan-select/);
+  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/类型|独享地址池|poolType/);
+  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/开启代理ARP|arpProxy/);
+  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/NAT集群A|出口路径|egressPath/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -411,7 +417,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
   expect(flow.artifacts.playwrightCode).toContain('2.2.2.2');
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-modal, \.ant-drawer, \[role=\\?["']dialog\\?["']\]["']\)[\s\S]*filter\(\{ hasText: ["']新建IPv4地址池["'] \}\)[\s\S]*locator\(["']\.ant-form-item["']\)[\s\S]*filter\(\{ hasText: ["']WAN口["'] \}\)[\s\S]*locator\(["']\.ant-select-selector["']\)|locator\(["']\.ant-form-item["']\)\.filter\(\{ hasText: ["']WAN口["'] \}\)\.locator\(["']\.ant-select-selector["']\)/);
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-modal, \.ant-drawer, \[role=\\?["']dialog\\?["']\]["']\)[\s\S]*filter\(\{ hasText: ["']新建IPv4地址池["'] \}\)[\s\S]*locator\(["']\.ant-form-item["']\)[\s\S]*filter\(\{ hasText: ["']\*? ?WAN口["'] \}\)[\s\S]*locator\(["']\.ant-select-selector["']\)|locator\(["']\.ant-form-item["']\)\.filter\(\{ hasText: ["']\*? ?WAN口["'] \}\)\.locator\(["']\.ant-select-selector["']\)/);
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 
@@ -555,7 +561,7 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   });
   if (await option.isVisible().catch(() => false))
     await dispatchAntDOptionClick(page, options, text);
-  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 5000 });
 }
 
 async function dispatchAntDOptionClick(page: Page, options: ReturnType<Page['locator']>, text: string) {
@@ -750,6 +756,7 @@ async function replayGeneratedPlaywrightCode(context: BrowserContext, code: stri
   if (testInfo)
     runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, standaloneVerification);
 }
+
 
 function expectInOrder(text: string, markers: Array<string | RegExp>) {
   let offset = 0;

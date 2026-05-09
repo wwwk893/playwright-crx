@@ -2040,6 +2040,70 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeated Popconfirm opener clicks on the same row are emitted once',
+    run: () => {
+      const repeatedDelete = (id: string, order: number): FlowStep => ({
+        id,
+        order,
+        action: 'click',
+        target: {
+          testId: 'resource-row-delete-action',
+          displayName: 'Resource A 删除',
+          scope: { table: { testId: 'resource-table', rowKey: 'resource-a', rowText: 'Resource A active 删除' } },
+        },
+        context: {
+          eventId: `ctx-${id}`,
+          capturedAt: 1000 + order,
+          before: {
+            table: { testId: 'resource-table', rowKey: 'resource-a', rowText: 'Resource A active 删除' },
+            target: { tag: 'a', testId: 'resource-row-delete-action', framework: 'antd', controlType: 'link', text: '删除' },
+          },
+          after: { openedDialog: { type: 'popover', title: '删除此行？', visible: true } },
+        },
+        assertions: id === 's001' ? [createTerminalStateAssertion('row-not-exists', 'a-row-gone', { tableTestId: 'resource-table', rowKey: 'resource-a' })] : [],
+      });
+      const repeatedFlow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [repeatedDelete('s001', 1), repeatedDelete('s002', 2), repeatedDelete('s003', 3)],
+      };
+      const code = generateBusinessFlowPlaywrightCode(repeatedFlow);
+      const playbackCode = generateBusinessFlowPlaybackCode(repeatedFlow);
+
+      assertEqual((code.match(/resource-row-delete-action/g) || []).length, 1);
+      assertEqual((playbackCode.match(/resource-row-delete-action/g) || []).length, 1);
+      assert(code.includes('row-key') || code.includes('resource-a'), 'terminal row assertion should stay attached to the remaining delete step');
+      assert(code.includes('not.toBeVisible();'), 'row-not-exists terminal assertion should still be emitted after dedupe');
+
+      const deleteRow = (id: string, order: number, rowKey: string, rowText: string): FlowStep => {
+        const base = repeatedDelete(id, order);
+        return {
+          ...base,
+          target: {
+            ...base.target,
+            displayName: `${rowText} 删除`,
+            scope: { table: { testId: 'resource-table', rowKey, rowText } },
+          },
+          context: {
+            eventId: base.context!.eventId,
+            capturedAt: base.context!.capturedAt,
+            before: {
+              ...base.context!.before,
+              table: { testId: 'resource-table', rowKey, rowText },
+            },
+            after: base.context!.after,
+          },
+          assertions: [],
+        };
+      };
+      const differentRowsFlow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [deleteRow('s010', 10, 'resource-a', 'Resource A active'), deleteRow('s011', 11, 'resource-b', 'Resource B active')],
+      };
+      const differentRowsCode = generateBusinessFlowPlaywrightCode(differentRowsFlow);
+      assertEqual((differentRowsCode.match(/resource-row-delete-action/g) || []).length, 2);
+    },
+  },
+  {
     name: 'second modal confirmation after submit remains scoped and is not skipped',
     run: () => {
       const flow: BusinessFlow = {
@@ -3839,10 +3903,14 @@ test('demo', async ({ page }) => {
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
       const optionStep = stepCodeBlock(code, 's002');
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+      const playbackOptionStep = stepCodeBlock(playbackCode, 's002');
 
       assert(optionStep.includes('AntD Select virtual dropdown replay workaround'), 'contextless option click should inherit the previous AntD select field context');
       assert(optionStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first()'), 'fallback should reopen the owning WAN ProFormSelect trigger');
       assert(!optionStep.includes('getByText'), 'option click should not use ambiguous global text replay');
+      assert(!playbackOptionStep.includes('.fill("xtest16:WAN1")'), 'parser-safe runtime should not emit a second full-label search fill after the select search was already filled');
+      assertEqual(countBusinessFlowPlaybackActions(flow), 2);
     },
   },
   {

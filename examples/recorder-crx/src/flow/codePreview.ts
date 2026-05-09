@@ -18,7 +18,7 @@ import { actionLabel, summarizeStepSubject } from './display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 
 export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
-  const effectiveFlow = withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow))));
+  const effectiveFlow = withDedupedRepeatedPopoverOpenerClicks(withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)))));
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
@@ -63,7 +63,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
 }
 
 export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
-  const effectiveFlow = withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow))));
+  const effectiveFlow = withDedupedRepeatedPopoverOpenerClicks(withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)))));
   const lines = [
     `import { test, expect } from '@playwright/test';`,
     '',
@@ -110,7 +110,7 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
 }
 
 export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
-  const effectiveFlow = withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow))));
+  const effectiveFlow = withDedupedRepeatedPopoverOpenerClicks(withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)))));
   let count = 0;
   const emittedRepeatStepIds = new Set<string>();
   let lastDropdownOptionIdentity = '';
@@ -175,6 +175,57 @@ function withDedupedAdjacentDropdownOptionClicks(flow: BusinessFlow): BusinessFl
     steps.push(step);
   }
   return changed ? { ...flow, steps } : flow;
+}
+
+function withDedupedRepeatedPopoverOpenerClicks(flow: BusinessFlow): BusinessFlow {
+  let changed = false;
+  const steps: FlowStep[] = [];
+  for (const step of flow.steps) {
+    const previous = steps[steps.length - 1];
+    if (previous && areRepeatedPopoverOpenerClicks(previous, step)) {
+      changed = true;
+      continue;
+    }
+    steps.push(step);
+  }
+  if (!changed)
+    return flow;
+  const keptStepIds = new Set(steps.map(step => step.id));
+  return {
+    ...flow,
+    steps,
+    repeatSegments: flow.repeatSegments
+        ?.map(segment => ({ ...segment, stepIds: segment.stepIds.filter(stepId => keptStepIds.has(stepId)) }))
+        .filter(segment => segment.stepIds.length > 0),
+  };
+}
+
+function areRepeatedPopoverOpenerClicks(previous: FlowStep, step: FlowStep) {
+  if (previous.action !== 'click' || step.action !== 'click')
+    return false;
+  if (!stepSynthesizesPopoverConfirm(previous, { parserSafe: true }) || !stepSynthesizesPopoverConfirm(step, { parserSafe: true }))
+    return false;
+  const previousPopover = popoverOpenedAfterClick(previous);
+  const currentPopover = popoverOpenedAfterClick(step);
+  if (previousPopover?.title && currentPopover?.title && previousPopover.title !== currentPopover.title)
+    return false;
+  const previousIdentity = repeatedPopoverOpenerIdentity(previous);
+  const currentIdentity = repeatedPopoverOpenerIdentity(step);
+  return !!previousIdentity && previousIdentity === currentIdentity;
+}
+
+function repeatedPopoverOpenerIdentity(step: FlowStep) {
+  const testId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(step.sourceCode) || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || '';
+  if (!isDeleteOrRemoveTestId(testId))
+    return '';
+  const table = step.target?.scope?.table || step.context?.before.table;
+  const tableId = normalizeComparableText(table?.testId || table?.title || '');
+  const rowKey = normalizeComparableText(table?.rowKey || '');
+  const rowText = normalizeComparableText(table?.rowText || step.target?.text || step.target?.name || step.target?.displayName || step.context?.before.target?.text || step.context?.before.target?.normalizedText || '');
+  const discriminator = rowKey ? `row-key:${rowKey}` : rowText ? `row-text:${rowText}` : '';
+  if (!discriminator)
+    return '';
+  return [normalizeComparableText(testId), tableId, discriminator].join('::');
 }
 
 function areDuplicateDropdownOptionClicks(a: FlowStep, b: FlowStep) {
@@ -1457,12 +1508,14 @@ function antdSelectOptionParserSafeSource(step: FlowStep, options: EmitStepOptio
       'page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option")',
       optionName,
   );
+  const previousStepTargetsField = previousStepAlreadyTargetsAntdSelectField(options.previousStep, step);
+  const previousStepFilledField = previousStepTargetsField && options.previousStep?.action === 'fill';
   const lines = [
     `await ${parserSafeLocator(parserSafeOptionLocator)}.click();`,
   ];
-  if (shouldParserSafeSearchAntdSelectOption(optionName))
+  if (shouldParserSafeSearchAntdSelectOption(optionName) && !previousStepFilledField)
     lines.unshift(`await ${input}.fill(${value});`);
-  if (!previousStepAlreadyTargetsAntdSelectField(options.previousStep, step))
+  if (!previousStepTargetsField)
     lines.unshift(`await ${trigger}.click();`);
   return lines.join('\n');
 }
