@@ -744,9 +744,9 @@ function emitStep(lines: string[], step: FlowStep, indent: string, segment?: Flo
   lines.push(`${indent}// ${step.id} ${actionLabel[step.action]}: ${summarizeStepSubject(step)}`);
   const sourceCode = sourceCodeForStep(step, options);
   if (sourceCode) {
-    const emittedSource = sourceCode
-        .map(line => segment ? parameterizeLine(line, step, segment, rowValues) : line)
-        .filter(line => !isPlaceholderSelectOptionSourceLine(line));
+    const parameterizedSource = sourceCode
+        .map(line => segment ? parameterizeLine(line, step, segment, rowValues) : line);
+    const emittedSource = parameterizedSource.some(line => isPlaceholderSelectOptionSourceLine(line)) ? [] : parameterizedSource;
     if (emittedSource.length)
       lines.push(...emittedSource.map(line => `${indent}${line}`));
     else
@@ -1146,9 +1146,26 @@ function preferredTargetLocator(step: FlowStep) {
     fieldLocator(step) ||
     popoverConfirmButtonLocator(step) ||
     dialogScopedLocator(step) ||
+    visibleDialogConfirmButtonLocator(step) ||
     sectionScopedLocator(step) ||
     globalRoleLocator(step) ||
     fallbackTextLocator(step);
+}
+
+function visibleDialogConfirmButtonLocator(step: FlowStep) {
+  if (step.action !== 'click')
+    return undefined;
+  const testId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(step.sourceCode) || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || '';
+  if (testId)
+    return undefined;
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  if (role && role !== 'button')
+    return undefined;
+  const name = normalizeGeneratedText(targetNameForLocator(step) || '') || '';
+  const compactName = name.replace(/\s+/g, '');
+  if (!/^(确定|确认|OK|YES)$/i.test(compactName))
+    return undefined;
+  return `page.locator(${stringLiteral('.ant-modal:not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active), .ant-drawer:not(.ant-drawer-hidden), [role="dialog"]')}).last().getByRole("button", { name: /^(确定|确 定|确认|OK|Ok|ok|Yes|yes)$/ })`;
 }
 
 function popoverConfirmButtonLocator(step: FlowStep) {
@@ -1190,6 +1207,8 @@ function isAntdSelectOptionStep(step: FlowStep) {
   const framework = contextTarget?.framework;
   const controlType = contextTarget?.controlType;
   const role = step.target?.role || contextTarget?.role || '';
+  if (isChoiceControlKind(controlType, role))
+    return false;
   if (/^(select|tree-select|cascader)$/.test(controlType || '') && role !== 'option')
     return false;
   const hasAntdSelector = /\.ant-select-item-option|\.ant-select-dropdown/.test(selector);
@@ -1258,6 +1277,8 @@ function activeDropdownOptionLocator(step: FlowStep) {
   const dropdown = step.context?.before.dialog || step.target?.scope?.dialog;
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const role = step.target?.role || step.context?.before.target?.role || '';
+  if (isChoiceControlKind(controlType, role))
+    return undefined;
   if (/^(select|tree-select|cascader)$/.test(controlType) && role !== 'option')
     return undefined;
   const framework = step.context?.before.target?.framework || String((step.target?.raw as { framework?: unknown } | undefined)?.framework || '');
@@ -1868,14 +1889,31 @@ function choiceControlLocator(step: FlowStep) {
   if (step.action !== 'click' && step.action !== 'check' && step.action !== 'uncheck')
     return undefined;
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
-  if (!/^(checkbox|radio|switch)$/.test(controlType) && !/^(checkbox|radio|switch)$/.test(step.target?.role || ''))
+  if (!isChoiceControlKind(controlType, step.target?.role || step.context?.before.target?.role || ''))
     return undefined;
-  const text = step.target?.text || step.target?.name || step.target?.displayName || step.target?.label;
+  const text = choiceControlText(step);
   if (!text)
     return undefined;
-  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  const dialog = selectTriggerDialog(step);
   const base = dialog?.title ? `page.getByRole('dialog', { name: ${stringLiteral(dialog.title)} })` : 'page';
   return `${base}.locator('label').filter({ hasText: ${stringLiteral(text)} })`;
+}
+
+function isChoiceControlKind(controlType?: string, role?: string) {
+  return /^(checkbox|radio|switch)$/.test(controlType || '') || /^(checkbox|radio|switch)$/.test(role || '');
+}
+
+function choiceControlText(step: FlowStep) {
+  return generatedTextCandidate(
+      step.context?.before.target?.text,
+      step.context?.before.target?.normalizedText,
+      step.context?.before.target?.ariaLabel,
+      step.uiRecipe?.targetText,
+      step.target?.text,
+      step.target?.name,
+      step.target?.displayName,
+      step.target?.label,
+  );
 }
 
 function fillTestIdLocator(step: FlowStep) {

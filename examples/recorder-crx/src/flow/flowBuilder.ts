@@ -155,6 +155,31 @@ export function deleteStepFromFlow(flow: BusinessFlow, stepId: string): Business
   };
 }
 
+export function clearFlowRecordingHistory(flow: BusinessFlow): BusinessFlow {
+  return {
+    ...flow,
+    repeatSegments: [],
+    network: [],
+    artifacts: {
+      ...flow.artifacts,
+      playwrightCode: undefined,
+      deletedStepIds: [],
+      deletedActionIndexes: [],
+      deletedActionSignatures: {},
+      stepActionIndexes: {},
+      stepMergedActionIndexes: {},
+      recorder: {
+        version: 2,
+        actionLog: [],
+        nextActionSeq: 1,
+        nextStepSeq: 1,
+        sessions: [],
+      },
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function insertEmptyStepAfter(flow: BusinessFlow, afterStepId: string): BusinessFlow {
   const base = migrateFlowToStableStepModel(flow);
   const recorder = cloneRecorderState(base);

@@ -44,7 +44,7 @@ import { clearAiUsageRecords, loadAiApiKey, loadAiIntentSettings, loadAiProvider
 import { usageRecordsToJsonl } from './aiIntent/usage';
 import type { AiIntentSettings, AiProviderProfile, AiUsageRecord } from './aiIntent/types';
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './flow/codePreview';
-import { appendSyntheticPageContextStepsWithResult, createAssertion, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow, nextAssertionId, normalizeFlowStepIds, type MergeDiagnosticEvent } from './flow/flowBuilder';
+import { appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, createAssertion, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow, nextAssertionId, normalizeFlowStepIds, type MergeDiagnosticEvent } from './flow/flowBuilder';
 import { mergePageContextIntoFlow, normalizeIntentSources } from './flow/flowContextMerger';
 import { deleteRepeatSegment, upsertRepeatSegment } from './flow/repeatSegments';
 import { toCompactFlow } from './flow/compactExporter';
@@ -53,6 +53,7 @@ import { flowStats } from './flow/display';
 import { downloadText, safeFilename } from './flow/download';
 import { redactBusinessFlow } from './flow/redactor';
 import { deleteFlowDraft, deleteFlowRecord, listFlowRecords, loadLatestFlowDraft, saveFlowDraft, saveFlowRecord } from './flow/storage';
+import { filterPageContextEventsForCapture, isPageContextEventWithinCapture } from './flow/pageContextCapture';
 import type { PageContextEvent } from './flow/pageContextTypes';
 import type { BusinessFlow, FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowRepeatSegment, FlowStep } from './flow/types';
 import { createEmptyBusinessFlow } from './flow/types';
@@ -121,20 +122,20 @@ function withPlaywrightCodeForExport(flow: BusinessFlow, code?: string): Busines
   return prepareBusinessFlowForExport(flow, code);
 }
 
-function requestPageContextEvents(): Promise<PageContextEvent[]> {
-  return chrome.runtime.sendMessage({ event: 'pageContextEventsRequested' })
+function requestPageContextEvents(options: { sinceWallTime?: number } = {}): Promise<PageContextEvent[]> {
+  return chrome.runtime.sendMessage({ event: 'pageContextEventsRequested', sinceWallTime: options.sinceWallTime })
       .then(events => Array.isArray(events) ? events : [])
       .catch(() => []);
 }
 
-async function requestSettledPageContextEvents(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageContextEvent[]> {
+async function requestSettledPageContextEvents(options: { settleMs?: number; timeoutMs?: number; sinceWallTime?: number } = {}): Promise<PageContextEvent[]> {
   const settleMs = options.settleMs ?? 220;
   const timeoutMs = options.timeoutMs ?? 1500;
   const deadline = Date.now() + timeoutMs;
-  let previous = await requestPageContextEvents();
+  let previous = await requestPageContextEvents({ sinceWallTime: options.sinceWallTime });
   while (Date.now() < deadline) {
     await new Promise(resolve => window.setTimeout(resolve, settleMs));
-    const next = await requestPageContextEvents();
+    const next = await requestPageContextEvents({ sinceWallTime: options.sinceWallTime });
     if (pageContextEventSignature(next) === pageContextEventSignature(previous))
       return next;
     previous = next;
@@ -496,6 +497,7 @@ export const CrxRecorder: React.FC = ({
   const [unsavedFlowPromptOpen, setUnsavedFlowPromptOpen] = React.useState(false);
   const [savingBeforeLeave, setSavingBeforeLeave] = React.useState(false);
   const flowDraftRef = React.useRef<BusinessFlow>(flowDraft);
+  const lastNonEmptyFlowDraftRef = React.useRef<BusinessFlow>();
   const pendingAssertionPickRef = React.useRef<PendingAssertionPick>();
   const pendingInsertRecordingRef = React.useRef<PendingInsertRecording>();
   const aiAutoTimerRef = React.useRef<number>();
@@ -503,6 +505,7 @@ export const CrxRecorder: React.FC = ({
   const lastDiagnosticContextEventIdRef = React.useRef<string>();
   const scheduledSyntheticContextEventIdsRef = React.useRef<Set<string>>(new Set());
   const pendingSyntheticClickEventsRef = React.useRef<PageContextEvent[]>([]);
+  const pageContextCaptureStartedAtRef = React.useRef<number>();
   const syntheticFlushTimerRef = React.useRef<number>();
   const businessFlowPlaybackCodeRef = React.useRef('');
   const businessFlowEnabledRef = React.useRef(defaultSettings.businessFlowEnabled !== false);
@@ -514,12 +517,22 @@ export const CrxRecorder: React.FC = ({
 
   React.useEffect(() => {
     flowDraftRef.current = flowDraft;
+    if (flowDraft.steps.length)
+      lastNonEmptyFlowDraftRef.current = flowDraft;
   }, [flowDraft]);
 
   const setPageContextCaptureActive = React.useCallback((active: boolean) => {
+    const wasActive = pageContextCaptureActiveRef.current;
     pageContextCaptureActiveRef.current = active;
     setPageContextCaptureActiveState(active);
+    if (active && !wasActive) {
+      pageContextCaptureStartedAtRef.current = Date.now();
+      lastDiagnosticContextEventIdRef.current = undefined;
+      scheduledSyntheticContextEventIdsRef.current.clear();
+      pendingSyntheticClickEventsRef.current = [];
+    }
     if (!active) {
+      pageContextCaptureStartedAtRef.current = undefined;
       if (syntheticFlushTimerRef.current) {
         window.clearTimeout(syntheticFlushTimerRef.current);
         syntheticFlushTimerRef.current = undefined;
@@ -549,11 +562,29 @@ export const CrxRecorder: React.FC = ({
   const applyPageContextEventsToDraft = React.useCallback((events: PageContextEvent[]) => {
     if (!events.length)
       return flowDraftRef.current;
+    const captureStartedAt = pageContextCaptureStartedAtRef.current;
+    const activeEvents = filterPageContextEventsForCapture(events, captureStartedAt);
+    if (activeEvents.length !== events.length) {
+      appendDiagnosticLog({
+        type: 'merge.page-context-stale-filtered',
+        level: 'warn',
+        message: '已忽略当前录制开始前的页面侧事件',
+        data: {
+          captureStartedAt,
+          receivedCount: events.length,
+          keptCount: activeEvents.length,
+          droppedCount: events.length - activeEvents.length,
+          droppedEventIds: events.filter(event => !isPageContextEventWithinCapture(event, captureStartedAt)).map(event => event.id).slice(0, 20),
+        },
+      });
+    }
+    if (!activeEvents.length)
+      return flowDraftRef.current;
     const pendingRecording = pendingInsertRecordingRef.current;
-    const withContext = mergePageContextIntoFlow(flowDraftRef.current, events);
+    const withContext = mergePageContextIntoFlow(flowDraftRef.current, activeEvents);
     const lastStepId = withContext.steps[withContext.steps.length - 1]?.id;
     const insertAfterStepId = pendingRecording?.appendToEnd ? lastStepId : pendingRecording?.afterStepId;
-    const result = appendSyntheticPageContextStepsWithResult(withContext, events, {
+    const result = appendSyntheticPageContextStepsWithResult(withContext, activeEvents, {
       insertAfterStepId,
       diagnostics: appendDiagnosticLog,
     });
@@ -577,6 +608,8 @@ export const CrxRecorder: React.FC = ({
 
   const queueSyntheticClickEvent = React.useCallback((event: PageContextEvent) => {
     if (!pageContextCaptureActiveRef.current)
+      return;
+    if (!isPageContextEventWithinCapture(event, pageContextCaptureStartedAtRef.current))
       return;
     const existingIndex = pendingSyntheticClickEventsRef.current.findIndex(existing => existing.id === event.id);
     if (existingIndex >= 0)
@@ -610,7 +643,8 @@ export const CrxRecorder: React.FC = ({
     // pageContextSidecar intentionally delays click context by 160ms so it can include
     // post-click overlay/toast state. Stop/export must drain that product pipeline,
     // otherwise table rowKey / AntD option context can miss the final flow export.
-    const requestedEvents = await requestSettledPageContextEvents();
+    const captureStartedAt = pageContextCaptureStartedAtRef.current;
+    const requestedEvents = await requestSettledPageContextEvents({ sinceWallTime: captureStartedAt });
     const requestedEventsById = new Map(requestedEvents.map(event => [event.id, event]));
     const queuedEventsAfterSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
@@ -683,15 +717,33 @@ export const CrxRecorder: React.FC = ({
             diagnostics: appendDiagnosticLog,
           };
           setFlowDraft(flow => {
-            const previousStepIds = new Set(flow.steps.map(step => step.id));
-            const nextFlow = mergeActionsIntoFlow(flow, actions, sources, mergeOptions);
+            const lastNonEmptyFlow = lastNonEmptyFlowDraftRef.current;
+            const mergeBase = !flow.steps.length && lastNonEmptyFlow?.flow.id === flow.flow.id ? lastNonEmptyFlow : flow;
+            if (mergeBase !== flow) {
+              appendDiagnosticLog({
+                type: 'ui.flow-restore-before-merge',
+                level: 'warn',
+                message: '录制合并前恢复同一流程的非空步骤快照',
+                data: {
+                  flowId: flow.flow.id,
+                  emptyStepCount: flow.steps.length,
+                  restoredStepCount: mergeBase.steps.length,
+                  actionCount: actions.length,
+                  pendingBaseActionCount: pendingRecording?.baseActionCount,
+                  pendingLocalBaseActionCount: pendingRecording?.localBaseActionCount,
+                },
+              });
+            }
+            const previousStepIds = new Set(mergeBase.steps.map(step => step.id));
+            const nextFlow = mergeActionsIntoFlow(mergeBase, actions, sources, mergeOptions);
             const insertedStepIds = nextFlow.steps.filter(step => !previousStepIds.has(step.id)).map(step => step.id);
             appendDiagnosticLog({
               type: insertedStepIds.length ? 'ui.steps-added' : 'ui.no-steps-added',
               level: insertedStepIds.length ? 'info' : 'warn',
               message: insertedStepIds.length ? `新增 ${insertedStepIds.length} 个业务步骤` : '本次 recorder payload 没有让右侧新增步骤',
               data: {
-                beforeStepCount: flow.steps.length,
+                beforeStepCount: mergeBase.steps.length,
+                restoredBeforeMerge: mergeBase !== flow,
                 afterStepCount: nextFlow.steps.length,
                 insertedStepIds,
                 actionCount: actions.length,
@@ -701,6 +753,8 @@ export const CrxRecorder: React.FC = ({
               },
             });
             flowDraftRef.current = nextFlow;
+            if (nextFlow.steps.length)
+              lastNonEmptyFlowDraftRef.current = nextFlow;
             if (pendingRecording && shouldAdvancePendingBase(pendingRecording, actions.length)) {
               advancePendingBase(pendingRecording, actions.length);
               if (pendingRecording.afterStepId && insertedStepIds.length) {
@@ -712,10 +766,13 @@ export const CrxRecorder: React.FC = ({
           });
           if (actions.length) {
             window.setTimeout(() => {
-              requestPageContextEvents().then(contextEvents => {
-                if (contextEvents.length) {
+              if (!pageContextCaptureActiveRef.current)
+                return;
+              requestPageContextEvents({ sinceWallTime: pageContextCaptureStartedAtRef.current }).then(contextEvents => {
+                const activeEvents = filterPageContextEventsForCapture(contextEvents, pageContextCaptureStartedAtRef.current);
+                if (activeEvents.length) {
                   setFlowDraft(flow => {
-                    const nextFlow = mergePageContextIntoFlow(flow, contextEvents);
+                    const nextFlow = mergePageContextIntoFlow(flow, activeEvents);
                     flowDraftRef.current = nextFlow;
                     return nextFlow;
                   });
@@ -908,13 +965,14 @@ export const CrxRecorder: React.FC = ({
       return;
 
     let disposed = false;
-    requestPageContextEvents().then(events => {
+    requestPageContextEvents({ sinceWallTime: pageContextCaptureStartedAtRef.current }).then(events => {
       if (!disposed)
         lastDiagnosticContextEventIdRef.current = events[events.length - 1]?.id;
     }).catch(() => {});
 
     const interval = window.setInterval(() => {
-      requestPageContextEvents().then(events => {
+      requestPageContextEvents({ sinceWallTime: pageContextCaptureStartedAtRef.current }).then(rawEvents => {
+        const events = filterPageContextEventsForCapture(rawEvents, pageContextCaptureStartedAtRef.current);
         if (disposed || !pageContextCaptureActiveRef.current || !events.length)
           return;
         const lastId = lastDiagnosticContextEventIdRef.current;
@@ -1578,7 +1636,12 @@ export const CrxRecorder: React.FC = ({
     }
     setFlowDraft(flow => {
       const step = flow.steps.find(step => step.id === stepId);
-      const next = deleteStepFromFlow(flow, stepId);
+      const deleted = deleteStepFromFlow(flow, stepId);
+      const next = deleted.steps.length ? deleted : clearFlowRecordingHistory(deleted);
+      if (next.steps.length)
+        lastNonEmptyFlowDraftRef.current = next;
+      else if (lastNonEmptyFlowDraftRef.current?.flow.id === flow.flow.id)
+        lastNonEmptyFlowDraftRef.current = undefined;
       appendDiagnosticLog({
         type: 'ui.step-delete',
         message: `删除步骤 ${stepId}`,
@@ -1606,7 +1669,12 @@ export const CrxRecorder: React.FC = ({
     }
     setFlowDraft(flow => {
       const deletedSteps = flow.steps.filter(step => uniqueStepIds.includes(step.id));
-      const next = uniqueStepIds.reduce((current, stepId) => deleteStepFromFlow(current, stepId), flow);
+      const deleted = uniqueStepIds.reduce((current, stepId) => deleteStepFromFlow(current, stepId), flow);
+      const next = deleted.steps.length ? deleted : clearFlowRecordingHistory(deleted);
+      if (next.steps.length)
+        lastNonEmptyFlowDraftRef.current = next;
+      else if (lastNonEmptyFlowDraftRef.current?.flow.id === flow.flow.id)
+        lastNonEmptyFlowDraftRef.current = undefined;
       appendDiagnosticLog({
         type: 'ui.steps-delete',
         message: `批量删除 ${deletedSteps.length} 个步骤`,
@@ -1705,29 +1773,9 @@ export const CrxRecorder: React.FC = ({
       },
       level: 'warn',
     });
-    setFlowDraft(flow => ({
-      ...flow,
-      steps: [],
-      repeatSegments: [],
-      network: [],
-      artifacts: {
-        ...flow.artifacts,
-        playwrightCode: undefined,
-        deletedStepIds: [],
-        deletedActionIndexes: [],
-        deletedActionSignatures: {},
-        stepActionIndexes: {},
-        stepMergedActionIndexes: {},
-        recorder: {
-          version: 2,
-          actionLog: [],
-          nextActionSeq: 1,
-          nextStepSeq: 1,
-          sessions: [],
-        },
-      },
-      updatedAt: new Date().toISOString(),
-    }));
+    setFlowDraft(flow => clearFlowRecordingHistory({ ...flow, steps: [] }));
+    if (lastNonEmptyFlowDraftRef.current?.flow.id === flowDraft.flow.id)
+      lastNonEmptyFlowDraftRef.current = undefined;
     setRecordedActionCount(0);
     setSources([]);
     setLog(new Map());
@@ -1742,7 +1790,7 @@ export const CrxRecorder: React.FC = ({
     window.dispatch({ event: 'clear', params: {} }).catch(() => {});
     window.dispatch({ event: 'fileChanged', params: { file: 'playwright-test' } }).catch(() => {});
     window.dispatch({ event: 'businessFlowCodeChanged', params: { code: null } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft.artifacts?.recorder?.actionLog.length, flowDraft.repeatSegments?.length, flowDraft.steps.length]);
+  }, [appendDiagnosticLog, flowDraft.artifacts?.recorder?.actionLog.length, flowDraft.flow.id, flowDraft.repeatSegments?.length, flowDraft.steps.length]);
 
   const saveRepeatSegment = React.useCallback((segment: FlowRepeatSegment) => {
     setFlowDraft(flow => {
@@ -2347,7 +2395,7 @@ export const CrxRecorder: React.FC = ({
                   insertAfterStepLabel={insertAfterStepLabel}
                 />
                 <div className={insertRecordingAfterStepId ? 'recording-toolbar inserting' : 'recording-toolbar'}>
-                  <button type='button' onClick={pauseRecording}>{mode === 'recording' ? '暂停' : '继续'}</button>
+                  <button type='button' onClick={mode === 'recording' ? pauseRecording : continueRecording}>{mode === 'recording' ? '暂停' : '继续'}</button>
                   <button type='button' className='danger' disabled={mode !== 'recording'} onClick={stopRecording}>停止录制</button>
                   <button type='button' onClick={() => saveCurrentRecord()}>保存记录</button>
                   {insertRecordingAfterStepId ? <button type='button' onClick={exitInsertRecording}>退出插入</button> : <button type='button' onClick={() => setPanelStage('review')}>导出</button>}

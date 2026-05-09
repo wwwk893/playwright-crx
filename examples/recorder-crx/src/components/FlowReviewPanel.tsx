@@ -156,8 +156,9 @@ export const FlowReviewPanel: React.FC<{
         </div>
         <div className='repeat-create-actions'>
           <button type='button' onClick={() => setSelectedRepeatStepIds(visibleSteps.map(step => step.id))}>选择全部</button>
-          <button type='button' onClick={() => setSelectedRepeatStepIds([])}>清空</button>
+          <button type='button' disabled={!selectionState.selectedCount} onClick={() => setSelectedRepeatStepIds([])}>取消选择</button>
           <button type='button' className='danger-outline' disabled={!selectionState.selectedCount} onClick={deleteSelectedSteps}>删除选中</button>
+          <button type='button' className='danger-outline' onClick={onClearSteps}>清空步骤</button>
           <button type='button' className='primary' disabled={!selectionState.canCreate} onClick={() => setEditingRepeatSegment(createRepeatSegment(flow, selectedRepeatStepIds))}>设为循环片段</button>
         </div>
       </div>}

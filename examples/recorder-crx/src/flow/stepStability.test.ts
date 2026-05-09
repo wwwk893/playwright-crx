@@ -10,7 +10,8 @@ import type { UiActionRecipe, UiComponentKind } from '../uiSemantics/types';
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
-import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { filterPageContextEventsForCapture } from './pageContextCapture';
 import { mergePageContextIntoFlow } from './flowContextMerger';
 import { suggestIntent } from './intentRules';
 import { createRepeatSegment } from './repeatSegments';
@@ -25,6 +26,17 @@ type TestCase = {
 };
 
 const tests: TestCase[] = [
+  {
+    name: 'page context capture ignores events older than the current recording session',
+    run: () => {
+      const events = [
+        pageClickEventWithTarget('old-click', 1000, { role: 'button', text: '上一轮' }),
+        pageClickEventWithTarget('current-click', 2000, { role: 'button', text: '本轮' }),
+      ];
+
+      assertEqual(filterPageContextEventsForCapture(events, 1500).map(event => event.id), ['current-click']);
+    },
+  },
   {
     name: 'continue recording appends only new actions and keeps user edits',
     run: () => {
@@ -70,6 +82,37 @@ const tests: TestCase[] = [
       assertEqual(continued.steps.map(step => step.id), ['s001', 's003', 's004']);
       assert(!continued.steps.some(step => step.id === 's002'), 'deleted s002 should not return');
       assertEqual(continued.steps.map(step => step.order), [1, 2, 3]);
+    },
+  },
+  {
+    name: 'clearing all visible steps resets hidden recorder history before continuation',
+    run: () => {
+      const initial = mergeActionsIntoFlow(undefined, [
+        clickAction('新建'),
+        fillAction('地址池名称', 'pool-a'),
+        clickAction('确定'),
+      ], [], {});
+      const deletedAll = initial.steps.reduce((flow, step) => deleteStepFromFlow(flow, step.id), initial);
+
+      assertEqual(deletedAll.steps.length, 0);
+      assertEqual(deletedAll.artifacts?.recorder?.actionLog.length, 3);
+
+      const cleared = clearFlowRecordingHistory(deletedAll);
+      assertEqual(cleared.steps.length, 0);
+      assertEqual(cleared.artifacts?.recorder?.actionLog.length, 0);
+      assertEqual(countBusinessFlowPlaybackActions(cleared), 0);
+
+      const continued = mergeActionsIntoFlow(cleared, [
+        clickAction('新增IP端口池'),
+        fillAction('地址池名称', 'pool-b'),
+      ], [], {
+        appendNewActions: true,
+        insertBaseActionCount: 0,
+      });
+
+      assertEqual(continued.steps.map(step => step.action), ['click', 'fill']);
+      assertEqual(continued.steps.map(step => step.id), ['s001', 's002']);
+      assertEqual(continued.artifacts?.recorder?.actionLog.length, 2);
     },
   },
   {
@@ -307,6 +350,46 @@ const tests: TestCase[] = [
       const repeatPlayback = generateBusinessFlowPlaybackCode(repeatFlow);
       assert(!repeatPlayback.includes('internal:has-text=\\"选择一个VRF\\"i'), 'placeholder produced only after repeat row parameterization should still be dropped');
       assert(!repeatPlayback.includes('选择一个VRF'), 'parameterized placeholder text should not leak into runtime playback');
+    },
+  },
+  {
+    name: 'placeholder select option replay drops the whole multiline dispatch block',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: { role: 'button', text: '选择一个WAN口', displayName: 'button 选择一个WAN口' },
+          rawAction: { name: 'click', selector: 'internal:role=button[name="选择一个WAN口"i]' } as any,
+          context: {
+            eventId: 'ctx-wan-placeholder',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'WAN口' },
+              target: { role: 'option' as any, framework: 'antd', controlType: 'select-option', text: '选择一个WAN口', normalizedText: '选择一个WAN口' },
+              dialog: { type: 'dropdown', title: '选择一个WAN口', visible: true },
+            },
+          },
+          assertions: [],
+        }],
+        repeatSegments: [{
+          id: 'segment-wan',
+          name: 'WAN rows',
+          stepIds: ['s001'],
+          parameters: [],
+          rows: [{ id: 'row-1', values: {} }],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('skipped unsafe placeholder select option replay'), 'placeholder block should be represented as an explicit skipped step comment');
+      assert(!code.includes('const normalize = (value)'), 'orphaned evaluateAll callback body must not be emitted');
+      assert(!code.includes('expectedText'), 'orphaned evaluateAll argument references must not be emitted');
+      assert(!code.includes('}, "选择一个WAN口");'), 'orphaned evaluateAll closing line must not be emitted');
     },
   },
   {
@@ -1696,6 +1779,31 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'tooltip target should click the visible AntD popconfirm button, not the tooltip container');
       assert(!firstStep.includes('page.getByRole("tooltip", { name: "确 定" }).click();'), 'tooltip role click is not a runnable confirmation target');
+    },
+  },
+  {
+    name: 'generic confirm button falls back to the top visible dialog instead of page global role',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [rawClickAction('internal:role=button[name="确 定"i]')], recordedSource([
+        `await page.getByRole('button', { name: '确 定' }).click();`,
+      ]), {});
+      const genericConfirm: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            role: 'button',
+            text: '确 定',
+            displayName: 'button 确 定',
+          },
+        })),
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(genericConfirm), 's001');
+
+      assert(firstStep.includes('.ant-modal:not(.ant-zoom-big-leave)'), 'generic confirm should target the top visible dialog first');
+      assert(firstStep.includes('getByRole("button", { name: /^(确定|确 定|确认|OK|Ok|ok|Yes|yes)$/ })'), 'generic confirm should use a dialog-scoped confirmation button regex');
+      assert(!firstStep.includes(`page.getByRole('button', { name: '确 定' }).click();`), 'generic confirm should not keep the page-global role locator');
     },
   },
   {
@@ -3957,6 +4065,83 @@ test('demo', async ({ page }) => {
 
       assert(!checkboxStep.includes('AntD Select virtual dropdown replay workaround'), 'checkbox should not inherit previous select option replay');
       assert(checkboxStep.includes('开启代理ARP'), 'checkbox replay should keep its own label');
+    },
+  },
+  {
+    name: 'radio click keeps current page context even when stale select metadata is attached',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            selector: 'internal:text="独享地址池"i',
+            raw: {
+              ui: {
+                library: 'pro-components',
+                component: 'select',
+                targetText: '选择一个VRF',
+                form: { label: '关联VRF', fieldKind: 'select' },
+                recipe: { kind: 'select-option', optionText: '选择一个VRF' },
+              },
+            },
+            testId: 'network-resource-form',
+            role: 'radio',
+            name: '选择一个VRF',
+            label: '类型',
+            text: '选择一个VRF',
+            locator: 'internal:text="独享地址池"i',
+            displayName: '选择一个VRF',
+            scope: {
+              form: { title: '端口映射 #1', label: '类型' },
+              dialog: { type: 'dropdown' as const, visible: true },
+            },
+            locatorHint: { strategy: 'global-testid', confidence: 0.99, reason: 'business test id' },
+          },
+          uiRecipe: {
+            kind: 'fill-form-field',
+            library: 'pro-components',
+            component: 'pro-form-field',
+            formKind: 'pro-form',
+            fieldKind: 'radio',
+            fieldLabel: '类型',
+            overlayTitle: '新建网络资源',
+            targetText: '独享地址池',
+          } as any,
+          context: {
+            eventId: 'ctx-radio-with-stale-select',
+            capturedAt: 1000,
+            before: {
+              form: { title: '端口映射 #1', label: '类型' },
+              target: {
+                tag: 'label',
+                role: 'radio' as any,
+                text: '独享地址池',
+                normalizedText: '独享地址池',
+                framework: 'procomponents',
+                controlType: 'radio',
+              },
+            },
+            after: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+            },
+          },
+          sourceCode: `await page.getByText("独享地址池").click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:text="独享地址池"i' } },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const radioStep = stepCodeBlock(code, 's001');
+
+      assert(!radioStep.includes('AntD Select virtual dropdown replay workaround'), 'radio should not be treated as an AntD select option');
+      assert(!radioStep.includes('.ant-select-selector'), 'radio replay should not look for select triggers');
+      assert(radioStep.includes(`getByRole('dialog', { name: "新建网络资源" }).locator('label').filter({ hasText: "独享地址池" }).click();`), 'radio replay should use the current radio label scoped to the persistent dialog');
     },
   },
   {

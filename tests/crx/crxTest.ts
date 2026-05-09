@@ -101,8 +101,10 @@ export const test = base.extend<CrxFixtureOptions & {
         },
 
         context: async ({ extensionPath, createUserDataDir }, use) => {
+          const runHeadless = process.env.PLAYWRIGHT_CRX_HEADLESS === '1';
           const context = await chromium.launchPersistentContext(createUserDataDir(), {
-            headless: false,
+            headless: runHeadless ? true : false,
+            channel: runHeadless && !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? 'chromium' : undefined,
             executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
             args: [
               '--no-sandbox',

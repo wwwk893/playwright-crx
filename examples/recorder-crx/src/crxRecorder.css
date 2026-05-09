@@ -2788,9 +2788,10 @@
 }
 
 .repeat-create-actions {
-  display: grid;
+  display: flex;
   flex: none;
-  grid-template-columns: auto auto auto auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 

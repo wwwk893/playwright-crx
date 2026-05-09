@@ -303,24 +303,24 @@ function addPageContextEvent(tabId: number, event: PageContextEvent) {
   contextEventsByTabId.set(tabId, prunePageContextEvents(events));
 }
 
-function getRecentPageContextEvents(tabId: number) {
+function getRecentPageContextEvents(tabId: number, sinceWallTime?: number) {
   const events = prunePageContextEvents(contextEventsByTabId.get(tabId) ?? []);
   contextEventsByTabId.set(tabId, events);
-  return events;
+  return filterPageContextEventsSince(events, sinceWallTime);
 }
 
-function getRecentPageContextEventsForRecordedTab(requestedTabId?: number) {
+function getRecentPageContextEventsForRecordedTab(requestedTabId?: number, sinceWallTime?: number) {
   if (typeof requestedTabId === 'number')
-    return getRecentPageContextEvents(requestedTabId);
+    return getRecentPageContextEvents(requestedTabId, sinceWallTime);
   if (typeof currentPageContextTabId === 'number') {
-    const events = getRecentPageContextEvents(currentPageContextTabId);
+    const events = getRecentPageContextEvents(currentPageContextTabId, sinceWallTime);
     if (events.length)
       return events;
   }
   if (attachedTabIds.size === 1) {
     const [tabId] = Array.from(attachedTabIds);
     currentPageContextTabId = tabId;
-    return getRecentPageContextEvents(tabId);
+    return getRecentPageContextEvents(tabId, sinceWallTime);
   }
   return [];
 }
@@ -330,6 +330,12 @@ function prunePageContextEvents(events: PageContextEvent[]) {
   return events
       .filter(event => (event.wallTime ?? Date.now()) >= minWallTime)
       .slice(-maxContextEventsPerTab);
+}
+
+function filterPageContextEventsSince(events: PageContextEvent[], sinceWallTime?: number) {
+  if (!Number.isFinite(sinceWallTime) || !sinceWallTime)
+    return events;
+  return events.filter(event => typeof event.wallTime !== 'number' || event.wallTime >= sinceWallTime);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -342,7 +348,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.event === 'pageContextEventsRequested') {
     const requestedTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
-    Promise.resolve(getRecentPageContextEventsForRecordedTab(requestedTabId))
+    const sinceWallTime = typeof message.sinceWallTime === 'number' ? message.sinceWallTime : undefined;
+    Promise.resolve(getRecentPageContextEventsForRecordedTab(requestedTabId, sinceWallTime))
         .then(events => sendResponse(events))
         .catch(() => sendResponse([]));
     return true;

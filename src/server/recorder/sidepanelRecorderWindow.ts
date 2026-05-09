@@ -17,6 +17,7 @@
 import type { RecorderEventData, RecorderMessage, RecorderWindow } from './crxRecorderApp';
 
 export class SidepanelRecorderWindow implements RecorderWindow {
+  private static _activeWindow?: SidepanelRecorderWindow;
   private _recorderUrl: string;
   private _portPromise: Promise<chrome.runtime.Port>;
   private _resolvePort?: (port: chrome.runtime.Port) => void;
@@ -28,6 +29,8 @@ export class SidepanelRecorderWindow implements RecorderWindow {
   hideApp?: (() => any) | undefined;
 
   constructor(recorderUrl?: string) {
+    SidepanelRecorderWindow._activeWindow?._disposeStaleConnection();
+    SidepanelRecorderWindow._activeWindow = this;
     this._recorderUrl = recorderUrl ?? 'index.html';
     this._portPromise = this._nextPortPromise();
     this._onConnect = this._handleConnect.bind(this);
@@ -69,6 +72,8 @@ export class SidepanelRecorderWindow implements RecorderWindow {
       this._port?.disconnect();
     } catch {
     }
+    if (SidepanelRecorderWindow._activeWindow === this)
+      SidepanelRecorderWindow._activeWindow = undefined;
     this._port = undefined;
     this._portPromise = this._nextPortPromise();
     this.hideApp?.();
@@ -83,6 +88,12 @@ export class SidepanelRecorderWindow implements RecorderWindow {
       return;
     if (port.name && port.name !== 'recorder')
       return;
+    if (this._port && this._port !== port) {
+      try {
+        this._port.disconnect();
+      } catch {
+      }
+    }
 
     this._port = port;
     this._closed = false;
@@ -108,5 +119,16 @@ export class SidepanelRecorderWindow implements RecorderWindow {
       });
     } catch {
     }
+  }
+
+  private _disposeStaleConnection() {
+    this._disposed = true;
+    this._closed = true;
+    chrome.runtime.onConnect.removeListener(this._onConnect);
+    try {
+      this._port?.disconnect();
+    } catch {
+    }
+    this._port = undefined;
   }
 }
