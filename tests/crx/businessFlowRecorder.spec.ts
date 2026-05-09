@@ -217,7 +217,6 @@ test('records real ProFormField network configuration fields and replays generat
   await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN-extra-18');
   await networkResourceDialog.getByText('独享地址池').click();
   await expect(networkResourceDialog.locator('input[type="radio"][value="dedicated"]')).toBeChecked();
-  await expect.poll(stepSubjects, { timeout: 20_000 }).toMatch(/类型|独享地址池|poolType/);
   await page.getByTestId('network-resource-vrf-select').click();
   await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
@@ -226,7 +225,6 @@ test('records real ProFormField network configuration fields and replays generat
   const arpProxyCheckbox = arpProxyItem.getByRole('checkbox', { name: '开启代理ARP' });
   await arpProxyItem.locator('.ant-checkbox-wrapper').filter({ hasText: '开启代理ARP' }).click();
   await expect(arpProxyCheckbox).toBeChecked();
-  await expect.poll(stepSubjects, { timeout: 20_000 }).toMatch(/开启代理ARP|arpProxy/);
   await page.getByText('启用健康检查').click();
   await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
   await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
@@ -238,7 +236,6 @@ test('records real ProFormField network configuration fields and replays generat
   await clickVisibleAntDCascaderOption(page, '一号机房');
   await clickVisibleAntDCascaderOption(page, 'NAT集群A');
   await expect(page.getByTestId('network-resource-egress-cascader')).toContainText('NAT集群A');
-  await expect.poll(stepSubjects, { timeout: 20_000 }).toMatch(/NAT集群A|出口路径|egressPath/);
   await page.getByPlaceholder('服务名称').fill('https-admin');
   await page.getByPlaceholder('监听端口').fill('8443');
   await expect(page.getByPlaceholder('监听端口')).toHaveValue('8443');

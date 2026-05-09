@@ -55,7 +55,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       lastDropdownOptionCompact = '';
     }
 
-    emitStep(lines, step, '  ', undefined, undefined, { nextStep: effectiveFlow.steps[index + 1] });
+    emitStep(lines, step, '  ', undefined, undefined, { previousStep: effectiveFlow.steps[index - 1], nextStep: effectiveFlow.steps[index + 1] });
   }
 
   lines.push('});');
@@ -502,40 +502,7 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
 
     if (activeSelectStep && isContextlessOptionTextClickAfterSelect(step, activeSelectStep, activeSelectQuery)) {
       changed = true;
-      const rawOptionTitle = rawSelectOptionTitle(step);
-      const query = activeSelectQuery || selectQueryForStep(activeSelectStep);
-      const optionText = completeOptionTextFromSelectQuery(step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle || '', query) || step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle;
-      const activeForm = selectStepFormContext(activeSelectStep);
-      return {
-        ...step,
-        target: {
-          ...step.target,
-          scope: {
-            ...step.target?.scope,
-            dialog: selectTriggerDialog(activeSelectStep),
-            form: activeForm,
-          },
-        },
-        context: {
-          ...step.context,
-          before: {
-            ...step.context?.before,
-            dialog: { type: 'dropdown', visible: true },
-            form: activeForm,
-            target: {
-              ...step.context?.before.target,
-              framework: activeSelectStep.context?.before.target?.framework || 'antd',
-              controlType: inheritedPopupOptionControlType(activeForm?.label),
-              text: optionText,
-              normalizedText: optionText,
-            },
-          },
-          after: {
-            ...step.context?.after,
-            dialog: selectTriggerDialog(activeSelectStep),
-          },
-        },
-      } as FlowStep;
+      return inheritedAntdSelectOptionStep(step, activeSelectStep, activeSelectQuery);
     }
 
     if (step.action !== 'fill' && step.action !== 'press') {
@@ -545,6 +512,43 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
     return step;
   });
   return changed ? { ...flow, steps } : flow;
+}
+
+function inheritedAntdSelectOptionStep(step: FlowStep, activeSelectStep: FlowStep, activeSelectQuery = '') {
+  const rawOptionTitle = rawSelectOptionTitle(step);
+  const query = activeSelectQuery || selectQueryForStep(activeSelectStep);
+  const optionText = completeOptionTextFromSelectQuery(step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle || '', query) || step.target?.text || step.target?.name || step.target?.displayName || rawOptionTitle;
+  const activeForm = selectStepFormContext(activeSelectStep);
+  return {
+    ...step,
+    target: {
+      ...step.target,
+      scope: {
+        ...step.target?.scope,
+        dialog: selectTriggerDialog(activeSelectStep),
+        form: activeForm,
+      },
+    },
+    context: {
+      ...step.context,
+      before: {
+        ...step.context?.before,
+        dialog: { type: 'dropdown', visible: true },
+        form: activeForm,
+        target: {
+          ...step.context?.before.target,
+          framework: activeSelectStep.context?.before.target?.framework || 'antd',
+          controlType: inheritedPopupOptionControlType(activeForm?.label),
+          text: optionText,
+          normalizedText: optionText,
+        },
+      },
+      after: {
+        ...step.context?.after,
+        dialog: selectTriggerDialog(activeSelectStep),
+      },
+    },
+  } as FlowStep;
 }
 
 function inheritedPopupOptionControlType(label?: string) {
@@ -561,10 +565,22 @@ function isAntdSelectFieldStep(step: FlowStep) {
   const label = selectStepFormContext(step)?.label;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   const source = step.sourceCode || '';
-  const sourceCombobox = /getByRole\(["']combobox["']/.test(source) || /role=combobox/.test(selector);
+  const explicitTextField = hasExplicitTextFieldContext(step);
+  const sourceCombobox = !explicitTextField && (/getByRole\(["']combobox["']/.test(source) || /role=combobox/.test(selector));
   const isAntdLike = framework === 'antd' || framework === 'procomponents' || step.target?.role === 'combobox' || sourceCombobox;
-  const isPopupField = controlType === 'select' || controlType === 'tree-select' || controlType === 'cascader' || step.target?.role === 'combobox' || sourceCombobox;
+  const isPopupField = !explicitTextField && (controlType === 'select' || controlType === 'tree-select' || controlType === 'cascader' || step.target?.role === 'combobox' || sourceCombobox);
   return !!label && isAntdLike && isPopupField && (step.action === 'click' || step.action === 'fill');
+}
+
+function hasExplicitTextFieldContext(step: FlowStep) {
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const tag = step.context?.before.target?.tag || String((step.target?.raw as { tag?: unknown } | undefined)?.tag || '');
+  if (/^(input|textarea)$/.test(controlType))
+    return true;
+  if (role === 'textbox')
+    return true;
+  return /^(input|textarea)$/i.test(tag) && role !== 'combobox' && !/^(select|tree-select|cascader)$/.test(controlType);
 }
 
 function selectStepFormContext(step: FlowStep) {
@@ -638,7 +654,7 @@ function emitRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRep
   for (const [index, step] of segmentSteps.entries()) {
     if (isIntermediateSameFieldFill(step, segmentSteps, index) || isPlaceholderSelectOptionClick(step) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]))
       continue;
-    emitStep(lines, step, '    ', segment, undefined, { nextStep: segmentSteps[index + 1] });
+    emitStep(lines, step, '    ', segment, undefined, { previousStep: segmentSteps[index - 1], nextStep: segmentSteps[index + 1] });
   }
   if (segment.assertionTemplate)
     lines.push(`    // template assertion: ${replaceTemplateValues(segment.assertionTemplate.description, segment)}`);
@@ -996,6 +1012,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     case 'openPage':
       return action.url || step.url ? `await page.goto(${stringLiteral(action.url || step.url)});` : undefined;
     case 'click': {
+      const inheritedOption = inheritedOptionClickSourceFromPreviousStep(step, options.previousStep, options);
+      if (inheritedOption)
+        return inheritedOption;
       const selectTriggerLocator = selectTriggerClickLocator(step);
       if (selectTriggerLocator)
         return `await ${selectTriggerLocator}.click();`;
@@ -1499,7 +1518,7 @@ function antdSelectOptionParserSafeSource(step: FlowStep, options: EmitStepOptio
   if (!field || !optionName)
     return rawSelectOptionParserSafeSource(step) || `await ${parserSafeLocator(antdSelectOptionLocator(step) || activeDropdownOptionLocator(step) || 'page.locator(".ant-select-item-option")')}.click();`;
   const trigger = parserSafeLocator(field);
-  const input = `${trigger}.locator(${stringLiteral('input')})`;
+  const input = `${trigger}.locator(${stringLiteral('input:visible')})`;
   const value = stringLiteral(parserSafeSelectSearchText(optionName));
   const optionLocator = antdSelectOptionLocator(step) || activeDropdownOptionLocator(step);
   if (!optionLocator)
@@ -1546,6 +1565,16 @@ function previousStepAlreadyTargetsAntdSelectField(previousStep: FlowStep | unde
 function rawSelectOptionParserSafeSource(step: FlowStep) {
   const optionLocator = antdSelectOptionLocator(step);
   return optionLocator ? `await ${parserSafeLocator(optionLocator)}.click();` : undefined;
+}
+
+function inheritedOptionClickSourceFromPreviousStep(step: FlowStep, previousStep: FlowStep | undefined, options: EmitStepOptions = {}) {
+  if (!previousStep || !isAntdSelectFieldStep(previousStep) || !isContextlessOptionTextClickAfterSelect(step, previousStep, selectQueryForStep(previousStep)))
+    return undefined;
+  const inheritedStep = inheritedAntdSelectOptionStep(step, previousStep, selectQueryForStep(previousStep));
+  const selectOption = antdSelectOptionLocator(inheritedStep) || activeDropdownOptionLocator(inheritedStep);
+  if (!selectOption)
+    return undefined;
+  return options.parserSafe ? antdSelectOptionParserSafeSource(inheritedStep, options) : antdSelectOptionClickSource(inheritedStep, selectOption);
 }
 
 function parserSafeLocator(locator: string) {
@@ -1600,7 +1629,15 @@ function antdSelectFieldLocator(step: FlowStep) {
     return undefined;
   const dialog = selectTriggerDialog(step);
   const root = dialogRootLocator(dialog);
-  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(label)} }).locator(${stringLiteral('.ant-select-selector')}).first()`;
+  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(formItemSearchText(label))} }).locator(${stringLiteral('.ant-select-selector')}).first()`;
+}
+
+function formItemSearchText(label: string) {
+  return normalizeRequiredLabel(label) || label;
+}
+
+function normalizeRequiredLabel(label: string) {
+  return label.replace(/^\s*\*\s*/, '').trim();
 }
 
 function dialogRootLocator(dialog?: FlowDialogScope) {
@@ -1646,7 +1683,7 @@ function popupOptionTriggerLocatorFromHint(step: FlowStep) {
   if (!hint)
     return undefined;
   const root = dialogRootLocator(selectTriggerDialog(step));
-  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(hint)} }).locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-cascader')}).first()`;
+  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(formItemSearchText(hint))} }).locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-cascader')}).first()`;
 }
 
 function popupTriggerHint(step: FlowStep) {
@@ -2069,7 +2106,7 @@ function fieldLocator(step: FlowStep) {
     popupFieldLabelFromName(targetText);
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
-  const isSelectLikeField = /^(select|tree-select|cascader)$/.test(controlType) || step.target?.role === 'combobox' || /ant-select|ant-cascader|role=combobox/.test(source);
+  const isSelectLikeField = !hasExplicitTextFieldContext(step) && (/^(select|tree-select|cascader)$/.test(controlType) || step.target?.role === 'combobox' || /ant-select|ant-cascader|role=combobox/.test(source));
   if ((step.target?.role === 'button' || controlType === 'button') && !isSelectLikeField)
     return undefined;
   if (label && isSelectLikeField)

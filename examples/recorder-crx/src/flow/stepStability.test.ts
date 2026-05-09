@@ -4966,6 +4966,58 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'ProFormSelect option fallback strips required marker when reopening form item',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            role: 'combobox',
+            name: '* WAN口',
+            label: '* WAN口',
+            scope: { form: { label: '* WAN口', name: 'wan' } },
+          },
+          value: 'xtest16',
+          context: {
+            eventId: 'ctx-wan-search',
+            capturedAt: 1000,
+            before: {
+              form: { label: '* WAN口', name: 'wan' },
+              target: {
+                framework: 'procomponents',
+                controlType: 'select',
+                role: 'combobox',
+              },
+            },
+          },
+          rawAction: { action: { name: 'fill', selector: 'internal:role=combobox[name="* WAN口"i]', text: 'xtest16' } },
+          sourceCode: `await page.getByRole('combobox', { name: '* WAN口' }).fill('xtest16');`,
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: { text: 'xtest16:WAN1', displayName: 'xtest16:WAN1' },
+          rawAction: { action: { name: 'click', selector: 'internal:text="xtest16:WAN1"i' } },
+          sourceCode: `await page.getByText('xtest16:WAN1').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+
+      assert(optionStep.includes('filter({ hasText: "WAN口" })'), 'required marker should be stripped for form-item text matching');
+      assert(!optionStep.includes('filter({ hasText: "* WAN口" })'), 'form-item text matching should not require the visual required marker');
+    },
+  },
+  {
     name: 'fill with stable test id ignores polluted ProFormSelect label context',
     run: () => {
       const flow: BusinessFlow = {
@@ -5016,6 +5068,107 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('page.getByTestId("network-resource-name").fill("pool-proform-alpha");'), 'stable test id fill should win over polluted select label context');
       assert(!firstStep.includes('filter({ hasText: "WAN口" })'), 'resource-name fill should not target the WAN ProFormSelect input');
+    },
+  },
+  {
+    name: 'input focus click ignores stale AntD Select selector metadata',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            label: '地址池名称',
+            displayName: '地址池名称',
+            scope: { form: { label: '地址池名称', name: 'poolName' } },
+          },
+          context: {
+            eventId: 'ctx-address-pool-name-click',
+            capturedAt: 1000,
+            before: {
+              form: { label: '地址池名称', name: 'poolName' },
+              target: {
+                tag: 'input',
+                framework: 'antd',
+                controlType: 'input',
+                role: 'textbox',
+                placeholder: '地址池名称',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=combobox[name="地址池名称"i]',
+            },
+          },
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "地址池名称" }).locator(".ant-select-selector").first().click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const clickStep = stepCodeBlock(code, 's001');
+
+      assert(clickStep.includes('getByLabel("地址池名称").click()') || clickStep.includes('getByPlaceholder("地址池名称").click()'), 'explicit input context should replay as a text-field focus click');
+      assert(!clickStep.includes('.ant-select-selector'), 'stale select source should not turn an input focus click into a select trigger');
+    },
+  },
+  {
+    name: 'bare text option after select trigger replays through active dropdown locator',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            role: 'combobox',
+            label: '关联VRF',
+            displayName: '关联VRF',
+            scope: { form: { label: '关联VRF', name: 'vrf' } },
+          },
+          context: {
+            eventId: 'ctx-vrf-trigger',
+            capturedAt: 1000,
+            before: {
+              form: { label: '关联VRF', name: 'vrf' },
+              target: {
+                framework: 'antd',
+                controlType: 'select',
+                role: 'combobox',
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="关联VRF"i]' } },
+          sourceCode: `await page.getByRole('combobox', { name: '关联VRF' }).click();`,
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'click',
+          target: {
+            text: '生产VRF',
+            displayName: '生产VRF',
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:text="生产VRF"i' } },
+          sourceCode: `await page.getByText('生产VRF').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const optionStep = stepCodeBlock(code, 's002');
+
+      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'context-light option should use the active dropdown locator');
+      assert(!optionStep.includes('getByText(\'生产VRF\')') && !optionStep.includes('getByText("生产VRF")'), 'context-light option should not replay as a page-global text click');
     },
   },
   {
