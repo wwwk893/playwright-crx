@@ -402,6 +402,110 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'page input transaction projects consecutive input events into one fill step',
+    run: () => {
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [
+        pageInputEvent('ctx-input-name-1', 1000, '地址池名称', 'p'),
+        pageInputEvent('ctx-input-name-2', 1050, '地址池名称', 'po'),
+        pageInputEvent('ctx-input-name-3', 1100, '地址池名称', 'pool'),
+      ]);
+
+      assertEqual(flow.steps.length, 1);
+      assertEqual(flow.steps[0].action, 'fill');
+      assertEqual(flow.steps[0].value, 'pool');
+      assertEqual(flow.steps[0].target?.label, '地址池名称');
+      assertEqual(flow.steps[0].context?.eventId, 'ctx-input-name-3');
+      assertEqual(flow.artifacts?.recorder?.eventJournal?.highWaterMarks.pageContextEventCount, 3);
+    },
+  },
+  {
+    name: 'recorder fill plus page input transaction keeps final page value',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        fillActionWithWallTime('地址池名称', 'po', 1000),
+      ], [], {});
+      const merged = mergePageContextIntoFlow(flow, [
+        pageInputEvent('ctx-input-name-final', 1100, '地址池名称', 'pool'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.length, 1);
+      assertEqual(merged.steps[0].id, 's001');
+      assertEqual(merged.steps[0].action, 'fill');
+      assertEqual(merged.steps[0].value, 'pool');
+      assertEqual(merged.steps[0].assertions[0]?.expected, 'pool');
+      assert(/\.fill\((['"])pool\1\)/.test(code), `generated code should use final input transaction value\n${code}`);
+      assertEqual(merged.steps[0].sourceActionIds?.length, 1);
+    },
+  },
+  {
+    name: 'page input transaction without captured value does not emit an empty fill',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        fillActionWithWallTime('地址池名称', 'pool', 1000),
+      ], [], {});
+      const merged = mergePageContextIntoFlow(flow, [
+        pageFieldEvent('ctx-input-no-value', 'input', 1050, '地址池名称'),
+        pageFieldEvent('ctx-change-no-value', 'change', 1100, '地址池名称'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.length, 1);
+      assertEqual(merged.steps[0].value, 'pool');
+      assert(/\.fill\((['"])pool\1\)/.test(code), `generated code should keep recorder value\n${code}`);
+      assert(!/\.fill\((['"])\1\)/.test(code), `generated code should not add an empty page-context fill\n${code}`);
+      assertEqual(merged.artifacts?.recorder?.eventJournal?.highWaterMarks.pageContextEventCount, 2);
+    },
+  },
+  {
+    name: 'page input transaction inserts page-only fill before later recorded click',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        clickActionWithWallTime('保存', 2000),
+      ], [], {});
+      const merged = mergePageContextIntoFlow(flow, [
+        pageInputEvent('ctx-input-before-save', 1000, '地址池名称', 'pool'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.map(step => step.action), ['fill', 'click']);
+      assertEqual(merged.steps[0].value, 'pool');
+      assertTextInOrder(code, [/\.fill\((['"])pool\1\)/, /\.click\(/]);
+    },
+  },
+  {
+    name: 'input transaction preserves scoped recorder fill source when page value finalizes',
+    run: () => {
+      const scopedSource = `await page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "新建IPv4地址池" }).getByLabel("地址池名称").fill("po");`;
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        fillActionWithWallTime('地址池名称', 'po', 1000),
+      ], recordedSource([scopedSource]), {});
+      const merged = mergePageContextIntoFlow(flow, [
+        pageDialogInputEvent('ctx-input-name-final-dialog', 1100, '地址池名称', 'pool', '新建IPv4地址池'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.length, 1);
+      assertEqual(merged.steps[0].value, 'pool');
+      assert(merged.steps[0].sourceCode?.includes('新建IPv4地址池'), 'stored fill source should keep dialog scope');
+      assert(/\.fill\((['"])pool\1\)/.test(merged.steps[0].sourceCode || ''), 'stored fill source should only update the final value');
+      assert(code.includes('新建IPv4地址池'), `generated code should keep dialog-scoped locator\n${code}`);
+      assert(/\.fill\((['"])pool\1\)/.test(code), `generated code should use final transaction value\n${code}`);
+    },
+  },
+  {
+    name: 'input transaction ignores single-character press and Tab without creating business steps',
+    run: () => {
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [
+        pageKeydownEvent('ctx-input-name-a', 1000, '地址池名称', 'a'),
+        pageKeydownEvent('ctx-input-name-tab', 1050, '地址池名称', 'Tab'),
+      ]);
+
+      assertEqual(flow.steps.length, 0);
+      assertEqual(flow.artifacts?.recorder?.eventJournal?.highWaterMarks.pageContextEventCount, 2);
+    },
+  },
+  {
     name: 'typing-like fills and key presses compact into one business step',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -6961,6 +7065,69 @@ function pageClickEventWithTarget(id: string, wallTime: number, target: ElementC
       target,
     },
   };
+}
+
+function pageInputEvent(id: string, wallTime: number, label: string, value: string): PageContextEvent {
+  return pageFieldEvent(id, 'input', wallTime, label, value);
+}
+
+function pageDialogInputEvent(id: string, wallTime: number, label: string, value: string, dialogTitle: string): PageContextEvent {
+  const event = pageFieldEvent(id, 'input', wallTime, label, value);
+  return {
+    ...event,
+    before: {
+      ...event.before,
+      dialog: { type: 'modal', title: dialogTitle, visible: true },
+    },
+  };
+}
+
+function pageKeydownEvent(id: string, wallTime: number, label: string, key: string): PageContextEvent {
+  return pageFieldEvent(id, 'keydown', wallTime, label, undefined, key);
+}
+
+function pageFieldEvent(id: string, kind: PageContextEvent['kind'], wallTime: number, label: string, value?: string, key?: string): PageContextEvent {
+  return {
+    id,
+    kind,
+    time: wallTime,
+    wallTime,
+    before: {
+      form: { label, name: label, testId: `${label}-field` },
+      target: {
+        tag: 'input',
+        role: 'textbox',
+        placeholder: label,
+        controlType: 'input',
+        locatorQuality: 'semantic',
+      },
+      ui: {
+        library: 'antd',
+        component: 'input',
+        targetText: label,
+        form: {
+          formKind: 'antd-form',
+          fieldKind: 'input',
+          label,
+          name: label,
+          placeholder: label,
+          valuePreview: value,
+        },
+        locatorHints: [{ kind: 'label', value: label, score: 0.9, reason: 'test fixture' }],
+        recipe: {
+          kind: 'fill-form-field',
+          library: 'antd',
+          component: 'input',
+          fieldKind: 'input',
+          fieldLabel: label,
+          fieldName: label,
+        },
+        confidence: 0.9,
+        reasons: ['test fixture'],
+      },
+    },
+    ...(key ? { key } : {}),
+  } as PageContextEvent;
 }
 
 function recordedSource(actions: string[]) {

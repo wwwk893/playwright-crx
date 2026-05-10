@@ -14,6 +14,7 @@ import { createEmptyBusinessFlow, flowAssertionId } from './types';
 import { migrateFlowToStableStepModel } from './flowMigration';
 import { cloneRecorderState, withRecorderState } from './recorderState';
 import { appendPageContextEvents, appendRecorderActionEvents, createEmptyEventJournal } from './eventJournal';
+import { projectInputTransactionsIntoFlow } from './businessFlowProjection';
 import { nextStableActionId, nextStableStepId, recomputeOrders } from './stableIds';
 
 type ActionLike = {
@@ -107,10 +108,10 @@ export function mergeActionsIntoFlow(prev: BusinessFlow | undefined, actions: un
       stepCount: refreshed.flow.steps.length,
       recorderActionLogCount: recorder.actionLog.length,
     });
-    return withRecorderState(refreshed.changed ? {
+    return projectInputTransactionsIntoFlow(withRecorderState(refreshed.changed ? {
       ...refreshed.flow,
       updatedAt: new Date().toISOString(),
-    } : refreshed.flow, recorder);
+    } : refreshed.flow, recorder), { commitOpen: true });
   }
 
   const assertionIndex = { value: nextAssertionIndex(refreshed.flow) };
@@ -136,10 +137,10 @@ export function mergeActionsIntoFlow(prev: BusinessFlow | undefined, actions: un
     insertedStepIds: next.steps.filter(step => !refreshed.flow.steps.some(previous => previous.id === step.id)).map(step => step.id),
     recorderActionLogCount: recorder.actionLog.length,
   });
-  return withRecorderState({
+  return projectInputTransactionsIntoFlow(withRecorderState({
     ...next,
     updatedAt: new Date().toISOString(),
-  }, recorder);
+  }, recorder), { commitOpen: true });
 }
 
 export function deleteStepFromFlow(flow: BusinessFlow, stepId: string): BusinessFlow {
