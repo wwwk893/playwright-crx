@@ -471,6 +471,8 @@ const tests: TestCase[] = [
       assertEqual(flow.steps[0].target?.label, 'WAN口');
       assertEqual(flow.steps[0].uiRecipe?.kind, 'select-option');
       assertTextInOrder(code, [/WAN口/, /wan/, /WAN1/]);
+      assert(code.includes('.locator(".ant-select-item-option'), 'select option code should target option rows, not nested text nodes');
+      assert(!code.includes('.getByText("WAN1", { exact: true })'), 'select option code should avoid getByText strict-mode duplicates inside AntD option rows');
       assertTextInOrder(playback, [/WAN口/, /WAN1/]);
     },
   },

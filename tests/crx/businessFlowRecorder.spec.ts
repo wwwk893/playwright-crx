@@ -172,9 +172,14 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)/);
-  expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
-  expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
+  expectInOrder(flow.artifacts.playwrightCode, [
+    'page.locator(".ant-form-item").filter({ hasText: "下方表单使用条目" })',
+    '.locator(".ant-select-selector',
+    'page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last().locator(".ant-select-item-option',
+    '.filter({ hasText: "real-item-a" }).first().click()',
+  ]);
+  expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']下方表单使用条目["']/);
+  expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());

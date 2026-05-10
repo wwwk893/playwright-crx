@@ -316,7 +316,8 @@ function selectTriggerLocator(transaction: SelectTransaction) {
 function selectOptionLocator(transaction: SelectTransaction) {
   const text = transaction.optionPath?.[transaction.optionPath.length - 1] || transaction.selectedText;
   const popupRoot = 'page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last()';
-  return `${popupRoot}.getByText(${stringLiteral(text)}, { exact: true })`;
+  const optionRows = '.ant-select-item-option, .ant-cascader-menu-item, .ant-select-tree-treenode, .ant-select-tree-node-content-wrapper';
+  return `${popupRoot}.locator(${stringLiteral(optionRows)}).filter({ hasText: ${stringLiteral(text)} }).first()`;
 }
 
 type SelectIdentity = {
