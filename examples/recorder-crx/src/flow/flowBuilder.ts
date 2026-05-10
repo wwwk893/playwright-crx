@@ -13,6 +13,7 @@ import { suggestBasicIntent, suggestWaitIntent } from './intentRules';
 import { createEmptyBusinessFlow, flowAssertionId } from './types';
 import { migrateFlowToStableStepModel } from './flowMigration';
 import { cloneRecorderState, withRecorderState } from './recorderState';
+import { appendPageContextEvents, appendRecorderActionEvents, createEmptyEventJournal } from './eventJournal';
 import { nextStableActionId, nextStableStepId, recomputeOrders } from './stableIds';
 
 type ActionLike = {
@@ -126,6 +127,7 @@ export function mergeActionsIntoFlow(prev: BusinessFlow | undefined, actions: un
 
   recorder.actionLog.push(...entries);
   recorder.sessions.push({ ...session, committedAt: new Date().toISOString() });
+  appendRecorderActionEvents(recorder, entries);
 
   const next = insertProjectedSteps(refreshed.flow, drafts, options.insertAfterStepId, options);
   emitDiagnostic(options, 'merge.commit', '业务步骤合并完成', {
@@ -169,8 +171,9 @@ export function clearFlowRecordingHistory(flow: BusinessFlow): BusinessFlow {
       stepActionIndexes: {},
       stepMergedActionIndexes: {},
       recorder: {
-        version: 2,
+        version: 3,
         actionLog: [],
+        eventJournal: createEmptyEventJournal(),
         nextActionSeq: 1,
         nextStepSeq: 1,
         sessions: [],
@@ -249,6 +252,7 @@ export function appendSyntheticPageContextSteps(flow: BusinessFlow, events: Page
 export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, events: PageContextEvent[], options: SyntheticAppendOptions = {}): SyntheticAppendResult {
   let base = migrateFlowToStableStepModel(flow);
   const recorder = cloneRecorderState(base);
+  const journalChanged = appendPageContextEvents(recorder, events);
   const steps = [...base.steps];
   const addedStepIds: string[] = [];
   const upgradedStepIds: string[] = [];
@@ -281,7 +285,7 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
   }
   if (!addedStepIds.length && !upgradedStepIds.length) {
     return {
-      flow,
+      flow: journalChanged ? withRecorderState(flow, recorder) : flow,
       insertedStepIds: [],
       upgradedStepIds: [],
       skippedEventIds,

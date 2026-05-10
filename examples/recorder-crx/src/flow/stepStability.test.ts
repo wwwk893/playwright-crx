@@ -13,6 +13,7 @@ import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { filterPageContextEventsForCapture } from './pageContextCapture';
 import { appendTerminalStateAssertions, createTerminalStateAssertion, replayDiagnosticSummary } from './terminalAssertions';
+import { eventJournalStats } from './eventJournal';
 import { mergePageContextIntoFlow } from './flowContextMerger';
 import { suggestIntent } from './intentRules';
 import { createRepeatSegment } from './repeatSegments';
@@ -27,6 +28,79 @@ type TestCase = {
 };
 
 const tests: TestCase[] = [
+  {
+    name: 'event journal initializes for legacy recorder state without changing steps',
+    run: () => {
+      const legacyFlow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('保存')], [], {});
+      const legacyRecorder = legacyFlow.artifacts?.recorder;
+      assert(legacyRecorder, 'legacy recorder should exist');
+      const legacyV2Flow: BusinessFlow = {
+        ...legacyFlow,
+        artifacts: {
+          ...legacyFlow.artifacts,
+          recorder: {
+            version: 2,
+            actionLog: legacyRecorder.actionLog,
+            nextActionSeq: legacyRecorder.nextActionSeq,
+            nextStepSeq: legacyRecorder.nextStepSeq,
+            sessions: legacyRecorder.sessions,
+          } as any,
+        },
+      };
+
+      const migrated = mergeActionsIntoFlow(legacyV2Flow, [clickAction('保存')], [], {});
+      const recorder = migrated.artifacts?.recorder;
+
+      assertEqual(migrated.steps.map(step => step.id), legacyFlow.steps.map(step => step.id));
+      assertEqual(recorder?.version, 3 as any);
+      assert(recorder?.eventJournal, 'v2 recorder state should be upgraded with an event journal');
+      assertEqual(eventJournalStats(recorder as any).recorderActionCount, 1);
+    },
+  },
+  {
+    name: 'mergeActionsIntoFlow appends recorder action facts to event journal without changing projected steps',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('新建'), fillAction('地址池名称', 'pool-a')], [], {});
+      const recorder = flow.artifacts?.recorder;
+      assert(recorder?.eventJournal, 'recorder action journal should exist');
+
+      const stats = eventJournalStats(recorder);
+      assertEqual(flow.steps.map(step => step.action), ['click', 'fill']);
+      assertEqual(recorder.actionLog.length, 2);
+      assertEqual(stats.recorderActionCount, 2);
+      assertEqual(stats.pageContextEventCount, 0);
+      assertEqual(recorder.eventJournal.eventOrder.length, 2);
+      assertEqual(recorder.eventJournal.eventOrder.map(id => recorder.eventJournal?.eventsById[id]?.source), ['playwright-recorder', 'playwright-recorder']);
+    },
+  },
+  {
+    name: 'page context synthetic append records page context facts in event journal',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('打开', 1000)], [], {});
+      const event = pageClickEvent('ctx-save', 2000, '保存');
+      const result = appendSyntheticPageContextStepsWithResult(flow, [event]);
+      const recorder = result.flow.artifacts?.recorder;
+
+      assert(recorder?.eventJournal, 'page context journal should exist');
+      assertEqual(eventJournalStats(recorder).pageContextEventCount, 1);
+      assertEqual(recorder.eventJournal.eventOrder.map(id => recorder.eventJournal?.eventsById[id]?.source).includes('page-context'), true);
+      assertEqual(result.insertedStepIds.length, 1);
+    },
+  },
+  {
+    name: 'export sanitization strips event journal recorder internals',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('保存')], [], {});
+      const exported = prepareBusinessFlowForExport(flow);
+      const exportedJson = JSON.stringify(exported);
+      const yaml = toCompactFlow(exported);
+
+      assert(!exported.artifacts?.recorder, 'export should remove recorder internals');
+      assert(!exportedJson.includes('eventJournal'), 'export json should not contain event journal');
+      assert(!exportedJson.includes('playwright-recorder'), 'export json should not contain recorder event facts');
+      assert(!yaml.includes('eventJournal'), 'compact yaml should not contain event journal');
+    },
+  },
   {
     name: 'page context capture ignores events older than the current recording session',
     run: () => {

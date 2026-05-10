@@ -6,6 +6,7 @@
  */
 import type { BusinessFlow, FlowRepeatSegment } from './types';
 import { cloneRecorderState, withRecorderState } from './recorderState';
+import { appendRecorderActionEvents } from './eventJournal';
 import { nextStableActionId, nextStableStepId, recomputeOrders } from './stableIds';
 
 export function migrateFlowToStableStepModel(flow: BusinessFlow): BusinessFlow {
@@ -55,6 +56,7 @@ export function migrateFlowToStableStepModel(flow: BusinessFlow): BusinessFlow {
     steps: recomputeOrders(steps),
     repeatSegments: migrateRepeatSegments(flow.repeatSegments, stepIdMap),
   };
+  appendRecorderActionEvents(recorder, recorder.actionLog);
   return withRecorderState(migrated, recorder);
 }
 

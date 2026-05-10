@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { RecorderEventJournal } from '../capture/eventEnvelope';
 import type { UiActionRecipe } from '../uiSemantics/types';
 import type {
   DialogContext,
@@ -248,8 +249,9 @@ export interface RecordingSession {
 }
 
 export interface FlowRecorderState {
-  version: 2;
+  version: 3;
   actionLog: RecordedActionEntry[];
+  eventJournal?: RecorderEventJournal;
   nextActionSeq: number;
   nextStepSeq: number;
   sessions: RecordingSession[];
