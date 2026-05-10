@@ -5,11 +5,21 @@
  */
 
 import { composeInputTransactionsFromFlow, isInputTransactionForAliases } from '../interactions/inputTransactions';
+import { projectSelectTransactionsIntoFlow } from '../interactions/selectTransactions';
 import type { InputTransaction } from '../interactions/types';
 import { inputTargetIdentityFromFlowTarget } from '../interactions/targetIdentity';
 import { cloneRecorderState, withRecorderState } from './recorderState';
 import { nextStableStepId, recomputeOrders } from './stableIds';
 import type { BusinessFlow, FlowAssertion, FlowStep, FlowTarget } from './types';
+
+export type BusinessFlowProjectionOptions = {
+  commitOpen?: boolean;
+};
+
+export function projectBusinessFlow(flow: BusinessFlow, options: BusinessFlowProjectionOptions = {}): BusinessFlow {
+  const commitOpen = options.commitOpen ?? true;
+  return projectSelectTransactionsIntoFlow(projectInputTransactionsIntoFlow(flow, { commitOpen }), { commitOpen });
+}
 
 export function projectInputTransactionsIntoFlow(flow: BusinessFlow, options: { commitOpen?: boolean } = {}): BusinessFlow {
   const composition = composeInputTransactionsFromFlow(flow, { commitOpen: options.commitOpen ?? true, commitReason: 'stop-recording' });

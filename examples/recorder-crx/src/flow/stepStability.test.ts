@@ -10,9 +10,11 @@ import { composeInputTransactionsFromJournal } from '../interactions/inputTransa
 import { composeSelectTransactionsFromJournal } from '../interactions/selectTransactions';
 import type { UiActionRecipe, UiComponentKind } from '../uiSemantics/types';
 import { countBusinessFlowPlaybackActions, generateAssertionCodePreview, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
+import { projectBusinessFlow } from './businessFlowProjection';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult } from './syntheticReconciler';
 import { filterPageContextEventsForCapture } from './pageContextCapture';
 import { finalizeRecordingSession } from './sessionFinalizer';
 import { appendTerminalStateAssertions, createTerminalStateAssertion, replayDiagnosticSummary } from './terminalAssertions';
@@ -143,7 +145,7 @@ const tests: TestCase[] = [
     run: () => {
       const flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('打开', 1000)], [], {});
       const event = pageClickEvent('ctx-save', 2000, '保存');
-      const result = appendSyntheticPageContextStepsWithResult(flow, [event]);
+      const result = reconcileSyntheticPageContextStepsWithResult(flow, [event]);
       const recorder = result.flow.artifacts?.recorder;
 
       assert(recorder?.eventJournal, 'page context journal should exist');
@@ -452,6 +454,39 @@ const tests: TestCase[] = [
       assertEqual(composition.selectTransactions.length, 0);
       assertEqual(composition.openSelectTransactions.length, 1);
       assertEqual(projected.steps.length, 0);
+    },
+  },
+  {
+    name: 'projectBusinessFlow facade projects input and select transactions once',
+    run: () => {
+      const base = createNamedFlow();
+      const flow: BusinessFlow = {
+        ...base,
+        artifacts: {
+          ...base.artifacts,
+          recorder: {
+            version: 3,
+            actionLog: [],
+            eventJournal: journalFromPageEvents([
+              pageInputEvent('ctx-projection-name', 900, '名称', 'edge-lab'),
+              pageSelectTriggerEvent('ctx-projection-wan-trigger', 1000, 'WAN口'),
+              pageSelectSearchEvent('ctx-projection-wan-search', 1050, 'WAN口', 'wan'),
+              pageSelectOptionEvent('ctx-projection-wan-option', 1100, 'WAN口', 'WAN1'),
+            ]),
+            nextActionSeq: 1,
+            nextStepSeq: 1,
+            sessions: [],
+          },
+        },
+      } as BusinessFlow;
+
+      const projected = projectBusinessFlow(flow, { commitOpen: true });
+      const projectedAgain = projectBusinessFlow(projected, { commitOpen: true });
+
+      assertEqual(projected.steps.map(step => step.action), ['fill', 'select']);
+      assertEqual(projected.steps.map(step => step.value), ['edge-lab', 'WAN1']);
+      assertEqual(projectedAgain.steps.map(step => step.id), projected.steps.map(step => step.id));
+      assertEqual(projectedAgain.steps.map(step => step.action), ['fill', 'select']);
     },
   },
   {

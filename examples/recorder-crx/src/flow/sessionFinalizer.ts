@@ -5,9 +5,9 @@
  * you may not use this file except in compliance with the License.
  */
 import { composeInputTransactionsFromFlow } from '../interactions/inputTransactions';
-import { composeSelectTransactionsFromFlow, projectSelectTransactionsIntoFlow } from '../interactions/selectTransactions';
+import { composeSelectTransactionsFromFlow } from '../interactions/selectTransactions';
 import { eventJournalStats } from './eventJournal';
-import { projectInputTransactionsIntoFlow } from './businessFlowProjection';
+import { projectBusinessFlow } from './businessFlowProjection';
 import type { BusinessFlow } from './types';
 
 export type FinalizeRecordingReason = 'stop-recording' | 'enter-review' | 'export' | 'generate-code';
@@ -98,12 +98,12 @@ export async function finalizeRecordingSession(flow: BusinessFlow, options: Fina
 
     if (now() - stableSince >= stableForMs) {
       emit('finalize.stable', counts);
-      return projectSelectTransactionsIntoFlow(projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true }), { commitOpen: true });
+      return projectBusinessFlow(currentFlow, { commitOpen: true });
     }
 
     if (elapsedMs >= maxWaitMs) {
       emit('finalize.timeout', counts, 'warn');
-      return projectSelectTransactionsIntoFlow(projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true }), { commitOpen: true });
+      return projectBusinessFlow(currentFlow, { commitOpen: true });
     }
 
     const remainingUntilStable = Math.max(0, stableForMs - (now() - stableSince));
