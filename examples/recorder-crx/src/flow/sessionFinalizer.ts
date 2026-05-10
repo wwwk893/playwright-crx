@@ -4,7 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  */
+import { composeInputTransactionsFromFlow } from '../interactions/inputTransactions';
 import { eventJournalStats } from './eventJournal';
+import { projectInputTransactionsIntoFlow } from './businessFlowProjection';
 import type { BusinessFlow } from './types';
 
 export type FinalizeRecordingReason = 'stop-recording' | 'enter-review' | 'export' | 'generate-code';
@@ -95,12 +97,12 @@ export async function finalizeRecordingSession(flow: BusinessFlow, options: Fina
 
     if (now() - stableSince >= stableForMs) {
       emit('finalize.stable', counts);
-      return currentFlow;
+      return projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true });
     }
 
     if (elapsedMs >= maxWaitMs) {
       emit('finalize.timeout', counts, 'warn');
-      return currentFlow;
+      return projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true });
     }
 
     const remainingUntilStable = Math.max(0, stableForMs - (now() - stableSince));
@@ -120,11 +122,12 @@ export function finalizerCounts(flow: BusinessFlow): FinalizerCounts {
     };
   }
   const stats = eventJournalStats(recorder);
+  const transactions = composeInputTransactionsFromFlow(flow, { commitOpen: false });
   return {
     recorderActionCount: stats.recorderActionCount,
     pageContextEventCount: stats.pageContextEventCount,
-    pendingContextCount: 0,
-    openTransactionCount: 0,
+    pendingContextCount: transactions.openInputTransactions.length,
+    openTransactionCount: transactions.openInputTransactions.length,
     lastEventAt: stats.lastEventAt,
     lastRecorderActionAt: stats.lastRecorderActionAt,
     lastPageContextEventAt: stats.lastPageContextEventAt,
