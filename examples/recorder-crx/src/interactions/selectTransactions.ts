@@ -49,17 +49,6 @@ type ComposeSelectOptions = {
 
 type PageContextPayload = PageContextEvent;
 
-type RecorderPayload = {
-  actionId?: string;
-  rawAction?: unknown;
-  sourceCode?: string;
-};
-
-type ActionLike = {
-  name?: string;
-  selector?: string;
-};
-
 export function composeSelectTransactionsFromFlow(flow: BusinessFlow, options: ComposeSelectOptions = {}): SelectTransactionComposition {
   const journal = flow.artifacts?.recorder?.eventJournal;
   return journal ? composeSelectTransactionsFromJournal(journal, options) : { selectTransactions: [], openSelectTransactions: [] };
@@ -147,11 +136,11 @@ export function composeSelectTransactionsFromJournal(journal: RecorderEventJourn
 
   for (const { event } of orderedEvents) {
     if (event.source !== 'page-context') {
-      const payload = event.payload as RecorderPayload;
-      const action = normalizeAction(payload.rawAction);
-      if (isSelectLikeRecorderAction(action, payload.sourceCode))
-        continue;
-      commitUnrelatedOpenTransactions(undefined, 'dropdown-close', event.timestamp.wallTime);
+      // Select transactions are driven by page-context semantics. Recorder
+      // actions remain in the journal and can be folded into projection as
+      // low-level evidence, but they must not close an open select transaction:
+      // AntD option clicks are often recorded as getByTitle/getByText/internal
+      // attr selectors without explicit select/option markers.
       continue;
     }
     const payload = event.payload as PageContextPayload;
@@ -240,7 +229,7 @@ function createSelectStep(recorder: ReturnType<typeof cloneRecorderState>, trans
     ...replacedSteps.flatMap(step => step.sourceActionIds ?? []),
   ]);
   return {
-    id: nextStableStepId(recorder),
+    id: replacedSteps[0]?.id ?? nextStableStepId(recorder),
     order: 0,
     kind: 'recorded',
     sourceActionIds,
@@ -293,13 +282,12 @@ function selectSearchTextEvidence(steps: FlowStep[]) {
 function selectSourceCode(transaction: SelectTransaction) {
   const trigger = selectTriggerLocator(transaction);
   const option = selectOptionLocator(transaction);
-  const fieldVariable = `selectField_${stableIdPart(transaction.id).replace(/-/g, '_').slice(0, 40)}`;
+  const triggerControl = `${trigger}.locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()`;
   const lines = [
-    `const ${fieldVariable} = ${trigger};`,
-    `await ${fieldVariable}.locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first().click();`,
+    `await ${triggerControl}.click();`,
   ];
   if (transaction.searchText)
-    lines.push(`await ${fieldVariable}.locator(${stringLiteral('input:visible')}).first().fill(${stringLiteral(transaction.searchText)});`);
+    lines.push(`await ${trigger}.locator(${stringLiteral('input:visible')}).first().fill(${stringLiteral(transaction.searchText)});`);
   lines.push(`await ${option}.click();`);
   return lines.join('\n');
 }
@@ -355,7 +343,7 @@ function selectField(payload: PageContextPayload): SelectTransaction['field'] {
 function isSelectTrigger(payload: PageContextPayload) {
   const controlType = payload.before.target?.controlType || '';
   const role = payload.before.target?.role || '';
-  return payload.kind === 'click' && /^(select|tree-select|cascader)$/.test(controlType) || payload.kind === 'click' && role === 'combobox';
+  return payload.kind === 'click' && (/^(select|tree-select|cascader)$/.test(controlType) || role === 'combobox');
 }
 
 function isSelectSearch(payload: PageContextPayload) {
@@ -507,7 +495,7 @@ function selectLowLevelStepIndexes(steps: FlowStep[], transaction: SelectTransac
       .filter(({ step }) => isLowLevelSelectStep(step, transaction))
       .filter(({ step }) => {
         const at = stepTime(step);
-        return typeof at !== 'number' || !areComparableWallTimes(at, transaction.startedAt) || at >= transaction.startedAt - 250 && at <= transaction.endedAt + 250;
+        return typeof at !== 'number' || !areComparableWallTimes(at, transaction.startedAt) || at >= transaction.startedAt - 1000 && at <= transaction.endedAt + 500;
       })
       .map(({ index }) => index);
 }
@@ -579,28 +567,6 @@ function isSelectLikeText(text: string) {
   return /ant-select|ant-cascader|ant-select-tree|role=combobox|internal:role=combobox|getbyrole\(['"]combobox['"]|\.ant-select-selector|\.ant-cascader-picker|combobox/.test(text);
 }
 
-function isSelectLikeRecorderAction(action: ActionLike, sourceCode?: string) {
-  const text = `${action.selector || ''}\n${sourceCode || ''}`.toLowerCase();
-  if (action.name === 'fill')
-    return isSelectLikeText(text);
-  if (action.name === 'click')
-    return isSelectLikeText(text) || /role=option|internal:role=option|getbyrole\(['"]option['"]|ant-select-dropdown|ant-cascader-dropdown/.test(text);
-  return false;
-}
-
-function normalizeAction(rawAction: unknown): ActionLike {
-  const raw = asRecord(rawAction);
-  const nested = asRecord(raw.action);
-  const source = nested.name ? nested : raw;
-  return {
-    name: typeof source.name === 'string' ? source.name : undefined,
-    selector: typeof source.selector === 'string' ? source.selector : undefined,
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
 
 function existingSelectTransactionIds(steps: FlowStep[]) {
   return steps.map(step => (step.rawAction as { transactionId?: string } | undefined)?.transactionId).filter(Boolean) as string[];

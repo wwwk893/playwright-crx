@@ -386,7 +386,9 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\("\.ant-form-item"\)\.filter\(\{ hasText: "\*? ?WAN口" \}\)\.locator\("\.ant-select-selector"\)\.first\(\)\.click\(\);/);
+  expect(flow.artifacts.playwrightCode).toContain('page.locator(".ant-form-item").filter({ hasText: "WAN口" })');
+  expect(flow.artifacts.playwrightCode).toContain('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();');
+  expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']\*? ?WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('role=button[name="选择一个WAN口"');
   expect(flow.artifacts.playwrightCode).not.toContain('nth(4)');
 

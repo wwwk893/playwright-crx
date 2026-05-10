@@ -488,6 +488,7 @@ const tests: TestCase[] = [
         `await page.getByRole('combobox', { name: 'WAN口' }).fill('wan');`,
         `await page.getByRole('option', { name: 'WAN1' }).click();`,
       ]), {});
+      const firstLowLevelStepId = recorded.steps[0].id;
       const merged = mergePageContextIntoFlow(recorded, [
         pageSelectTriggerEvent('ctx-recorded-select-trigger', 1000, 'WAN口'),
         pageSelectSearchEvent('ctx-recorded-select-search', 1050, 'WAN口', 'wan'),
@@ -497,10 +498,60 @@ const tests: TestCase[] = [
       const searchFillCount = (code.match(/\.fill\((['"])wan\1\)/g) ?? []).length;
 
       assertEqual(merged.steps.map(step => step.action), ['select']);
+      assertEqual(merged.steps[0].id, firstLowLevelStepId);
       assertEqual(merged.steps[0].value, 'WAN1');
       assert((merged.steps[0].sourceActionIds?.length ?? 0) >= 3, 'select step should preserve low-level recorder sourceActionIds');
       assertEqual(merged.steps.filter(step => step.action === 'fill' && step.value === 'wan').length, 0);
       assertEqual(searchFillCount, 1);
+      assert(!code.includes('const selectField_'), 'select code must stay parser-safe for in-panel runtime playback');
+    },
+  },
+  {
+    name: 'unclassified recorder option action does not close an open page-context select transaction',
+    run: () => {
+      const recorded = mergeActionsIntoFlow(createNamedFlow(), [
+        {
+          ...rawClickAction('internal:attr=[title="WAN1"] >> div'),
+          wallTime: 1075,
+        },
+      ], recordedSource([
+        `await page.getByTitle('WAN1').locator('div').click();`,
+      ]), {});
+      const merged = mergePageContextIntoFlow(recorded, [
+        pageSelectTriggerEvent('ctx-unclassified-select-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-unclassified-select-search', 1050, 'WAN口', 'wan'),
+        pageSelectOptionEvent('ctx-unclassified-select-option', 1100, 'WAN口', 'WAN1'),
+      ]);
+      const selectSteps = merged.steps.filter(step => step.action === 'select');
+
+      assertEqual(merged.steps.map(step => step.action), ['select']);
+      assertEqual(selectSteps.length, 1);
+      assertEqual(selectSteps[0].value, 'WAN1');
+      assertEqual(merged.steps.filter(step => step.action === 'fill' && step.value === 'wan').length, 0);
+    },
+  },
+  {
+    name: 'delayed page-context select transaction replaces earlier recorder trigger and search steps',
+    run: () => {
+      const recorded = mergeActionsIntoFlow(createNamedFlow(), [
+        selectTriggerAction('WAN口', 1000),
+        selectSearchFillAction('WAN口', 'wan', 1050),
+      ], recordedSource([
+        `await page.getByRole('combobox', { name: '* WAN口' }).click();`,
+        `await page.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first().locator('input:visible').first().fill('wan');`,
+      ]), {});
+      const firstLowLevelStepId = recorded.steps[0].id;
+      const merged = mergePageContextIntoFlow(recorded, [
+        pageSelectTriggerEvent('ctx-delayed-trigger', 1700, 'WAN口'),
+        pageSelectSearchEvent('ctx-delayed-search', 1750, 'WAN口', 'wan'),
+        pageSelectOptionEvent('ctx-delayed-option', 1850, 'WAN口', 'WAN1'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.map(step => step.action), ['select']);
+      assertEqual(merged.steps[0].id, firstLowLevelStepId);
+      assertEqual(merged.steps[0].value, 'WAN1');
+      assertEqual((code.match(/\.fill\((['"])wan\1\)/g) ?? []).length, 1);
     },
   },
   {
