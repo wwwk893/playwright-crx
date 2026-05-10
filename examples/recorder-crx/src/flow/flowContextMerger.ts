@@ -11,9 +11,11 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
+import { appendPageContextEvents } from './eventJournal';
 import { suggestIntent, stepContextFromEvent } from './intentRules';
 import { appendTerminalStateAssertions } from './terminalAssertions';
 import { matchPageContextEvent } from './pageContextMatcher';
+import { cloneRecorderState, withRecorderState } from './recorderState';
 import type { ElementContext, PageContextEvent, StepContextSnapshot } from './pageContextTypes';
 import type { UiSemanticContext } from '../uiSemantics/types';
 import type { BusinessFlow, FlowTargetScope, FlowStep, FlowTarget, LocatorHint } from './types';
@@ -23,6 +25,9 @@ const autoIntentThreshold = 0.6;
 export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContextEvent[]): BusinessFlow {
   if (!events.length)
     return appendTerminalStateAssertions(normalizeIntentSources(flow));
+
+  const recorder = cloneRecorderState(flow);
+  const journalChanged = appendPageContextEvents(recorder, events);
 
   let changed = false;
   const usedEventIds = new Set<string>();
@@ -53,7 +58,8 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
     steps,
     updatedAt: new Date().toISOString(),
   } : { ...flow, steps };
-  return appendTerminalStateAssertions(withContext);
+  const withTerminalAssertions = appendTerminalStateAssertions(withContext);
+  return journalChanged ? withRecorderState(withTerminalAssertions, recorder) : withTerminalAssertions;
 }
 
 export function normalizeIntentSources(flow: BusinessFlow): BusinessFlow {

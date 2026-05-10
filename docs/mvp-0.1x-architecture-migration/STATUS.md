@@ -7,8 +7,8 @@
 
 ## Current phase
 
-- Current PR: PR-01 Architecture Guardrails + AGENTS Update
-- Next PR: PR-02 Event Journal and Recorder State v3
+- Current PR: PR-02 Event Journal and Recorder State v3
+- Next PR: PR-03 Session Finalizer
 
 ## Execution rule
 
