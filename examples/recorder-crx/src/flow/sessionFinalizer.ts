@@ -5,6 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { composeInputTransactionsFromFlow } from '../interactions/inputTransactions';
+import { composeSelectTransactionsFromFlow, projectSelectTransactionsIntoFlow } from '../interactions/selectTransactions';
 import { eventJournalStats } from './eventJournal';
 import { projectInputTransactionsIntoFlow } from './businessFlowProjection';
 import type { BusinessFlow } from './types';
@@ -97,12 +98,12 @@ export async function finalizeRecordingSession(flow: BusinessFlow, options: Fina
 
     if (now() - stableSince >= stableForMs) {
       emit('finalize.stable', counts);
-      return projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true });
+      return projectSelectTransactionsIntoFlow(projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true }), { commitOpen: true });
     }
 
     if (elapsedMs >= maxWaitMs) {
       emit('finalize.timeout', counts, 'warn');
-      return projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true });
+      return projectSelectTransactionsIntoFlow(projectInputTransactionsIntoFlow(currentFlow, { commitOpen: true }), { commitOpen: true });
     }
 
     const remainingUntilStable = Math.max(0, stableForMs - (now() - stableSince));
@@ -122,12 +123,14 @@ export function finalizerCounts(flow: BusinessFlow): FinalizerCounts {
     };
   }
   const stats = eventJournalStats(recorder);
-  const transactions = composeInputTransactionsFromFlow(flow, { commitOpen: false });
+  const inputTransactions = composeInputTransactionsFromFlow(flow, { commitOpen: false });
+  const selectTransactions = composeSelectTransactionsFromFlow(flow, { commitOpen: false });
+  const openTransactionCount = inputTransactions.openInputTransactions.length + selectTransactions.openSelectTransactions.length;
   return {
     recorderActionCount: stats.recorderActionCount,
     pageContextEventCount: stats.pageContextEventCount,
-    pendingContextCount: transactions.openInputTransactions.length,
-    openTransactionCount: transactions.openInputTransactions.length,
+    pendingContextCount: openTransactionCount,
+    openTransactionCount,
     lastEventAt: stats.lastEventAt,
     lastRecorderActionAt: stats.lastRecorderActionAt,
     lastPageContextEventAt: stats.lastPageContextEventAt,

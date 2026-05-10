@@ -154,6 +154,10 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
 
     if (event.source === 'page-context') {
       const payload = event.payload as PageContextPayload;
+      if (isSelectLikePageContext(payload)) {
+        commitMatching(undefined, 'next-action', at);
+        continue;
+      }
       const identity = scopedIdentity(inputTargetIdentityFromPageContext(payload.before), pageContextDialogScope(payload.before));
       if (!identity)
         continue;
@@ -270,6 +274,12 @@ function recorderActionValue(action: ActionLike) {
 function pageContextInputValue(payload: PageContextPayload) {
   const value = payload.before?.ui?.form?.valuePreview;
   return typeof value === 'string' ? value : undefined;
+}
+
+function isSelectLikePageContext(payload: PageContextPayload) {
+  const controlType = payload.before?.target?.controlType || payload.before?.ui?.component || payload.before?.ui?.form?.fieldKind || '';
+  const role = payload.before?.target?.role || '';
+  return /^(select|tree-select|cascader|select-option|tree-select-option|cascader-option)$/.test(controlType) || role === 'combobox' || role === 'option' || role === 'treeitem';
 }
 
 function effectiveWallTime(event: RecorderEventEnvelope, latestRecorderActions: Map<string, { wallTime?: number }>) {

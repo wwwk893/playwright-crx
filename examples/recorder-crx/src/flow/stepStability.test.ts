@@ -7,6 +7,7 @@
 import { buildAiIntentInput } from '../aiIntent/prompt';
 import { compactSemanticDiagnostic, createSemanticDiagnosticsBuffer } from '../uiSemantics/diagnostics';
 import { composeInputTransactionsFromJournal } from '../interactions/inputTransactions';
+import { composeSelectTransactionsFromJournal } from '../interactions/selectTransactions';
 import type { UiActionRecipe, UiComponentKind } from '../uiSemantics/types';
 import { countBusinessFlowPlaybackActions, generateAssertionCodePreview, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
@@ -400,6 +401,94 @@ const tests: TestCase[] = [
 
       assertEqual(insertedSecondBatch.steps.map(step => step.id), ['s001', 's004', 's005', 's002', 's003']);
       assertEqual(insertedSecondBatch.steps.map(step => step.order), [1, 2, 3, 4, 5]);
+    },
+  },
+  {
+    name: 'select trigger search and option compose into one select transaction',
+    run: () => {
+      const composition = composeSelectTransactionsFromJournal(journalFromPageEvents([
+        pageSelectTriggerEvent('ctx-wan-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-wan-search', 1050, 'WAN口', 'wan'),
+        pageSelectOptionEvent('ctx-wan-option', 1100, 'WAN口', 'WAN1'),
+      ]));
+
+      assertEqual(composition.selectTransactions.length, 1);
+      assertEqual(composition.openSelectTransactions.length, 0);
+      assertEqual(composition.selectTransactions[0].component, 'Select');
+      assertEqual(composition.selectTransactions[0].field.label, 'WAN口');
+      assertEqual(composition.selectTransactions[0].searchText, 'wan');
+      assertEqual(composition.selectTransactions[0].selectedText, 'WAN1');
+      assertEqual(composition.selectTransactions[0].commitReason, 'option-click');
+      assertEqual(composition.selectTransactions[0].sourceEventIds, ['page-context:ctx-wan-trigger', 'page-context:ctx-wan-search', 'page-context:ctx-wan-option']);
+    },
+  },
+  {
+    name: 'TreeSelect and Cascader select transactions preserve option paths',
+    run: () => {
+      const composition = composeSelectTransactionsFromJournal(journalFromPageEvents([
+        pageSelectTriggerEvent('ctx-scope-trigger', 1000, '发布范围', 'tree-select'),
+        pageSelectOptionEvent('ctx-scope-option', 1100, '发布范围', '华东生产区', 'tree-select-option', ['中国', '华东', '生产区']),
+        pageSelectTriggerEvent('ctx-egress-trigger', 1200, '出口路径', 'cascader'),
+        pageSelectOptionEvent('ctx-egress-option', 1300, '出口路径', 'NAT集群A', 'cascader-option', ['默认路径', 'NAT集群A']),
+      ]));
+
+      assertEqual(composition.selectTransactions.map(transaction => transaction.component), ['TreeSelect', 'Cascader']);
+      assertEqual(composition.selectTransactions[0].optionPath, ['中国', '华东', '生产区']);
+      assertEqual(composition.selectTransactions[1].optionPath, ['默认路径', 'NAT集群A']);
+    },
+  },
+  {
+    name: 'open select transaction at stop does not create fake completed select step',
+    run: () => {
+      const composition = composeSelectTransactionsFromJournal(journalFromPageEvents([
+        pageSelectTriggerEvent('ctx-open-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-open-search', 1050, 'WAN口', 'wan'),
+      ]), { commitOpen: false });
+      const projected = mergePageContextIntoFlow(createNamedFlow(), [
+        pageSelectTriggerEvent('ctx-open-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-open-search', 1050, 'WAN口', 'wan'),
+      ]);
+
+      assertEqual(composition.selectTransactions.length, 0);
+      assertEqual(composition.openSelectTransactions.length, 1);
+      assertEqual(projected.steps.length, 0);
+    },
+  },
+  {
+    name: 'page select transaction projects trigger search option into one select step',
+    run: () => {
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [
+        pageSelectTriggerEvent('ctx-project-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-project-search', 1050, 'WAN口', 'wan'),
+        pageSelectOptionEvent('ctx-project-option', 1100, 'WAN口', 'WAN1'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(flow.steps.length, 1);
+      assertEqual(flow.steps[0].action, 'select');
+      assertEqual(flow.steps[0].value, 'WAN1');
+      assertEqual(flow.steps[0].target?.label, 'WAN口');
+      assertEqual(flow.steps[0].uiRecipe?.kind, 'select-option');
+      assertTextInOrder(code, [/WAN口/, /wan/, /WAN1/]);
+      assertTextInOrder(playback, [/WAN口/, /WAN1/]);
+    },
+  },
+  {
+    name: 'page select transaction stays after untimed navigation and opener steps',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        navigateAction('http://127.0.0.1:3107/antd-pro-form-fields.html'),
+        testIdClickAction('network-resource-add'),
+      ], [], {});
+      const merged = mergePageContextIntoFlow(flow, [
+        pageSelectTriggerEvent('ctx-vrf-trigger-after-open', 1000, '关联VRF'),
+        pageSelectOptionEvent('ctx-vrf-option-after-open', 1100, '关联VRF', '生产VRF'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.map(step => step.action), ['navigate', 'click', 'select']);
+      assertTextInOrder(code, [/page\.goto/, /network-resource-add/, /生产VRF/]);
     },
   },
   {
@@ -7124,6 +7213,78 @@ function pageClickEventWithTarget(id: string, wallTime: number, target: ElementC
       target,
     },
   };
+}
+
+function pageSelectTriggerEvent(id: string, wallTime: number, label: string, controlType: 'select' | 'tree-select' | 'cascader' = 'select'): PageContextEvent {
+  const event = pageClickEventWithTarget(id, wallTime, {
+    tag: 'div',
+    role: 'combobox',
+    text: label,
+    normalizedText: label,
+    framework: 'antd',
+    controlType,
+    locatorQuality: 'semantic',
+  } as ElementContext);
+  event.before.form = { label, name: label, testId: `${label}-field` };
+  event.before.dialog = { type: 'modal', title: '新建IPv4地址池', visible: true };
+  event.after = { dialog: { type: 'dropdown', title: `${label}选项`, visible: true } };
+  return event;
+}
+
+function pageSelectSearchEvent(id: string, wallTime: number, label: string, value: string): PageContextEvent {
+  return {
+    id,
+    kind: 'input' as const,
+    time: wallTime,
+    wallTime,
+    before: {
+      form: { label, name: label, testId: `${label}-field` },
+      dialog: { type: 'dropdown', title: `${label}选项`, visible: true },
+      target: {
+        tag: 'input',
+        role: 'combobox',
+        text: label,
+        normalizedText: label,
+        framework: 'antd',
+        controlType: 'select',
+        locatorQuality: 'semantic',
+      },
+      ui: {
+        library: 'antd',
+        component: 'select',
+        targetText: label,
+        form: {
+          formKind: 'antd-form',
+          fieldKind: 'select',
+          label,
+          name: label,
+          valuePreview: value,
+        },
+        locatorHints: [{ kind: 'label', value: label, score: 0.9, reason: 'test fixture' }],
+        confidence: 0.9,
+        reasons: ['test fixture'],
+      },
+    },
+  };
+}
+
+function pageSelectOptionEvent(id: string, wallTime: number, label: string, selectedText: string, controlType: 'select-option' | 'tree-select-option' | 'cascader-option' = 'select-option', optionPath?: string[]): PageContextEvent {
+  const event = pageClickEventWithTarget(id, wallTime, {
+    tag: controlType === 'cascader-option' ? 'li' : 'div',
+    role: controlType === 'tree-select-option' ? 'treeitem' : 'option',
+    text: selectedText,
+    normalizedText: selectedText,
+    title: selectedText,
+    selectedOption: selectedText,
+    framework: 'antd',
+    controlType,
+    optionPath,
+    locatorQuality: 'semantic',
+  } as ElementContext);
+  event.before.form = { label, name: label, testId: `${label}-field` };
+  event.before.dialog = { type: 'dropdown', title: `${label}选项`, visible: true };
+  event.after = { dialog: { type: 'modal', title: '新建IPv4地址池', visible: true } };
+  return event;
 }
 
 function pageInputEvent(id: string, wallTime: number, label: string, value: string): PageContextEvent {

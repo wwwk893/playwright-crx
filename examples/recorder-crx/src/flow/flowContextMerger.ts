@@ -13,6 +13,7 @@
  */
 import { appendPageContextEvents } from './eventJournal';
 import { projectInputTransactionsIntoFlow } from './businessFlowProjection';
+import { projectSelectTransactionsIntoFlow } from '../interactions/selectTransactions';
 import { suggestIntent, stepContextFromEvent } from './intentRules';
 import { appendTerminalStateAssertions } from './terminalAssertions';
 import { matchPageContextEvent } from './pageContextMatcher';
@@ -61,7 +62,7 @@ export function mergePageContextIntoFlow(flow: BusinessFlow, events: PageContext
   } : { ...flow, steps };
   const withTerminalAssertions = appendTerminalStateAssertions(withContext);
   const withRecorder = journalChanged ? withRecorderState(withTerminalAssertions, recorder) : withTerminalAssertions;
-  return projectInputTransactionsIntoFlow(withRecorder, { commitOpen: true });
+  return projectSelectTransactionsIntoFlow(projectInputTransactionsIntoFlow(withRecorder, { commitOpen: true }), { commitOpen: true });
 }
 
 export function normalizeIntentSources(flow: BusinessFlow): BusinessFlow {
