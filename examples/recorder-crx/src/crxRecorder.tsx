@@ -529,6 +529,7 @@ export const CrxRecorder: React.FC = ({
   const businessFlowPlaybackCodeRef = React.useRef('');
   const businessFlowEnabledRef = React.useRef(defaultSettings.businessFlowEnabled !== false);
   const pageContextCaptureActiveRef = React.useRef(false);
+  const finalizingRecordingSessionRef = React.useRef(false);
 
   React.useEffect(() => {
     businessFlowEnabledRef.current = settings.businessFlowEnabled !== false;
@@ -709,7 +710,7 @@ export const CrxRecorder: React.FC = ({
   }, [appendDiagnosticLog, flushPageContextEventsNow]);
 
   React.useEffect(() => {
-    if (mode !== 'recording' && pageContextCaptureActiveRef.current)
+    if (mode !== 'recording' && pageContextCaptureActiveRef.current && !finalizingRecordingSessionRef.current)
       setPageContextCaptureActive(false);
   }, [mode, setPageContextCaptureActive]);
 
@@ -1197,6 +1198,8 @@ export const CrxRecorder: React.FC = ({
   React.useEffect(() => {
     if (settings.businessFlowEnabled === false || panelStage === 'setup' || panelStage === 'library' || panelStage === 'editRecord')
       return;
+    if (finalizingRecordingSessionRef.current && panelStage === 'replay')
+      return;
     setSelectedFileId('playwright-test');
     window.dispatch({ event: 'fileChanged', params: { file: 'playwright-test' } }).catch(() => {});
     window.dispatch({ event: 'businessFlowCodeChanged', params: { code: businessFlowPlaybackCode } }).catch(() => {});
@@ -1329,8 +1332,7 @@ export const CrxRecorder: React.FC = ({
   }, [goToLibraryNow, saveCurrentRecord]);
 
   const openReplayPanel = React.useCallback(async () => {
-    const finalizedFlow = await finalizeCurrentRecordingSession('generate-code');
-    const playbackCode = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaybackCode(finalizedFlow);
+    finalizingRecordingSessionRef.current = true;
     setPanelStage('replay');
     setActiveTab('code');
     setPaused(true);
@@ -1338,8 +1340,17 @@ export const CrxRecorder: React.FC = ({
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
     window.dispatch({ event: 'fileChanged', params: { file: 'playwright-test' } }).catch(() => {});
     chrome.runtime.sendMessage({ event: 'activeTabAttachRequested' }).catch(() => {});
-    window.dispatch({ event: 'businessFlowCodeChanged', params: { code: playbackCode } }).catch(() => {});
-  }, [currentCodeText, finalizeCurrentRecordingSession, settings.businessFlowEnabled]);
+
+    try {
+      const finalizedFlow = await finalizeCurrentRecordingSession('generate-code');
+      const playbackCode = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaybackCode(finalizedFlow);
+      window.dispatch({ event: 'businessFlowCodeChanged', params: { code: playbackCode } }).catch(() => {});
+    } finally {
+      finalizingRecordingSessionRef.current = false;
+      if (pageContextCaptureActiveRef.current)
+        setPageContextCaptureActive(false);
+    }
+  }, [currentCodeText, finalizeCurrentRecordingSession, setPageContextCaptureActive, settings.businessFlowEnabled]);
 
   const enterReviewPanel = React.useCallback(async () => {
     const finalizedFlow = await finalizeCurrentRecordingSession('enter-review');
