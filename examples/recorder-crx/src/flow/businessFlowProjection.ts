@@ -13,21 +13,25 @@ import type { BusinessFlow, FlowAssertion, FlowStep, FlowTarget } from './types'
 
 export function projectInputTransactionsIntoFlow(flow: BusinessFlow, options: { commitOpen?: boolean } = {}): BusinessFlow {
   const composition = composeInputTransactionsFromFlow(flow, { commitOpen: options.commitOpen ?? true, commitReason: 'stop-recording' });
-  const transactions = composition.inputTransactions.filter(transaction => transaction.finalValue !== undefined);
+  const transactions = composition.inputTransactions
+      .filter(transaction => transaction.finalValue !== undefined)
+      .sort((left, right) => left.startedAt - right.startedAt || left.endedAt - right.endedAt || left.id.localeCompare(right.id));
   if (!transactions.length)
     return flow;
 
   const recorder = cloneRecorderState(flow);
   let steps = [...flow.steps];
   let changed = false;
+  const usedStepIds = new Set<string>();
 
   for (const transaction of transactions) {
-    const index = steps.findIndex(step => stepMatchesTransaction(step, transaction));
+    const index = findStepForTransaction(steps, transaction, usedStepIds);
     if (index >= 0) {
       const previous = steps[index];
       const next = projectTransactionOntoStep(previous, transaction);
       changed = changed || next !== previous;
       steps[index] = next;
+      usedStepIds.add(next.id);
       const sourceActionIds = new Set(transaction.sourceActionIds);
       steps = steps.filter((step, stepIndex) => {
         if (stepIndex === index)
@@ -49,6 +53,7 @@ export function projectInputTransactionsIntoFlow(flow: BusinessFlow, options: { 
     const step = createFillStepFromTransaction(recorder, transaction, nextAssertionIndex(steps));
     const insertAt = insertionIndexForTransaction(steps, transaction);
     steps = [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
+    usedStepIds.add(step.id);
     changed = true;
   }
 
@@ -101,13 +106,33 @@ function createFillStepFromTransaction(recorder: ReturnType<typeof cloneRecorder
   };
 }
 
+function findStepForTransaction(steps: FlowStep[], transaction: InputTransaction, usedStepIds: Set<string>) {
+  return steps.findIndex(step => {
+    if (usedStepIds.has(step.id))
+      return false;
+    return stepMatchesTransaction(step, transaction);
+  });
+}
+
 function stepMatchesTransaction(step: FlowStep, transaction: InputTransaction) {
   if (!isLowLevelInputStep(step))
     return false;
   if (transaction.sourceActionIds.length)
     return !!step.sourceActionIds?.some(actionId => transaction.sourceActionIds.includes(actionId));
+  const existingTransactionId = inputTransactionIdForStep(step);
+  if (existingTransactionId)
+    return existingTransactionId === transaction.id;
+  const at = stepWallTime(step);
+  if (at !== undefined && (at < transaction.startedAt - 50 || at > transaction.endedAt + 50))
+    return false;
   const identity = inputTargetIdentityFromFlowTarget(step.target);
   return isInputTransactionForAliases(transaction, identity?.aliases);
+}
+
+function inputTransactionIdForStep(step: FlowStep) {
+  const raw = recordFromUnknown(step.rawAction);
+  const value = raw.inputTransactionId;
+  return typeof value === 'string' ? value : undefined;
 }
 
 function isLowLevelInputStep(step: FlowStep) {
@@ -148,11 +173,25 @@ function mergeTarget(current: FlowTarget | undefined, transaction: InputTransact
     name: current.name || fromTransaction.name,
     placeholder: current.placeholder || fromTransaction.placeholder,
     displayName: current.displayName || fromTransaction.displayName,
-    scope: current.scope || fromTransaction.scope,
+    scope: mergeScope(current.scope, fromTransaction.scope),
     raw: {
       recorder: current.raw,
       inputTransaction: transaction,
     },
+  };
+}
+
+function mergeScope(current: FlowTarget['scope'] | undefined, incoming: FlowTarget['scope'] | undefined): FlowTarget['scope'] | undefined {
+  if (!current)
+    return incoming;
+  if (!incoming)
+    return current;
+  return {
+    ...current,
+    dialog: current.dialog ?? incoming.dialog,
+    section: current.section ?? incoming.section,
+    table: current.table ?? incoming.table,
+    form: current.form ?? incoming.form,
   };
 }
 
@@ -276,12 +315,12 @@ function quotedString(value: string, quote: string) {
 }
 
 function fillLocator(target: FlowTarget | undefined) {
-  if (target?.testId)
-    return `page.getByTestId(${stringLiteral(target.testId)})`;
   if (target?.label)
     return `page.getByLabel(${stringLiteral(target.label)})`;
   if (target?.placeholder)
     return `page.getByPlaceholder(${stringLiteral(target.placeholder)})`;
+  if (target?.testId)
+    return `page.getByTestId(${stringLiteral(target.testId)})`;
   if (target?.selector)
     return `page.locator(${stringLiteral(target.selector)})`;
   if (target?.locator)

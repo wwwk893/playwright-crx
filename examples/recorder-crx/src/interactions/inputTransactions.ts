@@ -68,8 +68,9 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
     if (!transaction) {
       if (value === undefined)
         return;
+      commitUnrelatedOpenTransactions(identity, 'next-action', at);
       transaction = {
-        id: `input-tx-${committed.length + openByTarget.size + 1}`,
+        id: transactionId(identity, at, source),
         type: 'input',
         targetKey: identity.targetKey,
         targetAliases: identity.aliases,
@@ -99,12 +100,29 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
       transaction.finalValue = value;
   };
 
-  const commitMatching = (identity: { aliases: string[] } | undefined, reason: InputTransactionCommitReason, at: number) => {
-    const transaction = identity ? findOpen(openByTarget, identity.aliases) : firstOpen(openByTarget);
-    if (!transaction)
-      return;
+  const commitOpenTransaction = (transaction: OpenInputTransaction, reason: InputTransactionCommitReason, at: number) => {
     transaction.endedAt = Math.max(transaction.endedAt, at);
     commitTransaction(openByTarget, committed, transaction, reason);
+  };
+
+  const commitUnrelatedOpenTransactions = (identity: { aliases: string[] }, reason: InputTransactionCommitReason, at: number) => {
+    for (const transaction of Array.from(openByTarget.values())) {
+      if (isInputTransactionForAliases(transaction, identity.aliases))
+        continue;
+      commitOpenTransaction(transaction, reason, at);
+    }
+  };
+
+  const commitMatching = (identity: { aliases: string[] } | undefined, reason: InputTransactionCommitReason, at: number) => {
+    if (!identity) {
+      for (const transaction of Array.from(openByTarget.values()))
+        commitOpenTransaction(transaction, reason, at);
+      return;
+    }
+    const transaction = findOpen(openByTarget, identity.aliases);
+    if (!transaction)
+      return;
+    commitOpenTransaction(transaction, reason, at);
   };
 
   const orderedEvents = journal.eventOrder
@@ -181,8 +199,13 @@ function findOpen(openByTarget: Map<string, OpenInputTransaction>, aliases: stri
   return Array.from(openByTarget.values()).find(transaction => isInputTransactionForAliases(transaction, aliases));
 }
 
-function firstOpen(openByTarget: Map<string, OpenInputTransaction>) {
-  return openByTarget.values().next().value as OpenInputTransaction | undefined;
+function transactionId(identity: { targetKey: string }, at: number, source: { eventId?: string; actionId?: string }) {
+  const sourceId = source.eventId || source.actionId || 'local';
+  return `input-tx-${stableIdPart(identity.targetKey)}-${Math.round(at)}-${stableIdPart(sourceId)}`;
+}
+
+function stableIdPart(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'field';
 }
 
 function commitTransaction(openByTarget: Map<string, OpenInputTransaction>, committed: InputTransaction[], transaction: OpenInputTransaction, reason: InputTransactionCommitReason) {
@@ -229,7 +252,7 @@ function isInputLikeRecorderAction(action: ActionLike) {
   if (action.name !== 'press')
     return false;
   const key = action.key || '';
-  return key.length === 1 || /^(Backspace|Delete|Space|Tab|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)$/i.test(key);
+  return key.length === 1 || /^(Backspace|Delete|Space|Tab|ArrowLeft|ArrowRight|ArrowUp|ArrowDown|Shift|CapsLock|Alt|Control|Meta)$/i.test(key);
 }
 
 function isCommitKey(key?: string) {

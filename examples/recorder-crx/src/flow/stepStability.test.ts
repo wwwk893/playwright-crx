@@ -6,6 +6,7 @@
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
 import { compactSemanticDiagnostic, createSemanticDiagnosticsBuffer } from '../uiSemantics/diagnostics';
+import { composeInputTransactionsFromJournal } from '../interactions/inputTransactions';
 import type { UiActionRecipe, UiComponentKind } from '../uiSemantics/types';
 import { countBusinessFlowPlaybackActions, generateAssertionCodePreview, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './codePreview';
 import { toCompactFlow } from './compactExporter';
@@ -491,6 +492,64 @@ const tests: TestCase[] = [
       assert(/\.fill\((['"])pool\1\)/.test(merged.steps[0].sourceCode || ''), 'stored fill source should only update the final value');
       assert(code.includes('新建IPv4地址池'), `generated code should keep dialog-scoped locator\n${code}`);
       assert(/\.fill\((['"])pool\1\)/.test(code), `generated code should use final transaction value\n${code}`);
+    },
+  },
+  {
+    name: 'non-contiguous edits of the same field remain separate fill steps',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [
+        clickActionWithWallTime('查询', 1100),
+        clickActionWithWallTime('保存', 1300),
+      ], [], {});
+      const merged = mergePageContextIntoFlow(flow, [
+        pageInputEvent('ctx-name-alice', 1000, '用户名', 'alice'),
+        pageInputEvent('ctx-name-bob', 1200, '用户名', 'bob'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+
+      assertEqual(merged.steps.map(step => `${step.action}:${step.value || step.target?.text || step.target?.name || step.target?.displayName}`), [
+        'fill:alice',
+        'click:查询',
+        'fill:bob',
+        'click:保存',
+      ]);
+      assertTextInOrder(code, [
+        /\.fill\((['"])alice\1\)/,
+        /查询|\.click\(/,
+        /\.fill\((['"])bob\1\)/,
+        /保存|\.click\(/,
+      ]);
+    },
+  },
+  {
+    name: 'starting input on another field commits the previous open transaction',
+    run: () => {
+      const composition = composeInputTransactionsFromJournal(journalFromPageEvents([
+        pageInputEvent('ctx-user-alice', 1000, '用户名', 'alice'),
+        pageInputEvent('ctx-email-a', 1100, '邮箱', 'a@example.com'),
+      ]), { commitOpen: false });
+
+      assertEqual(composition.inputTransactions.length, 1);
+      assertEqual(composition.inputTransactions[0].field.label, '用户名');
+      assertEqual(composition.inputTransactions[0].finalValue, 'alice');
+      assertEqual(composition.inputTransactions[0].commitReason, 'next-action');
+      assertEqual(composition.openInputTransactions.length, 1);
+      assertEqual(composition.openInputTransactions[0].field.label, '邮箱');
+      assertEqual(composition.openInputTransactions[0].finalValue, 'a@example.com');
+    },
+  },
+  {
+    name: 'non-input page event commits all open input transactions',
+    run: () => {
+      const composition = composeInputTransactionsFromJournal(journalFromPageEvents([
+        pageInputEvent('ctx-user-alice', 1000, '用户名', 'alice'),
+        pageInputEvent('ctx-email-a', 1100, '邮箱', 'a@example.com'),
+        pageClickEvent('ctx-search-after-fields', 1200, '查询'),
+      ]), { commitOpen: false });
+
+      assertEqual(composition.inputTransactions.map(transaction => transaction.field.label), ['用户名', '邮箱']);
+      assertEqual(composition.inputTransactions.map(transaction => transaction.commitReason), ['next-action', 'next-action']);
+      assertEqual(composition.openInputTransactions.length, 0);
     },
   },
   {
@@ -7080,6 +7139,31 @@ function pageDialogInputEvent(id: string, wallTime: number, label: string, value
       dialog: { type: 'modal', title: dialogTitle, visible: true },
     },
   };
+}
+
+function journalFromPageEvents(events: PageContextEvent[]) {
+  const eventsById = Object.fromEntries(events.map(event => {
+    const wallTime = typeof event.wallTime === 'number' ? event.wallTime : Date.now();
+    return [`page-context:${event.id}`, {
+      id: `page-context:${event.id}`,
+      sessionId: 'page-context',
+      source: 'page-context',
+      kind: event.kind,
+      createdAt: new Date(wallTime).toISOString(),
+      timestamp: { wallTime, performanceTime: event.time },
+      payload: event,
+    }];
+  }));
+  return {
+    version: 1,
+    eventsById,
+    eventOrder: events.map(event => `page-context:${event.id}`),
+    sessions: [],
+    highWaterMarks: {
+      recorderActionCount: 0,
+      pageContextEventCount: events.length,
+    },
+  } as any;
 }
 
 function pageKeydownEvent(id: string, wallTime: number, label: string, key: string): PageContextEvent {
