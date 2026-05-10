@@ -136,8 +136,13 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
       const payload = event.payload as RecorderPayload;
       const latestAction = payload.actionId ? latestRecorderActions.get(payload.actionId) : undefined;
       const action = normalizeAction(latestAction?.rawAction ?? payload.rawAction);
+      const sourceCode = latestAction?.sourceCode ?? payload.sourceCode;
       at = latestAction?.wallTime ?? at;
-      const identity = scopedIdentity(inputTargetIdentityFromRecorderAction(action), dialogScopeFromSource(latestAction?.sourceCode ?? payload.sourceCode));
+      const identity = scopedIdentity(inputTargetIdentityFromRecorderAction(action), dialogScopeFromSource(sourceCode));
+      if (isSelectLikeRecorderAction(action, sourceCode)) {
+        commitMatching(undefined, 'next-action', at);
+        continue;
+      }
       if (isInputLikeRecorderAction(action)) {
         if (!identity)
           continue;
@@ -261,6 +266,13 @@ function isInputLikeRecorderAction(action: ActionLike) {
 
 function isCommitKey(key?: string) {
   return /^(Tab|Enter)$/i.test(key || '');
+}
+
+function isSelectLikeRecorderAction(action: ActionLike, sourceCode?: string) {
+  if (action.name !== 'fill')
+    return false;
+  const text = `${action.selector || ''}\n${sourceCode || ''}`;
+  return /ant-select|ant-cascader|ant-select-tree|role=combobox|internal:role=combobox|getByRole\(["']combobox["']|\.ant-select-selector|\.ant-cascader-picker/i.test(text);
 }
 
 function recorderActionValue(action: ActionLike) {

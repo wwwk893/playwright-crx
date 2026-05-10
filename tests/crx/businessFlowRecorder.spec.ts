@@ -359,7 +359,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await page.getByTestId('site-save-button').click();
   await expect(page.getByText('配置已保存')).toBeVisible();
 
-  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(9);
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(8);
   const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
   await expect.poll(stepSubjects).toContain('site-ip-address-pool-create-button');
   await expect.poll(stepSubjects).toContain('test1');
@@ -370,7 +370,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
 
   let flow = await exportBusinessFlowJson(recorderPage);
   expect(flow.flow.name).toBe('地址池');
-  expect(flow.steps.length).toBeGreaterThanOrEqual(9);
+  expect(flow.steps.length).toBeGreaterThanOrEqual(8);
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-ip-address-pool-create-button')).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /WAN口|选择一个WAN口|xtest16:WAN1/.test(String(value || ''))))).toBeTruthy();
 
@@ -414,7 +414,10 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
   expect(flow.artifacts.playwrightCode).toContain('2.2.2.2');
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-modal, \.ant-drawer, \[role=\\?["']dialog\\?["']\]["']\)[\s\S]*filter\(\{ hasText: ["']新建IPv4地址池["'] \}\)[\s\S]*locator\(["']\.ant-form-item["']\)[\s\S]*filter\(\{ hasText: ["']\*? ?WAN口["'] \}\)[\s\S]*locator\(["']\.ant-select-selector["']\)|locator\(["']\.ant-form-item["']\)\.filter\(\{ hasText: ["']\*? ?WAN口["'] \}\)\.locator\(["']\.ant-select-selector["']\)/);
+  expectInOrder(flow.artifacts.playwrightCode, [
+    'page.locator(".ant-form-item").filter({ hasText: "WAN口" })',
+    '.locator(".ant-select-selector',
+  ]);
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 

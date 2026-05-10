@@ -475,6 +475,33 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'recorded select trigger search option are replaced by one select step',
+    run: () => {
+      const recorded = mergeActionsIntoFlow(createNamedFlow(), [
+        selectTriggerAction('WAN口', 1000),
+        selectSearchFillAction('WAN口', 'wan', 1050),
+        selectOptionAction('WAN1', 1100),
+      ], recordedSource([
+        `await page.getByRole('combobox', { name: 'WAN口' }).click();`,
+        `await page.getByRole('combobox', { name: 'WAN口' }).fill('wan');`,
+        `await page.getByRole('option', { name: 'WAN1' }).click();`,
+      ]), {});
+      const merged = mergePageContextIntoFlow(recorded, [
+        pageSelectTriggerEvent('ctx-recorded-select-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-recorded-select-search', 1050, 'WAN口', 'wan'),
+        pageSelectOptionEvent('ctx-recorded-select-option', 1100, 'WAN口', 'WAN1'),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(merged);
+      const searchFillCount = (code.match(/\.fill\((['"])wan\1\)/g) ?? []).length;
+
+      assertEqual(merged.steps.map(step => step.action), ['select']);
+      assertEqual(merged.steps[0].value, 'WAN1');
+      assert((merged.steps[0].sourceActionIds?.length ?? 0) >= 3, 'select step should preserve low-level recorder sourceActionIds');
+      assertEqual(merged.steps.filter(step => step.action === 'fill' && step.value === 'wan').length, 0);
+      assertEqual(searchFillCount, 1);
+    },
+  },
+  {
     name: 'page select transaction stays after untimed navigation and opener steps',
     run: () => {
       const flow = mergeActionsIntoFlow(createNamedFlow(), [
@@ -7164,6 +7191,37 @@ function fillAction(label: string, value: string) {
 function fillActionWithWallTime(label: string, value: string, wallTime: number) {
   return {
     ...fillAction(label, value),
+    wallTime,
+  };
+}
+
+function selectTriggerAction(label: string, wallTime: number) {
+  return {
+    action: {
+      name: 'click',
+      selector: `internal:role=combobox[name="${escapeSelectorName(label)}"i]`,
+    },
+    wallTime,
+  };
+}
+
+function selectSearchFillAction(label: string, value: string, wallTime: number) {
+  return {
+    action: {
+      name: 'fill',
+      selector: `internal:role=combobox[name="${escapeSelectorName(label)}"i]`,
+      text: value,
+    },
+    wallTime,
+  };
+}
+
+function selectOptionAction(optionText: string, wallTime: number) {
+  return {
+    action: {
+      name: 'click',
+      selector: `internal:role=option[name="${escapeSelectorName(optionText)}"i]`,
+    },
     wallTime,
   };
 }

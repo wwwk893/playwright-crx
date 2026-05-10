@@ -49,6 +49,17 @@ type ComposeSelectOptions = {
 
 type PageContextPayload = PageContextEvent;
 
+type RecorderPayload = {
+  actionId?: string;
+  rawAction?: unknown;
+  sourceCode?: string;
+};
+
+type ActionLike = {
+  name?: string;
+  selector?: string;
+};
+
 export function composeSelectTransactionsFromFlow(flow: BusinessFlow, options: ComposeSelectOptions = {}): SelectTransactionComposition {
   const journal = flow.artifacts?.recorder?.eventJournal;
   return journal ? composeSelectTransactionsFromJournal(journal, options) : { selectTransactions: [], openSelectTransactions: [] };
@@ -136,6 +147,10 @@ export function composeSelectTransactionsFromJournal(journal: RecorderEventJourn
 
   for (const { event } of orderedEvents) {
     if (event.source !== 'page-context') {
+      const payload = event.payload as RecorderPayload;
+      const action = normalizeAction(payload.rawAction);
+      if (isSelectLikeRecorderAction(action, payload.sourceCode))
+        continue;
       commitUnrelatedOpenTransactions(undefined, 'dropdown-close', event.timestamp.wallTime);
       continue;
     }
@@ -186,11 +201,24 @@ export function projectSelectTransactionsIntoFlow(flow: BusinessFlow, options: C
   const usedTransactionIds = new Set(existingSelectTransactionIds(steps));
 
   for (const transaction of transactions) {
-    if (usedTransactionIds.has(transaction.id))
+    const matchingIndexes = selectLowLevelStepIndexes(steps, transaction);
+    if (usedTransactionIds.has(transaction.id)) {
+      if (matchingIndexes.length) {
+        const remove = new Set(matchingIndexes);
+        steps = steps.filter((_candidate, index) => !remove.has(index));
+        changed = true;
+      }
       continue;
-    const step = createSelectStep(recorder, transaction);
-    const insertAt = insertionIndexForTransaction(steps, transaction);
-    steps = [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
+    }
+    const step = createSelectStep(recorder, transaction, matchingIndexes.map(index => steps[index]));
+    if (matchingIndexes.length) {
+      const first = matchingIndexes[0];
+      const remove = new Set(matchingIndexes.slice(1));
+      steps = steps.map((candidate, index) => index === first ? step : candidate).filter((_candidate, index) => !remove.has(index));
+    } else {
+      const insertAt = insertionIndexForTransaction(steps, transaction);
+      steps = [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
+    }
     usedTransactionIds.add(transaction.id);
     changed = true;
   }
@@ -204,45 +232,62 @@ export function projectSelectTransactionsIntoFlow(flow: BusinessFlow, options: C
   }, recorder);
 }
 
-function createSelectStep(recorder: ReturnType<typeof cloneRecorderState>, transaction: SelectTransaction): FlowStep {
-  const target = transaction.target ?? selectTargetFromTransaction(transaction);
+function createSelectStep(recorder: ReturnType<typeof cloneRecorderState>, transaction: SelectTransaction, replacedSteps: FlowStep[] = []): FlowStep {
+  const projectedTransaction = mergeSelectTransactionEvidence(transaction, replacedSteps);
+  const target = mergeSelectTargetEvidence(projectedTransaction.target ?? selectTargetFromTransaction(projectedTransaction), selectTargetEvidence(replacedSteps), projectedTransaction);
+  const sourceActionIds = unique([
+    ...projectedTransaction.sourceActionIds,
+    ...replacedSteps.flatMap(step => step.sourceActionIds ?? []),
+  ]);
   return {
     id: nextStableStepId(recorder),
     order: 0,
     kind: 'recorded',
+    sourceActionIds,
     action: 'select',
     target,
-    value: transaction.selectedText,
-    context: transaction.context,
+    value: projectedTransaction.selectedText,
+    context: projectedTransaction.context,
     uiRecipe: {
       kind: 'select-option',
       library: 'antd',
-      component: uiComponentForTransaction(transaction),
-      fieldKind: componentControlType(transaction.component),
-      fieldLabel: transaction.field.label,
-      fieldName: transaction.field.name,
-      optionText: transaction.selectedText,
+      component: uiComponentForTransaction(projectedTransaction),
+      fieldKind: componentControlType(projectedTransaction.component),
+      fieldLabel: projectedTransaction.field.label,
+      fieldName: projectedTransaction.field.name,
+      optionText: projectedTransaction.selectedText,
     },
     assertions: [{
-      id: `${transaction.id}-selected`,
+      id: `${projectedTransaction.id}-selected`,
       type: 'selected-value-visible',
       subject: 'element',
       target,
-      expected: transaction.selectedText,
+      expected: projectedTransaction.selectedText,
       enabled: false,
     }],
     rawAction: {
       name: 'select',
-      transactionId: transaction.id,
-      searchText: transaction.searchText,
-      selectedText: transaction.selectedText,
-      optionPath: transaction.optionPath,
-      sourceEventIds: transaction.sourceEventIds,
-      wallTime: transaction.startedAt,
-      endWallTime: transaction.endedAt,
+      transactionId: projectedTransaction.id,
+      searchText: projectedTransaction.searchText,
+      selectedText: projectedTransaction.selectedText,
+      optionPath: projectedTransaction.optionPath,
+      sourceEventIds: projectedTransaction.sourceEventIds,
+      wallTime: projectedTransaction.startedAt,
+      endWallTime: projectedTransaction.endedAt,
     },
-    sourceCode: selectSourceCode(transaction),
+    sourceCode: selectSourceCode(projectedTransaction),
   };
+}
+
+function mergeSelectTransactionEvidence(transaction: SelectTransaction, replacedSteps: FlowStep[]): SelectTransaction {
+  return {
+    ...transaction,
+    searchText: transaction.searchText ?? selectSearchTextEvidence(replacedSteps),
+  };
+}
+
+function selectSearchTextEvidence(steps: FlowStep[]) {
+  return steps.find(step => step.action === 'fill' && step.value)?.value;
 }
 
 function selectSourceCode(transaction: SelectTransaction) {
@@ -383,6 +428,55 @@ function selectTargetFromTransaction(transaction: SelectTransaction): FlowTarget
   };
 }
 
+function selectTargetEvidence(steps: FlowStep[]): Partial<FlowTarget> {
+  const evidence: Partial<FlowTarget> = {};
+  for (const step of steps) {
+    evidence.testId = evidence.testId || step.target?.testId || extractTestIdFromText(lowLevelStepText(step));
+    evidence.label = evidence.label || stableTargetField(step.target?.label) || stableTargetField(step.context?.before.form?.label) || extractNamedLocatorText(step.sourceCode);
+    evidence.name = evidence.name || stableTargetField(step.target?.name) || stableTargetField(step.context?.before.form?.name);
+  }
+  return evidence;
+}
+
+function mergeSelectTargetEvidence(target: FlowTarget, evidence: Partial<FlowTarget>, transaction: SelectTransaction): FlowTarget {
+  const label = target.label || evidence.label || transaction.field.label;
+  const name = target.name && target.name !== transaction.selectedText ? target.name : evidence.name || label || transaction.field.name;
+  const testId = target.testId || evidence.testId || transaction.field.testId;
+  return {
+    ...target,
+    label,
+    name,
+    testId,
+    displayName: label || name || testId || target.displayName,
+    scope: {
+      ...target.scope,
+      form: {
+        ...transaction.field,
+        ...target.scope?.form,
+        testId,
+        label,
+        name: name || transaction.field.name,
+      },
+    },
+  };
+}
+
+function stableTargetField(value?: string) {
+  if (!value)
+    return undefined;
+  return value;
+}
+
+function extractTestIdFromText(text: string) {
+  const match = text.match(/getbytestid\(['"]([^'"]+)['"]\)|data-testid[=\"'\s]+([^\"'\]\s]+)/i);
+  return match?.[1] || match?.[2];
+}
+
+function extractNamedLocatorText(sourceCode?: string) {
+  const match = sourceCode?.match(/getbyrole\(['"]combobox['"],\s*\{\s*name:\s*['"]([^'"]+)['"]/i) || sourceCode?.match(/filter\(\{\s*hastext:\s*['"]([^'"]+)['"]/i);
+  return match?.[1];
+}
+
 function insertionIndexForTransaction(steps: FlowStep[], transaction: SelectTransaction) {
   let insertAt = 0;
   let sawComparableWallTime = false;
@@ -404,6 +498,107 @@ function insertionIndexForTransaction(steps: FlowStep[], transaction: SelectTran
 function stepTime(step: FlowStep): number | undefined {
   const raw = step.rawAction as { wallTime?: number; endWallTime?: number; action?: { wallTime?: number; endWallTime?: number } } | undefined;
   return raw?.endWallTime ?? raw?.wallTime ?? raw?.action?.endWallTime ?? raw?.action?.wallTime ?? step.context?.capturedAt;
+}
+
+function selectLowLevelStepIndexes(steps: FlowStep[], transaction: SelectTransaction) {
+  return steps
+      .map((step, index) => ({ step, index }))
+      .filter(({ step }) => isLowLevelSelectStep(step, transaction))
+      .filter(({ step }) => {
+        const at = stepTime(step);
+        return typeof at !== 'number' || !areComparableWallTimes(at, transaction.startedAt) || at >= transaction.startedAt - 250 && at <= transaction.endedAt + 250;
+      })
+      .map(({ index }) => index);
+}
+
+function areComparableWallTimes(left: number, right: number) {
+  const leftIsEpoch = left > 1_000_000_000_000;
+  const rightIsEpoch = right > 1_000_000_000_000;
+  return leftIsEpoch === rightIsEpoch;
+}
+
+function isLowLevelSelectStep(step: FlowStep, transaction: SelectTransaction) {
+  if (step.action === 'select')
+    return false;
+  if (step.action !== 'click' && step.action !== 'fill')
+    return false;
+  const text = lowLevelStepText(step);
+  const fieldMatches = selectFieldTokens(transaction).some(token => text.includes(token));
+  const optionMatches = selectOptionTokens(transaction).some(token => text.includes(token));
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const controlType = step.context?.before.target?.controlType || '';
+
+  if (step.action === 'fill')
+    return isSelectLikeText(text) && (fieldMatches || optionMatches || !!transaction.searchText && text.includes(normalize(transaction.searchText)));
+  if (/combobox/.test(role) || /^(select|tree-select|cascader)$/.test(controlType) || /combobox|ant-select-selector|ant-cascader-picker/.test(text))
+    return fieldMatches || selectFieldTokens(transaction).length === 0;
+  if (/option|treeitem|menuitem/.test(role) || /option|tree-select-option|cascader-option|ant-select-dropdown|ant-cascader-dropdown/.test(text))
+    return optionMatches;
+  return false;
+}
+
+function lowLevelStepText(step: FlowStep) {
+  const raw = step.rawAction as { action?: { selector?: string }; selector?: string } | undefined;
+  return [
+    step.sourceCode,
+    step.value,
+    step.target?.selector,
+    step.target?.locator,
+    step.target?.role,
+    step.target?.name,
+    step.target?.label,
+    step.target?.text,
+    step.target?.displayName,
+    step.target?.placeholder,
+    step.context?.before.form?.label,
+    step.context?.before.form?.name,
+    step.context?.before.target?.role,
+    step.context?.before.target?.controlType,
+    step.context?.before.target?.text,
+    step.context?.before.target?.normalizedText,
+    step.context?.before.target?.title,
+    raw?.selector,
+    raw?.action?.selector,
+  ].filter(Boolean).join('\n').toLowerCase();
+}
+
+function selectFieldTokens(transaction: SelectTransaction) {
+  return [transaction.field.label, transaction.field.name, transaction.field.testId]
+      .filter(Boolean)
+      .map(value => normalize(value as string));
+}
+
+function selectOptionTokens(transaction: SelectTransaction) {
+  return [transaction.selectedText, transaction.optionPath?.[transaction.optionPath.length - 1]]
+      .filter(Boolean)
+      .map(value => normalize(value as string));
+}
+
+function isSelectLikeText(text: string) {
+  return /ant-select|ant-cascader|ant-select-tree|role=combobox|internal:role=combobox|getbyrole\(['"]combobox['"]|\.ant-select-selector|\.ant-cascader-picker|combobox/.test(text);
+}
+
+function isSelectLikeRecorderAction(action: ActionLike, sourceCode?: string) {
+  const text = `${action.selector || ''}\n${sourceCode || ''}`.toLowerCase();
+  if (action.name === 'fill')
+    return isSelectLikeText(text);
+  if (action.name === 'click')
+    return isSelectLikeText(text) || /role=option|internal:role=option|getbyrole\(['"]option['"]|ant-select-dropdown|ant-cascader-dropdown/.test(text);
+  return false;
+}
+
+function normalizeAction(rawAction: unknown): ActionLike {
+  const raw = asRecord(rawAction);
+  const nested = asRecord(raw.action);
+  const source = nested.name ? nested : raw;
+  return {
+    name: typeof source.name === 'string' ? source.name : undefined,
+    selector: typeof source.selector === 'string' ? source.selector : undefined,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
 function existingSelectTransactionIds(steps: FlowStep[]) {
