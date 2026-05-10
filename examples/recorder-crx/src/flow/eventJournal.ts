@@ -104,7 +104,7 @@ function lastWallTime(events: RecorderEventEnvelope[]) {
 }
 
 function pageContextEventToEnvelope(event: PageContextEvent): RecorderEventEnvelope {
-  const wallTime = event.wallTime ?? event.time ?? Date.now();
+  const wallTime = typeof event.wallTime === 'number' ? event.wallTime : Date.now();
   return {
     id: `page-context:${event.id}`,
     sessionId: 'page-context',
@@ -113,6 +113,7 @@ function pageContextEventToEnvelope(event: PageContextEvent): RecorderEventEnvel
     createdAt: new Date(wallTime).toISOString(),
     timestamp: {
       wallTime,
+      performanceTime: typeof event.time === 'number' ? event.time : undefined,
     },
     payload: compactPageContextEvent(event),
   };

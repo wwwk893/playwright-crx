@@ -88,6 +88,59 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'mergePageContextIntoFlow records matched page context facts in event journal',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('保存', 1000)], [], {});
+      const event = pageClickEvent('ctx-merge-save', 1100, '保存');
+
+      const merged = mergePageContextIntoFlow(flow, [event]);
+      const recorder = merged.artifacts?.recorder;
+
+      assert(recorder?.eventJournal, 'merged flow should keep event journal');
+      assertEqual(eventJournalStats(recorder).recorderActionCount, 1);
+      assertEqual(eventJournalStats(recorder).pageContextEventCount, 1);
+      assert(recorder.eventJournal.eventsById[`page-context:${event.id}`], 'matched page context event should be recorded as a fact');
+      assertEqual(merged.steps.map(step => step.id), flow.steps.map(step => step.id));
+    },
+  },
+  {
+    name: 'mergePageContextIntoFlow records ignored page context facts without changing steps',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('保存', 1000)], [], {});
+      const event = pageClickEventWithTarget('ctx-ignored-option', 1100, {
+        role: 'option',
+        controlType: 'select-option',
+        text: '不匹配的选项',
+        normalizedText: '不匹配的选项',
+      });
+
+      const merged = mergePageContextIntoFlow(flow, [event]);
+      const recorder = merged.artifacts?.recorder;
+
+      assert(recorder?.eventJournal, 'ignored context should still be captured as a fact');
+      assertEqual(eventJournalStats(recorder).pageContextEventCount, 1);
+      assert(recorder.eventJournal.eventsById[`page-context:${event.id}`], 'ignored page context event should be recorded as a fact');
+      assertEqual(merged.steps, flow.steps);
+    },
+  },
+  {
+    name: 'page context event without wallTime uses Date.now wall time and preserves performanceTime',
+    run: () => {
+      const nowBefore = Date.now();
+      const event = pageClickEvent('ctx-no-wall', 1234, '保存');
+      delete (event as Partial<PageContextEvent>).wallTime;
+      event.time = 1234;
+
+      const flow = appendSyntheticPageContextStepsWithResult(createNamedFlow(), [event]).flow;
+      const envelope = flow.artifacts?.recorder?.eventJournal?.eventsById[`page-context:${event.id}`];
+
+      assert(envelope, 'page context envelope should exist');
+      assert(envelope.timestamp.wallTime >= nowBefore, 'missing wallTime should fall back to current wall time');
+      assertEqual(envelope.timestamp.performanceTime, 1234);
+      assert(!envelope.createdAt.startsWith('1970-'), 'createdAt should not be derived from performance.now');
+    },
+  },
+  {
     name: 'export sanitization strips event journal recorder internals',
     run: () => {
       const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('保存')], [], {});
