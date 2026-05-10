@@ -5,4 +5,6 @@
  */
 
 export { composeInputTransactionsFromFlow, composeInputTransactionsFromJournal } from './inputTransactions';
+export { composeSelectTransactionsFromFlow, composeSelectTransactionsFromJournal } from './selectTransactions';
+export type { SelectTransaction, SelectTransactionComposition } from './selectTransactions';
 export type { InputTransaction, InputTransactionComposition } from './types';

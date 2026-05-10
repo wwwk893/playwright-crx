@@ -172,9 +172,14 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)["']\)\.last\(\)\.locator\(["']\.ant-select-item-option["']\)\.filter\(\{\s*hasText:\s*["']real-item-a["']\s*\}\)/);
-  expect(flow.artifacts.playwrightCode).toContain('dispatchEvent(new MouseEvent("mousedown"');
-  expect(flow.artifacts.playwrightCode).toMatch(/waitFor\(\{ state: .*hidden.*timeout: 1000 \}\)/);
+  expectInOrder(flow.artifacts.playwrightCode, [
+    'page.locator(".ant-form-item").filter({ hasText: "下方表单使用条目" })',
+    '.locator(".ant-select-selector',
+    'page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last().locator(".ant-select-item-option',
+    '.filter({ hasText: "real-item-a" }).first().click()',
+  ]);
+  expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']下方表单使用条目["']/);
+  expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
 
   await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
@@ -359,7 +364,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await page.getByTestId('site-save-button').click();
   await expect(page.getByText('配置已保存')).toBeVisible();
 
-  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(9);
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(8);
   const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
   await expect.poll(stepSubjects).toContain('site-ip-address-pool-create-button');
   await expect.poll(stepSubjects).toContain('test1');
@@ -370,7 +375,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
 
   let flow = await exportBusinessFlowJson(recorderPage);
   expect(flow.flow.name).toBe('地址池');
-  expect(flow.steps.length).toBeGreaterThanOrEqual(9);
+  expect(flow.steps.length).toBeGreaterThanOrEqual(8);
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-ip-address-pool-create-button')).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /WAN口|选择一个WAN口|xtest16:WAN1/.test(String(value || ''))))).toBeTruthy();
 
@@ -414,7 +419,10 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
   expect(flow.artifacts.playwrightCode).toContain('2.2.2.2');
-  expect(flow.artifacts.playwrightCode).toMatch(/locator\(["']\.ant-modal, \.ant-drawer, \[role=\\?["']dialog\\?["']\]["']\)[\s\S]*filter\(\{ hasText: ["']新建IPv4地址池["'] \}\)[\s\S]*locator\(["']\.ant-form-item["']\)[\s\S]*filter\(\{ hasText: ["']\*? ?WAN口["'] \}\)[\s\S]*locator\(["']\.ant-select-selector["']\)|locator\(["']\.ant-form-item["']\)\.filter\(\{ hasText: ["']\*? ?WAN口["'] \}\)\.locator\(["']\.ant-select-selector["']\)/);
+  expectInOrder(flow.artifacts.playwrightCode, [
+    'page.locator(".ant-form-item").filter({ hasText: "WAN口" })',
+    '.locator(".ant-select-selector',
+  ]);
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 

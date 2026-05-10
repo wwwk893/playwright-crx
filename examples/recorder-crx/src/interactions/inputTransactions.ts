@@ -136,8 +136,13 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
       const payload = event.payload as RecorderPayload;
       const latestAction = payload.actionId ? latestRecorderActions.get(payload.actionId) : undefined;
       const action = normalizeAction(latestAction?.rawAction ?? payload.rawAction);
+      const sourceCode = latestAction?.sourceCode ?? payload.sourceCode;
       at = latestAction?.wallTime ?? at;
-      const identity = scopedIdentity(inputTargetIdentityFromRecorderAction(action), dialogScopeFromSource(latestAction?.sourceCode ?? payload.sourceCode));
+      const identity = scopedIdentity(inputTargetIdentityFromRecorderAction(action), dialogScopeFromSource(sourceCode));
+      if (isSelectLikeRecorderAction(action, sourceCode)) {
+        commitMatching(undefined, 'next-action', at);
+        continue;
+      }
       if (isInputLikeRecorderAction(action)) {
         if (!identity)
           continue;
@@ -154,6 +159,10 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
 
     if (event.source === 'page-context') {
       const payload = event.payload as PageContextPayload;
+      if (isSelectLikePageContext(payload)) {
+        commitMatching(undefined, 'next-action', at);
+        continue;
+      }
       const identity = scopedIdentity(inputTargetIdentityFromPageContext(payload.before), pageContextDialogScope(payload.before));
       if (!identity)
         continue;
@@ -259,6 +268,13 @@ function isCommitKey(key?: string) {
   return /^(Tab|Enter)$/i.test(key || '');
 }
 
+function isSelectLikeRecorderAction(action: ActionLike, sourceCode?: string) {
+  if (action.name !== 'fill')
+    return false;
+  const text = `${action.selector || ''}\n${sourceCode || ''}`;
+  return /ant-select|ant-cascader|ant-select-tree|role=combobox|internal:role=combobox|getByRole\(["']combobox["']|\.ant-select-selector|\.ant-cascader-picker/i.test(text);
+}
+
 function recorderActionValue(action: ActionLike) {
   if (typeof action.text === 'string')
     return action.text;
@@ -270,6 +286,12 @@ function recorderActionValue(action: ActionLike) {
 function pageContextInputValue(payload: PageContextPayload) {
   const value = payload.before?.ui?.form?.valuePreview;
   return typeof value === 'string' ? value : undefined;
+}
+
+function isSelectLikePageContext(payload: PageContextPayload) {
+  const controlType = payload.before?.target?.controlType || payload.before?.ui?.component || payload.before?.ui?.form?.fieldKind || '';
+  const role = payload.before?.target?.role || '';
+  return /^(select|tree-select|cascader|select-option|tree-select-option|cascader-option)$/.test(controlType) || role === 'combobox' || role === 'option' || role === 'treeitem';
 }
 
 function effectiveWallTime(event: RecorderEventEnvelope, latestRecorderActions: Map<string, { wallTime?: number }>) {
