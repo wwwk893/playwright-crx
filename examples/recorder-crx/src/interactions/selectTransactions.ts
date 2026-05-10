@@ -302,10 +302,31 @@ function selectTriggerLocator(transaction: SelectTransaction) {
 }
 
 function selectOptionLocator(transaction: SelectTransaction) {
-  const text = transaction.optionPath?.[transaction.optionPath.length - 1] || transaction.selectedText;
+  const text = selectReplayOptionText(transaction);
   const popupRoot = 'page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last()';
   const optionRows = '.ant-select-item-option, .ant-cascader-menu-item, .ant-select-tree-treenode, .ant-select-tree-node-content-wrapper';
   return `${popupRoot}.locator(${stringLiteral(optionRows)}).filter({ hasText: ${stringLiteral(text)} }).first()`;
+}
+
+function selectReplayOptionText(transaction: SelectTransaction) {
+  const candidates = [
+    transaction.optionPath?.[transaction.optionPath.length - 1],
+    transaction.searchText ? undefined : inferredSelectSearchText(transaction),
+    transaction.selectedText,
+  ];
+  return candidates.find(isUsableOptionText) || transaction.selectedText;
+}
+
+function inferredSelectSearchText(transaction: SelectTransaction) {
+  const text = transaction.selectedText.trim();
+  if (!text || text === '[object Object]')
+    return undefined;
+  const firstToken = text.split(/\s+/).find(Boolean);
+  if (firstToken && firstToken !== text)
+    return firstToken;
+  if (/[:：_-]/.test(text))
+    return text.split(/[:：]/)[0] || text;
+  return undefined;
 }
 
 type SelectIdentity = {
@@ -373,12 +394,27 @@ function componentFromPayload(payload: PageContextPayload): SelectTransactionCom
 }
 
 function optionText(payload: PageContextPayload) {
-  return payload.before.target?.selectedOption || payload.before.ui?.option?.text || payload.before.target?.text || payload.before.target?.normalizedText || payload.before.target?.title;
+  return displayOptionText(payload.before.target?.selectedOption)
+      || displayOptionText(payload.before.ui?.option?.text)
+      || displayOptionText(payload.before.target?.text)
+      || displayOptionText(payload.before.target?.normalizedText)
+      || displayOptionText(payload.before.target?.title);
 }
 
 function optionPath(payload: PageContextPayload) {
   const path = payload.before.target?.optionPath || payload.before.ui?.option?.path;
-  return path?.length ? path : undefined;
+  if (!path?.length)
+    return undefined;
+  const normalized = path.map(displayOptionText).filter(isUsableOptionText);
+  return normalized.length ? normalized : undefined;
+}
+
+function displayOptionText(value: unknown) {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function isUsableOptionText(value: unknown): value is string {
+  return typeof value === 'string' && !!value.trim() && value !== '[object Object]';
 }
 
 function pageContextSearchValue(payload: PageContextPayload) {

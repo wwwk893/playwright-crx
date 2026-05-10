@@ -555,6 +555,21 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'select option ignores object-like option path and replays by selected text',
+    run: () => {
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [
+        pageSelectTriggerEvent('ctx-object-path-trigger', 1000, 'IP地址池'),
+        pageSelectOptionEvent('ctx-object-path-option', 1100, 'IP地址池', 'test1 1.1.1.1--2.2.2.2 共享', 'select-option', ['[object Object]']),
+      ]);
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(!code.includes('[object Object]'), 'select option replay must not use object-like optionPath text');
+      assert(!code.includes('.fill("test1")'), 'select option replay should not infer a search fill for ReactNode/object-valued options');
+      assert(code.includes('filter({ hasText: "test1" })'), 'select option replay should click by the inferred visible search token');
+      assert(code.includes('test1 1.1.1.1--2.2.2.2 共享'), 'select option replay should preserve selected text in the business step');
+    },
+  },
+  {
     name: 'page select transaction stays after untimed navigation and opener steps',
     run: () => {
       const flow = mergeActionsIntoFlow(createNamedFlow(), [
