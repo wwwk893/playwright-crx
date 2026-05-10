@@ -13,6 +13,11 @@ AGENTS.md
 docs/mvp-0.1x-architecture-migration/**
 ```
 
+Allowed documentation-only conflict fixes in this PR:
+
+- PR-02 paths must follow `FINAL_FILE_TREE.md` + `PR_TO_FILE_MAP.md`: raw event envelope/normalization under `capture/`, journal under `flow/`.
+- PR-07 recipe ownership must use `uiSemantics/recipes.ts` for domain types and `replay/types.ts` for renderer-facing re-exports/types; do not introduce a second `replay/recipes.ts` model.
+
 Do not modify product source code.
 
 ## Implementation

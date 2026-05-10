@@ -7,8 +7,9 @@ Event Journal 是事实层，不是业务步骤层。它统一保存 Playwright 
 ## New files
 
 ```text
+examples/recorder-crx/src/capture/eventEnvelope.ts
+examples/recorder-crx/src/capture/recorderActionNormalizer.ts
 examples/recorder-crx/src/flow/eventJournal.ts
-examples/recorder-crx/src/flow/eventTypes.ts
 ```
 
 ## Types

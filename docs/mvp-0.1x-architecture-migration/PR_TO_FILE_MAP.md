@@ -8,12 +8,15 @@ Create/modify:
 
 ```text
 AGENTS.md
+STATUS.md
 TARGET_ARCHITECTURE.md
 FINAL_FILE_TREE.md
 PR_TO_FILE_MAP.md
 ARCHITECTURE_CONTRACT.md
 docs/migration/MODULE_BOUNDARIES.md
 docs/checklists/ACCEPTANCE_GATES.md
+docs/prs/PR-02-event-journal-and-recorder-state-v3.md
+docs/prs/PR-07-ui-action-recipe-model.md
 ```
 
 Must not modify runtime code except docs/tests import path checks.
@@ -115,6 +118,7 @@ Create/modify:
 ```text
 examples/recorder-crx/src/uiSemantics/recipes.ts
 examples/recorder-crx/src/replay/types.ts
+examples/recorder-crx/src/replay/recipeBuilder.ts
 examples/recorder-crx/src/flow/types.ts
 examples/recorder-crx/src/flow/businessFlowProjection.ts
 examples/recorder-crx/src/flow/stepStability.test.ts
@@ -126,7 +130,6 @@ Create:
 
 ```text
 examples/recorder-crx/src/replay/index.ts
-examples/recorder-crx/src/replay/recipeBuilder.ts
 examples/recorder-crx/src/replay/exportedRenderer.ts
 examples/recorder-crx/src/replay/parserSafeRenderer.ts
 examples/recorder-crx/src/replay/assertionRenderer.ts
@@ -204,4 +207,3 @@ Acceptance:
 - Legacy helper functions marked deprecated or removed.
 - Final module tree matches `FINAL_FILE_TREE.md`.
 - Full CRX regression and flow tests pass.
-```
