@@ -12,6 +12,7 @@ import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { filterPageContextEventsForCapture } from './pageContextCapture';
+import { finalizeRecordingSession } from './sessionFinalizer';
 import { appendTerminalStateAssertions, createTerminalStateAssertion, replayDiagnosticSummary } from './terminalAssertions';
 import { eventJournalStats } from './eventJournal';
 import { mergePageContextIntoFlow } from './flowContextMerger';
@@ -24,10 +25,72 @@ import { createEmptyBusinessFlow } from './types';
 
 type TestCase = {
   name: string;
-  run: () => void;
+  run: () => void | Promise<void>;
 };
 
 const tests: TestCase[] = [
+  {
+    name: 'finalizeRecordingSession waits for journal counts to stay stable and emits diagnostics',
+    run: async () => {
+      let now = 0;
+      let flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('保存', 1000)], [], {});
+      const diagnostics: Array<{ type: string; data?: any }> = [];
+      let drainCount = 0;
+
+      const finalized = await finalizeRecordingSession(flow, {
+        reason: 'export',
+        stableForMs: 100,
+        maxWaitMs: 500,
+        pollIntervalMs: 50,
+        now: () => now,
+        wait: async ms => { now += ms; },
+        getCurrentFlow: () => flow,
+        drainPageContextEvents: async () => {
+          drainCount += 1;
+          if (drainCount === 2)
+            flow = mergePageContextIntoFlow(flow, [pageClickEvent('ctx-finalize-save', 1100, '保存')]);
+        },
+        diagnostics: event => diagnostics.push(event),
+      });
+
+      const recorder = finalized.artifacts?.recorder;
+      assert(recorder?.eventJournal, 'finalized flow should keep event journal');
+      assertEqual(eventJournalStats(recorder).pageContextEventCount, 1);
+      assert(now >= 100, 'finalizer should wait until counts are stable for stableForMs');
+      assert(diagnostics.some(event => event.type === 'finalize.stable'), 'finalizer should emit stable diagnostics');
+      assert(diagnostics.some(event => event.data?.reason === 'export'), 'diagnostics should include finalization reason');
+      assert(diagnostics.some(event => event.data?.counts?.pageContextEventCount === 1), 'diagnostics should include page context counts');
+    },
+  },
+  {
+    name: 'finalizeRecordingSession times out with bounded diagnostics when counts keep changing',
+    run: async () => {
+      let now = 0;
+      let flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('打开', 1000)], [], {});
+      let seq = 0;
+      const diagnostics: Array<{ type: string; data?: any }> = [];
+
+      const finalized = await finalizeRecordingSession(flow, {
+        reason: 'enter-review',
+        stableForMs: 100,
+        maxWaitMs: 160,
+        pollIntervalMs: 50,
+        now: () => now,
+        wait: async ms => { now += ms; },
+        getCurrentFlow: () => flow,
+        drainPageContextEvents: async () => {
+          seq += 1;
+          flow = mergePageContextIntoFlow(flow, [pageClickEvent(`ctx-changing-${seq}`, 1000 + seq, `事件 ${seq}`)]);
+        },
+        diagnostics: event => diagnostics.push(event),
+      });
+
+      assertEqual(finalized.artifacts?.recorder?.eventJournal?.highWaterMarks.pageContextEventCount, seq);
+      assert(now >= 160, 'finalizer should respect maxWaitMs when facts keep changing');
+      assert(diagnostics.some(event => event.type === 'finalize.timeout'), 'finalizer should emit timeout diagnostics');
+      assert(diagnostics.some(event => event.data?.reason === 'enter-review'), 'timeout diagnostics should include reason');
+    },
+  },
   {
     name: 'event journal initializes for legacy recorder state without changing steps',
     run: () => {
@@ -6780,11 +6843,13 @@ test('demo', async ({ page }) => {
   },
 ];
 
-runStepStabilityTests();
+runStepStabilityTests().catch(error => {
+  setTimeout(() => { throw error; }, 0);
+});
 
-function runStepStabilityTests() {
+async function runStepStabilityTests() {
   for (const test of tests) {
-    test.run();
+    await test.run();
     writeLine(`ok - ${test.name}`);
   }
   writeLine(`\n${tests.length} flow stability tests passed`);

@@ -46,6 +46,7 @@ import type { AiIntentSettings, AiProviderProfile, AiUsageRecord } from './aiInt
 import { countBusinessFlowPlaybackActions, generateBusinessFlowPlaybackCode, generateBusinessFlowPlaywrightCode } from './flow/codePreview';
 import { appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, createAssertion, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow, nextAssertionId, normalizeFlowStepIds, type MergeDiagnosticEvent } from './flow/flowBuilder';
 import { mergePageContextIntoFlow, normalizeIntentSources } from './flow/flowContextMerger';
+import { finalizeRecordingSession, type FinalizeRecordingReason } from './flow/sessionFinalizer';
 import { deleteRepeatSegment, upsertRepeatSegment } from './flow/repeatSegments';
 import { toCompactFlow } from './flow/compactExporter';
 import { prepareBusinessFlowForExport } from './flow/exportSanitizer';
@@ -684,6 +685,29 @@ export const CrxRecorder: React.FC = ({
     return applyPageContextEventsToDraft(events);
   }, [applyPageContextEventsToDraft]);
 
+  const finalizeCurrentRecordingSession = React.useCallback(async (reason: FinalizeRecordingReason) => {
+    let pageContextDrained = false;
+    const finalized = await finalizeRecordingSession(flowDraftRef.current, {
+      reason,
+      getCurrentFlow: () => flowDraftRef.current,
+      drainPageContextEvents: async () => {
+        if (pageContextDrained)
+          return undefined;
+        pageContextDrained = true;
+        return flushPageContextEventsNow();
+      },
+      diagnostics: event => appendDiagnosticLog({
+        type: event.type,
+        level: event.level,
+        message: event.message,
+        data: event.data,
+      }),
+    });
+    flowDraftRef.current = finalized;
+    setFlowDraft(finalized);
+    return finalized;
+  }, [appendDiagnosticLog, flushPageContextEventsNow]);
+
   React.useEffect(() => {
     if (mode !== 'recording' && pageContextCaptureActiveRef.current)
       setPageContextCaptureActive(false);
@@ -1304,7 +1328,9 @@ export const CrxRecorder: React.FC = ({
       setSavingBeforeLeave(false);
   }, [goToLibraryNow, saveCurrentRecord]);
 
-  const openReplayPanel = React.useCallback(() => {
+  const openReplayPanel = React.useCallback(async () => {
+    const finalizedFlow = await finalizeCurrentRecordingSession('generate-code');
+    const playbackCode = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaybackCode(finalizedFlow);
     setPanelStage('replay');
     setActiveTab('code');
     setPaused(true);
@@ -1312,8 +1338,14 @@ export const CrxRecorder: React.FC = ({
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
     window.dispatch({ event: 'fileChanged', params: { file: 'playwright-test' } }).catch(() => {});
     chrome.runtime.sendMessage({ event: 'activeTabAttachRequested' }).catch(() => {});
-    window.dispatch({ event: 'businessFlowCodeChanged', params: { code: businessFlowPlaybackCode } }).catch(() => {});
-  }, [businessFlowPlaybackCode]);
+    window.dispatch({ event: 'businessFlowCodeChanged', params: { code: playbackCode } }).catch(() => {});
+  }, [currentCodeText, finalizeCurrentRecordingSession, settings.businessFlowEnabled]);
+
+  const enterReviewPanel = React.useCallback(async () => {
+    const finalizedFlow = await finalizeCurrentRecordingSession('enter-review');
+    setPanelStage(finalizedFlow.steps.length ? 'review' : 'recording');
+    setActiveTab('business');
+  }, [finalizeCurrentRecordingSession]);
 
   React.useEffect(() => {
     if (!hasUnsavedFlowChanges)
@@ -1908,14 +1940,14 @@ export const CrxRecorder: React.FC = ({
         recordedActionCount,
       },
     });
-    await flushPageContextEventsNow();
+    await finalizeCurrentRecordingSession('stop-recording');
     setPageContextCaptureActive(false);
     pendingInsertRecordingRef.current = undefined;
     setInsertRecordingAfterStepId(undefined);
     setPanelStage('recording');
     setActiveTab('business');
     window.dispatch({ event: 'setMode', params: { mode: 'standby' } }).catch(() => {});
-  }, [appendDiagnosticLog, flowDraft.steps.length, flushPageContextEventsNow, recordedActionCount, setPageContextCaptureActive]);
+  }, [appendDiagnosticLog, finalizeCurrentRecordingSession, flowDraft.steps.length, recordedActionCount, setPageContextCaptureActive]);
 
   const continueRecording = React.useCallback(() => {
     if (!hasRecordingFlowContext(flowDraft)) {
@@ -2045,9 +2077,9 @@ export const CrxRecorder: React.FC = ({
       return;
     }
 
-    const flushedFlow = appendTerminalStateAssertions(await flushPageContextEventsNow());
-    const exportCodeText = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaywrightCode(flushedFlow);
-    const flowWithCode = withPlaywrightCodeForExport(flushedFlow, exportCodeText);
+    const finalizedFlow = appendTerminalStateAssertions(await finalizeCurrentRecordingSession('export'));
+    const exportCodeText = settings.businessFlowEnabled === false ? currentCodeText : generateBusinessFlowPlaywrightCode(finalizedFlow);
+    const flowWithCode = withPlaywrightCodeForExport(finalizedFlow, exportCodeText);
     if (!hasEnabledAssertion(flowWithCode) && !window.confirm('当前流程还没有启用断言，仍然导出吗？'))
       return;
 
@@ -2060,7 +2092,7 @@ export const CrxRecorder: React.FC = ({
     }
 
     downloadText(`${baseFilename}.compact-flow.yaml`, toCompactFlow(exportFlow), 'text/yaml');
-  }, [currentCodeText, flowDraft.flow.name, flushPageContextEventsNow, settings.businessFlowEnabled, settings.redactSensitiveData]);
+  }, [currentCodeText, finalizeCurrentRecordingSession, flowDraft.flow.name, settings.businessFlowEnabled, settings.redactSensitiveData]);
 
   const stats = flowStats(flowDraft);
   const isBusinessFlowEnabled = settings.businessFlowEnabled !== false;
@@ -2240,11 +2272,10 @@ export const CrxRecorder: React.FC = ({
               setActiveTab('business');
             }}>断言</button>}
             {hasFlowContext && <button type='button' className={panelStage === 'replay' ? 'active' : ''} onClick={() => {
-              openReplayPanel();
+              openReplayPanel().catch(() => {});
             }}>回放</button>}
             {hasFlowContext && <button type='button' className={panelStage === 'review' ? 'active' : ''} onClick={() => {
-              setPanelStage(flowDraft.steps.length ? 'review' : 'recording');
-              setActiveTab('business');
+              enterReviewPanel().catch(() => {});
             }}>导出</button>}
             <button type='button' className={panelStage === 'flowSettings' || panelStage === 'aiSettings' ? 'active' : ''} onClick={() => {
               setPanelStage(hasActiveRecordingFlowContext ? 'flowSettings' : 'aiSettings');
@@ -2416,7 +2447,7 @@ export const CrxRecorder: React.FC = ({
                   <button type='button' onClick={mode === 'recording' ? pauseRecording : continueRecording}>{mode === 'recording' ? '暂停' : '继续'}</button>
                   <button type='button' className='danger' disabled={mode !== 'recording'} onClick={stopRecording}>停止录制</button>
                   <button type='button' onClick={() => saveCurrentRecord()}>保存记录</button>
-                  {insertRecordingAfterStepId ? <button type='button' onClick={exitInsertRecording}>退出插入</button> : <button type='button' onClick={() => setPanelStage('review')}>导出</button>}
+                  {insertRecordingAfterStepId ? <button type='button' onClick={exitInsertRecording}>退出插入</button> : <button type='button' onClick={() => enterReviewPanel().catch(() => {})}>导出</button>}
                 </div>
                 {insertAnchorStep && <div className='insert-recording-banner'>
                   <div>
@@ -2458,7 +2489,7 @@ export const CrxRecorder: React.FC = ({
                   onExportJson={() => exportBusinessFlow('json')}
                   onExportYaml={() => exportBusinessFlow('yaml')}
                   onOpenReplayCode={() => {
-                    openReplayPanel();
+                    openReplayPanel().catch(() => {});
                   }}
                   onEditFlow={() => openEditFlowSheet(flowDraft)}
                   onOpenSettings={() => setPanelStage('aiSettings')}
@@ -2494,7 +2525,7 @@ export const CrxRecorder: React.FC = ({
                 onExportJson={() => exportBusinessFlow('json')}
                 onExportYaml={() => exportBusinessFlow('yaml')}
                 onOpenReplayCode={() => {
-                  openReplayPanel();
+                  openReplayPanel().catch(() => {});
                 }}
                 onEditFlow={() => openEditFlowSheet(flowDraft)}
                 onOpenSettings={() => setPanelStage('aiSettings')}

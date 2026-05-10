@@ -7,8 +7,8 @@
 
 ## Current phase
 
-- Current PR: PR-02 Event Journal and Recorder State v3
-- Next PR: PR-03 Session Finalizer
+- Current PR: PR-03 Session Finalizer
+- Next PR: PR-04 Input Transaction Model
 
 ## Execution rule
 
