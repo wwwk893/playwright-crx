@@ -32,11 +32,12 @@ export function appendTerminalStateAssertions(flow: BusinessFlow): BusinessFlow 
   let changed = false;
   const steps = flow.steps.map((step, index) => {
     const suggestions = suggestTerminalStateAssertions(step, index, flow.steps[index - 1]);
-    const missing = suggestions.filter(suggestion => !hasEquivalentAssertion(step.assertions, suggestion));
-    if (!missing.length)
+    const assertions = removeStaleSelectedValueAssertions(step.assertions, suggestions, step);
+    const missing = suggestions.filter(suggestion => !hasEquivalentAssertion(assertions, suggestion));
+    if (!missing.length && assertions === step.assertions)
       return step;
     changed = true;
-    return { ...step, assertions: [...step.assertions, ...missing] };
+    return { ...step, assertions: [...assertions, ...missing] };
   });
   return changed ? { ...flow, steps, updatedAt: new Date().toISOString() } : flow;
 }
@@ -62,12 +63,12 @@ export function suggestTerminalStateAssertions(step: FlowStep, stepIndex = 0, pr
       suggestions.push(inferredClosed);
   }
 
-  if (selectedOption && targetTestId && isMeaningfulSelectedValue(selectedOption, step)) {
+  if (step.action !== 'select' && selectedOption && targetTestId && isMeaningfulSelectedValue(selectedOption, step)) {
     suggestions.push(createTerminalStateAssertion('selected-value-visible', terminalAssertionId(step.id, suggestions.length, stepIndex), {
       targetTestId,
       expected: selectedOption,
     }, step.target));
-  } else {
+  } else if (step.action !== 'select') {
     const selectedFromOptionClick = inferSelectedValueAssertion(step, previousStep, stepIndex, suggestions.length);
     if (selectedFromOptionClick)
       suggestions.push(selectedFromOptionClick);
@@ -217,6 +218,7 @@ function isMeaningfulSelectedValue(value: string, step: FlowStep) {
   const contextTarget = step.context?.before.target;
   const candidates = [
     step.target?.label,
+    step.target?.name,
     step.target?.placeholder,
     step.target?.scope?.form?.label,
     step.target?.scope?.form?.name,
@@ -311,6 +313,38 @@ function isRowDeletionConfirmation(step: FlowStep, previousStep?: FlowStep, tabl
 
 function hasEquivalentAssertion(assertions: FlowAssertion[], suggestion: FlowAssertion) {
   return assertions.some(assertion => assertion.type === suggestion.type && JSON.stringify(assertion.params || {}) === JSON.stringify(suggestion.params || {}));
+}
+
+function removeStaleSelectedValueAssertions(assertions: FlowAssertion[], suggestions: FlowAssertion[], step: FlowStep) {
+  const selectedSuggestions = suggestions.filter(suggestion => suggestion.type === 'selected-value-visible');
+  const filtered = assertions.filter(assertion => {
+    if (assertion.type !== 'selected-value-visible' || !isGeneratedSelectedValueAssertion(assertion))
+      return true;
+    if (step.action === 'select')
+      return false;
+    const expected = selectedValueAssertionExpected(assertion);
+    if (expected && !isMeaningfulSelectedValue(expected, step))
+      return false;
+    if (!selectedSuggestions.length)
+      return true;
+    const targetKey = selectedValueAssertionTargetKey(assertion);
+    if (!targetKey || !expected)
+      return true;
+    return !selectedSuggestions.some(suggestion => selectedValueAssertionTargetKey(suggestion) === targetKey && selectedValueAssertionExpected(suggestion) !== expected);
+  });
+  return filtered.length === assertions.length ? assertions : filtered;
+}
+
+function isGeneratedSelectedValueAssertion(assertion: FlowAssertion) {
+  return assertion.enabled !== false;
+}
+
+function selectedValueAssertionTargetKey(assertion: FlowAssertion) {
+  return stringParam(assertion.params?.targetTestId || assertion.target?.testId || assertion.target?.selector);
+}
+
+function selectedValueAssertionExpected(assertion: FlowAssertion) {
+  return stringParam(assertion.expected || assertion.params?.expected);
 }
 
 function terminalAssertionId(stepId: string, offset: number, stepIndex: number) {

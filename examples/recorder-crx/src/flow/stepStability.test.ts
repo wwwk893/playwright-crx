@@ -6793,6 +6793,42 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'terminal-state selected value suggestion removes stale control assertions from select transactions',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's011',
+          order: 11,
+          action: 'select',
+          target: { testId: 'network-resource-wan-select', displayName: '关联VRF' },
+          value: '生产VRF',
+          context: {
+            eventId: 'ctx-vrf-option',
+            capturedAt: 1200,
+            before: {
+              target: { testId: 'network-resource-wan-select', controlType: 'select', selectedOption: '生产VRF' },
+            },
+          },
+          assertions: [{
+            id: 's011-terminal-1',
+            type: 'selected-value-visible',
+            subject: 'element',
+            target: { testId: 'network-resource-wan-select' },
+            expected: '关联VRF',
+            params: { targetTestId: 'network-resource-wan-select', expected: '关联VRF' },
+            enabled: true,
+          }],
+        }],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const selectedAssertions = enriched.steps[0].assertions.filter(assertion => assertion.type === 'selected-value-visible' && assertion.enabled !== false);
+
+      assertEqual(selectedAssertions.map(assertion => assertion.expected), []);
+    },
+  },
+  {
     name: 'terminal-state selected value inference uses generic select evidence instead of domain words',
     run: () => {
       const selectableFlow: BusinessFlow = {
