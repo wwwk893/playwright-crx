@@ -16,6 +16,12 @@ import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult } from './syntheticReconciler';
 import { buildRecipeForStep } from '../replay/recipeBuilder';
+import {
+  countBusinessFlowPlaybackActions as countBusinessFlowPlaybackActionsFromReplay,
+  generateBusinessFlowPlaybackCode as generateBusinessFlowPlaybackCodeFromReplay,
+  generateBusinessFlowPlaywrightCode as generateBusinessFlowPlaywrightCodeFromReplay,
+} from '../replay';
+import { generateBusinessFlowPlaybackCode as generateParserSafeBusinessFlowCode } from '../replay/parserSafeRenderer';
 import type { UiActionRecipe as ReplayUiActionRecipe } from '../replay/types';
 import { filterPageContextEventsForCapture } from './pageContextCapture';
 import { finalizeRecordingSession } from './sessionFinalizer';
@@ -584,6 +590,28 @@ const tests: TestCase[] = [
         assertions: [],
       });
       assertEqual(recipe, undefined);
+    },
+  },
+  {
+    name: 'replay compiler modules back the codePreview facade and parser-safe action count',
+    run: () => {
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [
+        pageSelectTriggerEvent('ctx-compiler-trigger', 1000, 'WAN口'),
+        pageSelectSearchEvent('ctx-compiler-search', 1050, 'WAN口', 'wan'),
+        pageSelectOptionEvent('ctx-compiler-option', 1100, 'WAN口', 'WAN1'),
+      ]);
+      const exportedFromFacade = generateBusinessFlowPlaywrightCode(flow);
+      const exportedFromReplay = generateBusinessFlowPlaywrightCodeFromReplay(flow);
+      const parserSafeFromFacade = generateBusinessFlowPlaybackCode(flow);
+      const parserSafeFromReplay = generateBusinessFlowPlaybackCodeFromReplay(flow);
+
+      assertEqual(exportedFromReplay, exportedFromFacade);
+      assertEqual(parserSafeFromReplay, parserSafeFromFacade);
+      assertEqual(generateParserSafeBusinessFlowCode(flow), parserSafeFromFacade);
+      assert(parserSafeFromReplay.includes('.ant-select-item-option'), 'parser-safe renderer should preserve select option replay');
+      assert(!parserSafeFromReplay.includes('if (!await'), 'parser-safe renderer must not emit exported-only control flow');
+      assertEqual(countBusinessFlowPlaybackActionsFromReplay(flow), countBusinessFlowPlaybackActions(flow));
+      assertEqual(countBusinessFlowPlaybackActionsFromReplay(flow), runnableLineCount(parserSafeFromReplay));
     },
   },
   {
@@ -7701,6 +7729,10 @@ function stepCodeBlock(code: string, stepId: string) {
   assert(start >= 0, `${stepId} block should exist`);
   const next = code.indexOf('\n  // s', start + 1);
   return code.slice(start, next === -1 ? undefined : next);
+}
+
+function runnableLineCount(code: string) {
+  return code.split(/\r?\n/).filter(line => /^(await|const|let|var)\s/.test(line.trim())).length;
 }
 
 function semanticUi(options: {
