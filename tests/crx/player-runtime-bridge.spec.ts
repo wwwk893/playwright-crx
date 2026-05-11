@@ -47,6 +47,39 @@ test('runtime bridge contract', async ({ page }) => {
   });
 });
 
+test('runtime active popup option bridge dispatches only one click', async ({ runCrxTest, mockPaths }) => {
+  await mockPaths({
+    'runtime-active-popup-click-count.html': `<html>
+      <body>
+        <div id="count">0</div>
+        <div class="ant-select-dropdown" style="display:block; position:absolute; left:20px; top:20px; width:180px; height:80px;">
+          <div class="ant-select-item-option" title="WAN1" style="pointer-events:none; width:160px; height:30px;">WAN1</div>
+        </div>
+        <script>
+          let count = 0;
+          document.querySelector('.ant-select-item-option').addEventListener('click', () => {
+            count += 1;
+            document.querySelector('#count').textContent = String(count);
+          });
+        </script>
+      </body>
+    </html>`,
+  });
+
+  await runCrxTest(async ({ crxApp, page, server, expect }) => {
+    const code = `import { test } from '@playwright/test';
+
+test('runtime bridge contract', async ({ page }) => {
+  await page.goto('${server.PREFIX}/runtime-active-popup-click-count.html');
+  await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option").filter({ hasText: "WAN1" }).click();
+});`;
+
+    await crxApp.recorder.run(code, page);
+
+    await expect(page.locator('#count')).toHaveText('1');
+  });
+});
+
 test('runtime active popup dispatch handles generated union selector for Select option bridge', async ({ runCrxTest, mockPaths }) => {
   await mockPaths({
     'runtime-union-active-popup.html': `<html>
@@ -232,6 +265,38 @@ test('runtime bridge contract', async ({ page }) => {
     expect(error?.message).toContain('runtime bridge: no unique active select popup option matched explicit selector');
     await expect(page.locator('#selected')).toHaveText('none');
     await expect(page.locator('.ant-select-dropdown')).toHaveCount(0);
+  });
+});
+
+test('runtime duplicate ordinal fallback dispatches only one click', async ({ runCrxTest, mockPaths }) => {
+  await mockPaths({
+    'runtime-duplicate-ordinal-click-count.html': `<html>
+      <body>
+        <div id="count">0</div>
+        <button type="button">Save</button>
+        <button id="target" type="button" style="pointer-events:none;">Save</button>
+        <script>
+          let count = 0;
+          document.querySelector('#target').addEventListener('click', () => {
+            count += 1;
+            document.querySelector('#count').textContent = String(count);
+          });
+        </script>
+      </body>
+    </html>`,
+  });
+
+  await runCrxTest(async ({ crxApp, page, server, expect }) => {
+    const code = `import { test } from '@playwright/test';
+
+test('runtime bridge contract', async ({ page }) => {
+  await page.goto('${server.PREFIX}/runtime-duplicate-ordinal-click-count.html');
+  await page.getByRole("button", { name: "Save" }).nth(1).click();
+});`;
+
+    await crxApp.recorder.run(code, page);
+
+    await expect(page.locator('#count')).toHaveText('1');
   });
 });
 

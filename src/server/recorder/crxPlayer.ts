@@ -93,7 +93,7 @@ export default class CrxPlayer extends EventEmitter {
 
     if (recorder && crxApp && crxApp._context !== context) {
       // we intercept incognito call logs and forward them into the recorder
-      const instrumentationListener: InstrumentationListener = {
+      instrumentationListener = {
         onBeforeCall: recorder.onBeforeCall.bind(recorder),
         onBeforeInputAction: recorder.onBeforeInputAction.bind(recorder),
         onCallLog: recorder.onCallLog.bind(recorder),
@@ -385,7 +385,6 @@ async function dispatchDuplicateOrdinalClick(mainFrame: Frame, target: { index: 
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      (element as HTMLElement).click?.();
     };
     let candidates: Element[] = [];
     if (testId)
@@ -535,7 +534,6 @@ async function dispatchActiveAntdOptionClick(mainFrame: Frame, target: { optionK
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      (element as HTMLElement).click?.();
     };
     const deadline = Date.now() + timeout;
     while (Date.now() <= deadline) {
