@@ -4,6 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import type { UiActionRecipe } from './recipes';
+export type { UiActionRecipe } from './recipes';
+
 export type UiLibrary = 'antd' | 'pro-components' | 'unknown';
 
 export type UiComponentKind =
@@ -107,52 +110,6 @@ export interface UiOptionContext {
   text?: string;
   value?: string;
   path?: string[];
-}
-
-export interface UiActionRecipe {
-  kind:
-    | 'click-button'
-    | 'fill-form-field'
-    | 'select-option'
-    | 'pick-date'
-    | 'pick-range'
-    | 'pick-time'
-    | 'toggle-control'
-    | 'upload-file'
-    | 'submit-form'
-    | 'reset-form'
-    | 'protable-search'
-    | 'protable-reset-search'
-    | 'protable-toolbar-action'
-    | 'table-row-action'
-    | 'table-batch-action'
-    | 'editable-table-cell'
-    | 'editable-table-save-row'
-    | 'editable-table-cancel-row'
-    | 'paginate'
-    | 'sort-table'
-    | 'filter-table'
-    | 'modal-action'
-    | 'drawer-action'
-    | 'confirm-popconfirm'
-    | 'dropdown-menu-action'
-    | 'show-tooltip'
-    | 'switch-tab'
-    | 'switch-step'
-    | 'assert-description-field'
-    | 'raw-dom-action';
-  library: UiLibrary;
-  component: UiComponentKind;
-  formKind?: string;
-  fieldKind?: string;
-  fieldLabel?: string;
-  fieldName?: string;
-  optionText?: string;
-  tableTitle?: string;
-  rowKey?: string;
-  columnTitle?: string;
-  overlayTitle?: string;
-  targetText?: string;
 }
 
 export interface UiSemanticContext {

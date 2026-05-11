@@ -3,7 +3,107 @@
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
-import type { UiActionRecipe, UiSemanticContext } from './types';
+import type { UiComponentKind, UiLibrary, UiSemanticContext } from './types';
+
+export type UiActionFramework = 'antd' | 'procomponents' | 'generic';
+
+export type UiActionRecipeComponent =
+  | 'Input'
+  | 'Select'
+  | 'TreeSelect'
+  | 'Cascader'
+  | 'TableRowAction'
+  | 'ModalButton'
+  | 'PopconfirmButton'
+  | 'Switch'
+  | 'Checkbox'
+  | 'Button'
+  | UiComponentKind;
+
+export type UiActionOperation = 'fill' | 'selectOption' | 'click' | 'confirm' | 'toggle' | 'rowAction';
+
+export type LegacyUiActionRecipeKind =
+  | 'click-button'
+  | 'fill-form-field'
+  | 'select-option'
+  | 'pick-date'
+  | 'pick-range'
+  | 'pick-time'
+  | 'toggle-control'
+  | 'upload-file'
+  | 'submit-form'
+  | 'reset-form'
+  | 'protable-search'
+  | 'protable-reset-search'
+  | 'protable-toolbar-action'
+  | 'table-row-action'
+  | 'table-batch-action'
+  | 'editable-table-cell'
+  | 'editable-table-save-row'
+  | 'editable-table-cancel-row'
+  | 'paginate'
+  | 'sort-table'
+  | 'filter-table'
+  | 'modal-action'
+  | 'drawer-action'
+  | 'confirm-popconfirm'
+  | 'dropdown-menu-action'
+  | 'show-tooltip'
+  | 'switch-tab'
+  | 'switch-step'
+  | 'assert-description-field'
+  | 'raw-dom-action';
+
+export type UiActionRecipeTarget = {
+  testId?: string;
+  label?: string;
+  role?: string;
+  text?: string;
+  dialog?: unknown;
+  table?: unknown;
+  row?: unknown;
+};
+
+export type UiActionRecipeOption = {
+  searchText?: string;
+  displayText?: string;
+  exactTokens?: string[];
+  path?: string[];
+};
+
+export type UiActionReplayContract = {
+  exportedStrategy?: string;
+  parserSafeStrategy?: string;
+  runtimeFallback?: string;
+};
+
+export interface UiActionRecipe {
+  // PR-07 structured recipe contract. Optional while legacy page-context recipes
+  // continue to feed the current code preview/runtime until PR-08 renderer split.
+  version?: 1;
+  framework?: UiActionFramework;
+  operation?: UiActionOperation;
+  target?: UiActionRecipeTarget;
+  value?: string;
+  option?: UiActionRecipeOption;
+  replay?: UiActionReplayContract;
+
+  // Legacy compact fields stay source-compatible so existing codePreview,
+  // compact export, and AI-intent surfaces do not change behavior in PR-07.
+  kind: LegacyUiActionRecipeKind;
+  library: UiLibrary;
+  component: UiActionRecipeComponent;
+  formKind?: string;
+  fieldKind?: string;
+  fieldLabel?: string;
+  fieldName?: string;
+  optionText?: string;
+  tableTitle?: string;
+  rowKey?: string;
+  columnTitle?: string;
+  overlayTitle?: string;
+  targetText?: string;
+}
 
 export function buildUiRecipe(ui: UiSemanticContext): UiActionRecipe {
   const targetText = ui.targetText;

@@ -15,6 +15,8 @@ import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult } from './syntheticReconciler';
+import { buildRecipeForStep } from '../replay/recipeBuilder';
+import type { UiActionRecipe as ReplayUiActionRecipe } from '../replay/types';
 import { filterPageContextEventsForCapture } from './pageContextCapture';
 import { finalizeRecordingSession } from './sessionFinalizer';
 import { appendTerminalStateAssertions, createTerminalStateAssertion, replayDiagnosticSummary } from './terminalAssertions';
@@ -487,6 +489,67 @@ const tests: TestCase[] = [
       assertEqual(projected.steps.map(step => step.value), ['edge-lab', 'WAN1']);
       assertEqual(projectedAgain.steps.map(step => step.id), projected.steps.map(step => step.id));
       assertEqual(projectedAgain.steps.map(step => step.action), ['fill', 'select']);
+      const fillRecipe = buildRecipeForStep(projected.steps[0]);
+      const selectRecipe = buildRecipeForStep(projected.steps[1]);
+      assertEqual(fillRecipe?.version, 1);
+      assertEqual(fillRecipe?.operation, 'fill');
+      assertEqual(fillRecipe?.target?.label, '名称');
+      assertEqual(fillRecipe?.value, 'edge-lab');
+      assertEqual(selectRecipe?.version, 1);
+      assertEqual(selectRecipe?.framework, 'antd');
+      assertEqual(selectRecipe?.component, 'Select');
+      assertEqual(selectRecipe?.operation, 'selectOption');
+      assertEqual(selectRecipe?.option?.displayText, 'WAN1');
+      assertEqual(selectRecipe?.replay?.parserSafeStrategy, 'active-popup-option');
+      const replayRecipe: ReplayUiActionRecipe = selectRecipe!;
+      assertEqual(replayRecipe.operation, 'selectOption');
+    },
+  },
+  {
+    name: 'recipeBuilder derives table row and popconfirm recipes from FlowStep context',
+    run: () => {
+      const rowRecipe = buildRecipeForStep({
+        id: 's-table-edit',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: { role: 'button', name: '编辑', scope: { table: { title: '用户管理', rowKey: 'user-42' } } },
+        context: {
+          eventId: 'ctx-table-edit',
+          capturedAt: 1000,
+          before: {
+            target: { tag: 'button', role: 'button', text: '编辑' },
+            table: { title: '用户管理', rowKey: 'user-42', columnName: '操作' },
+          } as any,
+        },
+        assertions: [],
+      });
+      assertEqual(rowRecipe?.version, 1);
+      assertEqual(rowRecipe?.operation, 'rowAction');
+      assertEqual(rowRecipe?.component, 'TableRowAction');
+      assertEqual((rowRecipe?.target?.table as any)?.title, '用户管理');
+      assertEqual((rowRecipe?.target?.row as any)?.key, 'user-42');
+
+      const confirmRecipe = buildRecipeForStep({
+        id: 's-delete-ok',
+        order: 2,
+        kind: 'recorded',
+        action: 'click',
+        target: { role: 'button', name: '确定' },
+        context: {
+          eventId: 'ctx-delete-ok',
+          capturedAt: 1100,
+          before: {
+            target: { tag: 'button', role: 'button', text: '确定' },
+            dialog: { type: 'popconfirm', title: '确定删除？', visible: true },
+          } as any,
+        },
+        assertions: [],
+      });
+      assertEqual(confirmRecipe?.version, 1);
+      assertEqual(confirmRecipe?.operation, 'confirm');
+      assertEqual(confirmRecipe?.component, 'PopconfirmButton');
+      assertEqual((confirmRecipe?.target?.dialog as any)?.title, '确定删除？');
     },
   },
   {
