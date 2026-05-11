@@ -679,6 +679,28 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'parser-safe runtime bridge does not globally heal text-only non-popup clicks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's-text-only-click',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: '保存' },
+            assertions: [],
+          },
+        ],
+      };
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assert(!playback.includes('getByText("保存")') && !playback.includes("getByText('保存')"), 'parser-safe runtime playback must not heal non-popup clicks through global text fallback');
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
+    },
+  },
+  {
     name: 'page select transaction projects trigger search option into one select step',
     run: () => {
       const flow = mergePageContextIntoFlow(createNamedFlow(), [
