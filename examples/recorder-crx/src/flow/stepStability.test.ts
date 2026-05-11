@@ -553,6 +553,40 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'recipeBuilder does not force AntD replay strategy for generic select steps',
+    run: () => {
+      const recipe = buildRecipeForStep({
+        id: 's-generic-select',
+        order: 1,
+        kind: 'recorded',
+        action: 'select',
+        target: { label: 'Country' },
+        value: 'US',
+        assertions: [],
+      });
+      assertEqual(recipe?.framework, 'generic');
+      assertEqual(recipe?.operation, 'selectOption');
+      assertEqual(recipe?.option?.displayText, 'US');
+      assertEqual(recipe?.replay?.exportedStrategy, 'select-option');
+      assertEqual(recipe?.replay?.parserSafeStrategy, 'select-option');
+      assertEqual(recipe?.replay?.runtimeFallback, undefined);
+    },
+  },
+  {
+    name: 'recipeBuilder does not emit selectOption recipe without option text',
+    run: () => {
+      const recipe = buildRecipeForStep({
+        id: 's-empty-select',
+        order: 1,
+        kind: 'recorded',
+        action: 'select',
+        target: { label: 'Country' },
+        assertions: [],
+      });
+      assertEqual(recipe, undefined);
+    },
+  },
+  {
     name: 'page select transaction projects trigger search option into one select step',
     run: () => {
       const flow = mergePageContextIntoFlow(createNamedFlow(), [

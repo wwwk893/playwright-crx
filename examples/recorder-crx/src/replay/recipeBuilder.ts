@@ -50,10 +50,12 @@ function fillRecipe(step: FlowStep): UiActionRecipe {
   });
 }
 
-function selectRecipe(step: FlowStep): UiActionRecipe {
-  const library = libraryForStep(step, 'antd');
+function selectRecipe(step: FlowStep): UiActionRecipe | undefined {
+  const library = libraryForStep(step);
   const component = selectComponentForStep(step);
-  const displayText = step.value || step.uiRecipe?.optionText || step.context?.before.ui?.option?.text || step.context?.before.target?.selectedOption || step.target?.text || '';
+  const displayText = optionDisplayTextForStep(step);
+  if (!displayText)
+    return undefined;
   const path = optionPathForStep(step);
   return makeRecipe({
     library,
@@ -169,10 +171,11 @@ function makeRecipe(options: {
   overlayTitle?: string;
   targetText?: string;
 }): UiActionRecipe {
+  const framework = frameworkFromLibrary(options.library);
   return {
     version: 1,
-    framework: frameworkFromLibrary(options.library),
-    replay: replayFor(options.operation),
+    framework,
+    replay: replayFor({ operation: options.operation, framework, component: options.component }),
     ...options,
   };
 }
@@ -185,16 +188,19 @@ function frameworkFromLibrary(library?: UiLibrary): UiActionFramework {
   return 'generic';
 }
 
-function replayFor(operation: UiActionOperation): UiActionReplayContract {
-  if (operation === 'selectOption')
-    return { exportedStrategy: 'active-popup-option', parserSafeStrategy: 'active-popup-option', runtimeFallback: 'runtime-bridge' };
-  if (operation === 'rowAction')
+function replayFor(input: { operation: UiActionOperation; framework: UiActionFramework; component: UiActionRecipeComponent }): UiActionReplayContract {
+  if (input.operation === 'selectOption') {
+    if (input.framework === 'antd' || input.framework === 'procomponents')
+      return { exportedStrategy: 'active-popup-option', parserSafeStrategy: 'active-popup-option', runtimeFallback: 'runtime-bridge' };
+    return { exportedStrategy: 'select-option', parserSafeStrategy: 'select-option' };
+  }
+  if (input.operation === 'rowAction')
     return { exportedStrategy: 'table-row-action', parserSafeStrategy: 'table-row-action' };
-  if (operation === 'confirm')
+  if (input.operation === 'confirm')
     return { exportedStrategy: 'visible-popconfirm', parserSafeStrategy: 'visible-popconfirm' };
-  if (operation === 'fill')
+  if (input.operation === 'fill')
     return { exportedStrategy: 'field-locator-fill', parserSafeStrategy: 'field-locator-fill' };
-  if (operation === 'toggle')
+  if (input.operation === 'toggle')
     return { exportedStrategy: 'control-toggle', parserSafeStrategy: 'control-toggle' };
   return { exportedStrategy: 'semantic-click', parserSafeStrategy: 'semantic-click' };
 }
@@ -240,6 +246,11 @@ function selectComponentForStep(step: FlowStep): UiActionRecipeComponent {
   if (component === 'cascader' || component === 'Cascader')
     return 'Cascader';
   return 'Select';
+}
+
+function optionDisplayTextForStep(step: FlowStep) {
+  const value = step.value || step.uiRecipe?.optionText || step.context?.before.ui?.option?.text || step.context?.before.target?.selectedOption || step.target?.text;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function optionPathForStep(step: FlowStep) {
