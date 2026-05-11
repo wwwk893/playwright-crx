@@ -93,7 +93,7 @@ export default class CrxPlayer extends EventEmitter {
 
     if (recorder && crxApp && crxApp._context !== context) {
       // we intercept incognito call logs and forward them into the recorder
-      const instrumentationListener: InstrumentationListener = {
+      instrumentationListener = {
         onBeforeCall: recorder.onBeforeCall.bind(recorder),
         onBeforeInputAction: recorder.onBeforeInputAction.bind(recorder),
         onCallLog: recorder.onCallLog.bind(recorder),
@@ -249,18 +249,30 @@ export default class CrxPlayer extends EventEmitter {
       const activeAntdOptionClick = activeAntdOptionClickTarget(selector);
       if (activeAntdOptionClick) {
         return await innerPerformAction(mainFrame, actionInContext, async callMetadata => {
-          if (await dispatchActiveAntdOptionClick(mainFrame, activeAntdOptionClick, kActionTimeout))
+          const optionDescription = activeAntdOptionDescription(activeAntdOptionClick.optionKinds);
+          if (!activeAntdOptionClick.tokens.length)
+            throw new Error(`runtime bridge: active ${optionDescription} option selector requires explicit option text token`);
+          if (await dispatchActiveAntdOptionClick(mainFrame, activeAntdOptionClick, kActionTimeout)) {
+            logRuntimeBridgeDiagnostic(mainFrame, callMetadata, `runtime bridge: dispatched active ${optionDescription} option`);
             return;
-          await mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true });
+          }
+          throw new Error(`runtime bridge: no unique active ${optionDescription} option matched explicit selector`);
         });
       }
       const duplicateOrdinalClick = duplicateOrdinalClickTarget(selector);
+      const activePopconfirmConfirmClick = activePopconfirmConfirmClickTarget(selector);
       return await innerPerformAction(mainFrame, actionInContext, async callMetadata => {
         try {
           await mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true });
         } catch (error) {
-          if (duplicateOrdinalClick && await dispatchDuplicateOrdinalClick(mainFrame, duplicateOrdinalClick))
+          if (duplicateOrdinalClick && await dispatchDuplicateOrdinalClick(mainFrame, duplicateOrdinalClick)) {
+            logRuntimeBridgeDiagnostic(mainFrame, callMetadata, `runtime bridge: dispatched duplicate ordinal click`);
             return;
+          }
+          if (activePopconfirmConfirmClick && await dispatchActivePopconfirmConfirmClick(mainFrame)) {
+            logRuntimeBridgeDiagnostic(mainFrame, callMetadata, `runtime bridge: dispatched active popconfirm confirm`);
+            return;
+          }
           throw error;
         }
       });
@@ -337,6 +349,11 @@ export default class CrxPlayer extends EventEmitter {
   }
 }
 
+function logRuntimeBridgeDiagnostic(sdkObject: Frame | BrowserContext, callMetadata: CallMetadata, message: string) {
+  callMetadata.log.push(message);
+  sdkObject.instrumentation.onCallLog(sdkObject, callMetadata, 'api', message);
+}
+
 function duplicateOrdinalClickTarget(selector: string) {
   const nthMatch = selector.match(/>>\s*nth=(\d+)/);
   if (!nthMatch)
@@ -368,7 +385,6 @@ async function dispatchDuplicateOrdinalClick(mainFrame: Frame, target: { index: 
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      (element as HTMLElement).click?.();
     };
     let candidates: Element[] = [];
     if (testId)
@@ -386,135 +402,150 @@ async function dispatchDuplicateOrdinalClick(mainFrame: Frame, target: { index: 
   }), { isFunction: true }, target);
 }
 
-function activeAntdOptionClickTarget(selector: string) {
-  const optionKind = activeAntdOptionKind(selector);
-  if (!optionKind)
+function activePopconfirmConfirmClickTarget(selector: string) {
+  if (!/\.ant-popover:not\(\.ant-popover-hidden\):not\(\.ant-zoom-big-leave\):not\(\.ant-zoom-big-leave-active\)/.test(selector))
     return undefined;
-  const tokens = activeAntdOptionTextTokens(selector);
-  if (!tokens.length && !/internal:has-text=(?:\\"|")?\[object/i.test(selector))
+  if (!/(?:\:has\(\.ant-popconfirm-buttons\)|\.ant-popconfirm-buttons)/.test(selector))
     return undefined;
-  return { optionKind, tokens };
+  if (!/internal:role=button/i.test(selector))
+    return undefined;
+  if (!/(确定|确 定|确认|OK|Ok|ok|Yes|yes)/.test(selector))
+    return undefined;
+  return true;
 }
 
-function activeAntdOptionKind(selector: string) {
-  if (/ant-cascader-dropdown:not\(\.ant-cascader-dropdown-hidden\).*ant-cascader-menu-item/.test(selector))
-    return 'cascader';
-  if (/ant-select-dropdown:not\(\.ant-select-dropdown-hidden\).*ant-select-tree/.test(selector))
-    return 'tree';
-  if (/ant-select-dropdown:not\(\.ant-select-dropdown-hidden\).*ant-select-item-option/.test(selector))
-    return 'select';
-  return undefined;
-}
-
-function activeAntdOptionTextTokens(selector: string) {
-  return [...selector.matchAll(/internal:has-text=(?:\\"|")([^"\\]+)(?:\\"|")/g)]
-      .map(match => match[1])
-      .filter(token => token && token !== '[object Object]');
-}
-
-async function dispatchActiveAntdOptionClick(mainFrame: Frame, target: { optionKind: string, tokens: string[] }, timeout: number) {
-  const clicked = await mainFrame.evaluateExpression(String(async ({ optionKind, tokens, timeout }) => {
+async function dispatchActivePopconfirmConfirmClick(mainFrame: Frame) {
+  return await mainFrame.evaluateExpression(String(() => {
     const normalize = (value: string | null | undefined) => (value || '').replace(/\s+/g, ' ').trim();
-    const tokenGroups = tokens.map(token => {
-      const normalized = normalize(token);
-      const pieces = normalized.split(/[:：\s]+/).map(normalize).filter(Boolean);
-      return [normalized, ...pieces].filter(Boolean);
-    }).filter(group => group.length);
-    const selector = optionKind === 'cascader' ?
-      '.ant-cascader-menu-item:not(.ant-cascader-menu-item-disabled)' :
-      optionKind === 'tree' ?
-        '.ant-select-tree-node-content-wrapper:not(.ant-select-tree-node-disabled), .ant-select-tree-title' :
-        '.ant-select-item-option:not(.ant-select-item-option-disabled)';
-    const primaryQuery = tokenGroups[0]?.[0] || '';
     const isVisible = (element: Element) => {
       const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
-    const textFor = (element: Element) => normalize([
+    const roots = Array.from(document.querySelectorAll('.ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)')).filter(root => isVisible(root) && !!root.querySelector('.ant-popconfirm-buttons'));
+    if (roots.length !== 1)
+      return false;
+    const root = roots[0];
+    const candidates = Array.from(root.querySelectorAll('button, [role="button"]')).filter(element => {
+      const text = normalize(element.textContent).replace(/\s+/g, '');
+      return isVisible(element) && /^(确定|确认|OK|YES)$/i.test(text);
+    });
+    if (candidates.length !== 1)
+      return false;
+    const element = candidates[0];
+    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }), { isFunction: true }, undefined);
+}
+
+type ActiveAntdOptionKind = 'cascader' | 'tree' | 'select';
+
+function activeAntdOptionClickTarget(selector: string) {
+  const optionKinds = activeAntdOptionKinds(selector);
+  if (!optionKinds.length)
+    return undefined;
+  const tokens = activeAntdOptionTextTokens(selector);
+  return { optionKinds, tokens };
+}
+
+function activeAntdOptionKinds(selector: string): ActiveAntdOptionKind[] {
+  const kinds: ActiveAntdOptionKind[] = [];
+  if (/\.ant-cascader-dropdown:not\(\.ant-cascader-dropdown-hidden\)\s+\.ant-cascader-menu-item/.test(selector))
+    kinds.push('cascader');
+  if (/\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)\s+\.(?:ant-select-tree-node-content-wrapper|ant-select-tree-title)/.test(selector))
+    kinds.push('tree');
+  if (/\.ant-select-dropdown:not\(\.ant-select-dropdown-hidden\)\s+\.ant-select-item-option/.test(selector))
+    kinds.push('select');
+  return kinds;
+}
+
+function activeAntdOptionDescription(optionKinds: ActiveAntdOptionKind[]) {
+  return optionKinds.length === 1 ? `${optionKinds[0]} popup` : 'popup';
+}
+
+function activeAntdOptionTextTokens(selector: string) {
+  const internalTokens = Array.from(selector.matchAll(/internal:has-text=(?:\\"|")([^"\\]+)(?:\\"|")/g))
+      .map(match => match[1]);
+  const locatorFilterTokens = Array.from(selector.matchAll(/\.filter\(\{\s*hasText:\s*(?:"([^"]+)"|'([^']+)')\s*\}\)/g))
+      .map(match => match[1] || match[2]);
+  return [...internalTokens, ...locatorFilterTokens]
+      .filter(token => token && token !== '[object Object]');
+}
+
+async function dispatchActiveAntdOptionClick(mainFrame: Frame, target: { optionKinds: ActiveAntdOptionKind[], tokens: string[] }, timeout: number) {
+  return await mainFrame.evaluateExpression(String(async ({ optionKinds, tokens, timeout }) => {
+    const normalize = (value: string | null | undefined) => (value || '').replace(/\s+/g, ' ').trim();
+    const normalizedTokens = tokens.map(normalize).filter(Boolean);
+    if (!normalizedTokens.length)
+      return false;
+    const definitions = {
+      cascader: {
+        rootSelector: '.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)',
+        optionSelector: '.ant-cascader-menu-item:not(.ant-cascader-menu-item-disabled)',
+      },
+      tree: {
+        rootSelector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
+        optionSelector: '.ant-select-tree-node-content-wrapper:not(.ant-select-tree-node-disabled)',
+      },
+      select: {
+        rootSelector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
+        optionSelector: '.ant-select-item-option:not(.ant-select-item-option-disabled)',
+      },
+    } as const;
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const textCandidatesFor = (element: Element) => [
       element.getAttribute('title'),
+      element.getAttribute('aria-label'),
       element.querySelector('.ant-select-item-option-content')?.textContent,
       element.textContent,
-    ].filter(Boolean).join(' '));
+    ].map(normalize).filter(Boolean);
+    const candidateTokensFor = (element: Element) => {
+      const candidates = textCandidatesFor(element);
+      const splitTokens = candidates.flatMap(candidate => candidate.split(/\s+/).map(normalize).filter(Boolean));
+      return [...new Set([...candidates, ...splitTokens])];
+    };
     const matches = (element: Element) => {
-      const text = textFor(element);
-      return !tokenGroups.length || tokenGroups.every(group => text.includes(group[0]) || group.slice(1).every(token => text.includes(token)));
+      if (!normalizedTokens.length)
+        return true;
+      const candidateTokens = candidateTokensFor(element);
+      return normalizedTokens.every(token => candidateTokens.includes(token));
     };
-    const findOption = () => [...document.querySelectorAll(selector)].find(element => isVisible(element) && matches(element));
-    const hasVisibleDropdown = () => [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')].some(isVisible);
-    const findLooseOption = () => {
-      const primary = tokenGroups[0]?.[0];
-      if (!primary)
-        return undefined;
-      const candidates = [...document.querySelectorAll(selector)].filter(element => isVisible(element) && textFor(element).includes(primary));
-      return candidates.length === 1 ? candidates[0] : undefined;
-    };
+    const visibleRoots = (rootSelector: string) => Array.from(document.querySelectorAll(rootSelector)).filter(isVisible);
+    const matchingCandidates = () => optionKinds.flatMap(optionKind => {
+      const definition = definitions[optionKind as keyof typeof definitions];
+      if (!definition)
+        return [];
+      return visibleRoots(definition.rootSelector).flatMap(root => {
+        return Array.from(root.querySelectorAll(definition.optionSelector)).filter(element => isVisible(element) && matches(element));
+      });
+    });
     const dispatchClick = (element: Element) => {
       element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      (element as HTMLElement).click?.();
-    };
-    const setSearchValue = (trigger: Element, value: string) => {
-      const input = trigger.querySelector('input') || (document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined);
-      if (!input || !value)
-        return;
-      input.focus();
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(input, value);
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
-      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: value.slice(-1) || 'a' }));
-      input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-    };
-    const openTriggersAndFindOption = async () => {
-      const activeElement = document.activeElement instanceof Element ? document.activeElement : undefined;
-      const activeTrigger = activeElement?.closest('.ant-select')?.querySelector('.ant-select-selector');
-      const visibleDropdown = hasVisibleDropdown();
-      const preferred = [
-        activeTrigger,
-        ...document.querySelectorAll('.ant-select-open .ant-select-selector, .ant-select-focused .ant-select-selector'),
-      ].filter((element): element is Element => !!element && isVisible(element));
-      const all = visibleDropdown ? [] : [...document.querySelectorAll('.ant-modal .ant-select-selector, .ant-drawer .ant-select-selector, [role="dialog"] .ant-select-selector')].filter(isVisible);
-      const triggers = [...preferred, ...all].filter((trigger, index, list) => list.indexOf(trigger) === index);
-      for (const trigger of triggers) {
-        if (!visibleDropdown) {
-          dispatchClick(trigger);
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        const option = findOption() || findLooseOption();
-        if (option)
-          return option;
-        if (primaryQuery) {
-          setSearchValue(trigger, primaryQuery);
-          await new Promise(resolve => setTimeout(resolve, 120));
-          const searchedOption = findOption() || findLooseOption();
-          if (searchedOption)
-            return searchedOption;
-        }
-      }
-      return undefined;
     };
     const deadline = Date.now() + timeout;
-    let retriedByOpeningTrigger = false;
     while (Date.now() <= deadline) {
-      const option = findOption();
-      if (option) {
-        dispatchClick(option);
+      const candidates = matchingCandidates();
+      if (candidates.length === 1) {
+        dispatchClick(candidates[0]);
         return true;
       }
-      if (!retriedByOpeningTrigger && (optionKind === 'select' || optionKind === 'tree')) {
-        retriedByOpeningTrigger = true;
-        const openedOption = await openTriggersAndFindOption();
-        if (openedOption) {
-          dispatchClick(openedOption);
-          return true;
-        }
-      }
+      if (candidates.length > 1)
+        return false;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     return false;
   }), { isFunction: true }, { ...target, timeout });
-  return clicked;
 }

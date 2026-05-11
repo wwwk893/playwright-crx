@@ -1097,10 +1097,10 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const activePopupOption = activeDropdownOptionLocator(step, options);
       if (activePopupOption)
         return options.parserSafe ? `await ${activePopupOption}.click();` : antdPopupOptionClickSource(step, activePopupOption);
-      const preferred = preferredTargetLocator(step);
+      const preferred = preferredTargetLocator(step, options);
       if (preferred)
         return `await ${preferred}.click();`;
-      return selector ? `await ${locatorExpressionForSelector(selector)}.click();` : targetClickFallback(step);
+      return selector ? `await ${locatorExpressionForSelector(selector)}.click();` : targetClickFallback(step, options);
     }
     case 'fill': {
       const value = stringLiteral(action.text ?? action.value ?? step.value ?? '');
@@ -1148,11 +1148,12 @@ function antdPopoverConfirmAfterClickSource(step: FlowStep, options: EmitStepOpt
     ? `page.locator(${stringLiteral(dialogRootSelector({ type: 'popover', visible: true }))}).filter({ hasText: ${stringLiteral(popover.title)} })`
     : visibleRoot;
   const clickSource = `await ${root}.getByRole("button", { name: /^(确定|确 定)$/ }).click();`;
-  if (options.parserSafe)
+  if (options.parserSafe) {
     return [
       `await page.waitForTimeout(300);`,
       clickSource,
     ].join('\n');
+  }
   return [
     clickSource,
     `await ${root}.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});`,
@@ -1279,8 +1280,10 @@ function renderStableWaitSource(milliseconds: number, options: EmitStepOptions =
   ].join('\n');
 }
 
-function targetClickFallback(step: FlowStep) {
-  const preferred = preferredTargetLocator(step);
+function targetClickFallback(step: FlowStep, options: EmitStepOptions = {}) {
+  if (options.parserSafe)
+    return undefined;
+  const preferred = preferredTargetLocator(step, options);
   if (preferred)
     return `await ${preferred}.click();`;
   const text = step.target?.text || step.target?.name || step.target?.label || step.target?.displayName;
@@ -1295,7 +1298,7 @@ function selectTriggerClickLocator(step: FlowStep) {
   return fieldLocator(step);
 }
 
-function preferredTargetLocator(step: FlowStep) {
+function preferredTargetLocator(step: FlowStep, options: EmitStepOptions = {}) {
   return globalTestIdLocator(step) ||
     antdTreeSelectOptionLocator(step) ||
     antdCascaderOptionLocator(step) ||
@@ -1310,7 +1313,7 @@ function preferredTargetLocator(step: FlowStep) {
     sectionScopedLocator(step) ||
     modalConfirmButtonLocator(step) ||
     globalRoleLocator(step) ||
-    fallbackTextLocator(step);
+    (options.parserSafe ? undefined : fallbackTextLocator(step));
 }
 
 function visibleDialogConfirmButtonLocator(step: FlowStep) {
