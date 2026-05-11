@@ -1090,7 +1090,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;
       const treeOption = antdTreeSelectOptionLocator(step, options);
       if (treeOption)
-        return options.parserSafe ? `await ${treeOption}.click();` : antdPopupOptionClickSource(step, treeOption);
+        return options.parserSafe ? `await ${treeOption}.click();` : antdPopupOptionClickSource(step, treeOption, { clickFirstMatch: true });
       const cascaderOption = antdCascaderOptionLocator(step, options);
       if (cascaderOption)
         return options.parserSafe ? `await ${cascaderOption}.click();\nawait page.waitForTimeout(120);` : antdPopupOptionClickSource(step, cascaderOption, { stabilizeAfterClickMs: 120, clickFirstMatch: true });

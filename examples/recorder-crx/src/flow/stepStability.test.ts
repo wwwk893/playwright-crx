@@ -5168,6 +5168,61 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'exported tree-select option opens owning trigger and dispatches the first filtered item',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: '华东生产区',
+            name: '华东生产区',
+            scope: { form: { label: '发布范围' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-tree-option',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', title: '全国站点', visible: true },
+              form: { label: '发布范围' },
+              target: {
+                tag: 'span',
+                role: 'treeitem',
+                text: '华东生产区',
+                normalizedText: '华东生产区',
+                framework: 'antd',
+                controlType: 'tree-select-option',
+                optionPath: ['华东生产区'],
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: '.ant-select-tree-node-content-wrapper >> text=华东生产区',
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('华东生产区'), 'tree-select option text should be preserved in generated replay');
+      assert(firstStep.includes('if (!await page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-tree-node-content-wrapper").filter({ hasText: "华东生产区" }).first().isVisible().catch(() => false))'), 'tree-select replay should open the owning trigger based on target option visibility, not any visible dropdown');
+      assert(firstStep.includes('.filter({ hasText: "发布范围" })'), 'tree-select replay should reopen the owning form field trigger');
+      assert(firstStep.includes('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();'), 'tree-select replay should click the owning AntD trigger when the target option is absent');
+      assert(firstStep.includes('.first().evaluate((element, expectedText)'), 'tree-select replay should dispatch the first filtered option directly');
+      assert(!firstStep.includes('evaluateAll((elements, expectedText)'), 'tree-select replay should not use the flaky active popup collection scan');
+      assert(!firstStep.includes('page.getByText("华东生产区")'), 'tree-select replay should not fall back to global page text');
+    },
+  },
+  {
     name: 'AntD select option generation ignores object labels and uses string fallback',
     run: () => {
       const flow: BusinessFlow = {
