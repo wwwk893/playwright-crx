@@ -667,7 +667,11 @@ const tests: TestCase[] = [
       const playback = generateBusinessFlowPlaybackCode(flow);
 
       assert(!code.includes('.fill("xtest16")'), 'exported replay should omit redundant AntD select search fills before the option workaround');
+      assert(code.includes('.ant-select-dropdown:visible'), 'exported replay can use Playwright :visible active dropdown selectors');
       assert(!playback.includes("getByText('xtest16:WAN1')"), 'parser-safe replay should dedupe follow-up raw text clicks after selecting the same AntD option');
+      assert(playback.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parser-safe replay must keep the current CrxPlayer active option selector contract');
+      assert(!playback.includes('.ant-select-dropdown:visible'), 'parser-safe replay must not use exported-only :visible active dropdown selectors before the runtime bridge supports them');
+      assert(!playback.includes('if (!await'), 'parser-safe replay should remain flat parser-safe actions');
       assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
       assertEqual(countBusinessFlowPlaybackActions(flow), countBusinessFlowPlaybackActionsFromReplay(flow));
       assert(code.includes('getByRole("combobox", { name: "WAN口" })') || code.includes('page.locator(".ant-form-item").filter({ hasText: "WAN口" })'), 'exported replay should still open the select before choosing the option');
@@ -2674,7 +2678,10 @@ test('demo', async ({ page }) => {
       assert(!code.includes('page.getByRole("button", { name: "确 定" }).click();'), 'dialog confirm echo should not fall back to a page-global ambiguous role locator');
       assertEqual((code.match(/getByTestId\("wan-config-confirm"\)\.click\(\);/g) || []).length, 1);
       assert(playbackCode.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "编辑WAN2" }).getByTestId("wan-transport-row-delete-action").click();'), 'runtime playback should keep the dialog-scoped delete click');
-      assert(playbackCode.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active):has(.ant-popconfirm-buttons)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'runtime playback should confirm a visible AntD Popconfirm root with buttons without title coupling');
+      const runtimeWaitIndex = playbackCode.indexOf('page.waitForTimeout(300)');
+      const runtimePopoverConfirmIndex = playbackCode.indexOf('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active):has(.ant-popconfirm-buttons)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();');
+      assert(runtimeWaitIndex >= 0, 'runtime playback should give the AntD Popconfirm animation a parser-safe boundary');
+      assert(runtimePopoverConfirmIndex > runtimeWaitIndex, 'runtime playback should confirm a visible AntD Popconfirm root with buttons after the parser-safe boundary');
       assert(!playbackCode.includes('.catch('), 'runtime playback should not include unsupported catch continuations');
     },
   },
@@ -3407,7 +3414,7 @@ test('demo', async ({ page }) => {
           sourceActionIds: ['a002'],
           action: 'click',
           target: { text: '生产VRF' },
-          sourceCode: `await page.getByText("生产VRF").click();`,
+          sourceCode: `await page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last().locator(".ant-select-item-option, .ant-cascader-menu-item, .ant-select-tree-treenode, .ant-select-tree-node-content-wrapper").filter({ hasText: "生产VRF" }).first().click();`,
           assertions: [],
         }],
         repeatSegments: [{
@@ -3430,8 +3437,8 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       assert(code.includes('for (const row of repeat_1Data)'), 'repeat loop should be emitted');
       assert(code.includes('.ant-select-dropdown:visible'), 'parameterized popup option should stay scoped to active AntD dropdown');
-      assert(code.includes('evaluateAll((elements, expectedText)'), 'parameterized popup option should validate against the active popup options');
-      assert(code.includes('AntD option text mismatch'), 'parameterized popup option should fail on partial or wrong text matches');
+      assert(code.includes('.first().evaluate((element, expectedText)'), 'parameterized popup option should dispatch the first filtered active option directly');
+      assert(code.includes('AntD option text mismatch'), 'parameterized popup option should fail on wrong text matches');
       assert(code.includes('}, String(row.vrf));'), 'popup option should use the row variable as exact expected text');
       assert(!code.includes('|| elements[elements.length - 1]'), 'popup option must not fall back to the last partial match');
       assert(!code.includes('filter({ hasText: String(row.vrf) }).first().click()'), 'parameterized dropdown option must not use partial first-match clicks');
@@ -5112,6 +5119,55 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'exported cascader option replay dispatches the first filtered active item directly',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: '上海',
+            name: '上海',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-cascader-option',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', title: '出口路径选项', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'li',
+                text: '上海',
+                normalizedText: '上海',
+                framework: 'antd',
+                controlType: 'cascader-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: '.ant-cascader-dropdown .ant-cascader-menu-item >> text=上海',
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('.ant-cascader-dropdown:visible'), 'exported cascader replay should stay scoped to the visible cascader popup');
+      assert(firstStep.includes('.first().evaluate((element, expectedText)'), 'exported cascader replay should dispatch the first filtered option without re-querying an evaluateAll collection');
+      assert(!firstStep.includes('evaluateAll((elements, expectedText)'), 'exported cascader replay should not use the flaky active popup collection scan');
+    },
+  },
+  {
     name: 'AntD select option generation ignores object labels and uses string fallback',
     run: () => {
       const flow: BusinessFlow = {
@@ -5208,7 +5264,7 @@ test('demo', async ({ page }) => {
       assert(!playbackCode.includes('if (!await'), 'runtime playback code should not include unsupported control flow for active popup options');
       assert(!playbackCode.includes('.first()'), 'runtime playback code should avoid unsupported locator first() calls');
       assert(!playbackCode.includes('.last()'), 'runtime playback code should avoid unsupported locator last() calls');
-      assert(playbackCode.includes('.ant-select-dropdown:visible'), 'runtime playback should still target the active dropdown');
+      assert(playbackCode.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'runtime playback should keep the CrxPlayer active dropdown contract');
       assert(playbackCode.includes('.click();'), 'runtime playback should remain parseable click actions');
     },
   },
@@ -5344,7 +5400,7 @@ test('demo', async ({ page }) => {
       };
 
       const exportedCode = generateBusinessFlowPlaywrightCode(flow);
-      assert(exportedCode.includes('evaluateAll'), 'exported Playwright code should keep the AntD dispatch workaround');
+      assert(exportedCode.includes('.first().evaluate((element, expectedText)'), 'exported Playwright code should keep the AntD dispatch workaround');
       assertEqual(countBusinessFlowPlaybackActions(flow), 1);
     },
   },

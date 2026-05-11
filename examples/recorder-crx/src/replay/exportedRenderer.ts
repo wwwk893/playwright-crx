@@ -1088,15 +1088,15 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const rawSelectOption = rawSelectOptionClickSource(step);
       if (rawSelectOption)
         return options.parserSafe ? rawSelectOptionParserSafeSource(step) : rawSelectOption;
-      const treeOption = antdTreeSelectOptionLocator(step);
+      const treeOption = antdTreeSelectOptionLocator(step, options);
       if (treeOption)
-        return options.parserSafe ? `await ${parserSafeLocator(treeOption)}.click();` : antdPopupOptionClickSource(step, treeOption);
-      const cascaderOption = antdCascaderOptionLocator(step);
+        return options.parserSafe ? `await ${treeOption}.click();` : antdPopupOptionClickSource(step, treeOption);
+      const cascaderOption = antdCascaderOptionLocator(step, options);
       if (cascaderOption)
-        return options.parserSafe ? `await ${parserSafeLocator(cascaderOption)}.click();\nawait page.waitForTimeout(120);` : antdPopupOptionClickSource(step, cascaderOption, { stabilizeAfterClickMs: 120 });
-      const activePopupOption = activeDropdownOptionLocator(step);
+        return options.parserSafe ? `await ${cascaderOption}.click();\nawait page.waitForTimeout(120);` : antdPopupOptionClickSource(step, cascaderOption, { stabilizeAfterClickMs: 120, clickFirstMatch: true });
+      const activePopupOption = activeDropdownOptionLocator(step, options);
       if (activePopupOption)
-        return options.parserSafe ? `await ${parserSafeLocator(activePopupOption)}.click();` : antdPopupOptionClickSource(step, activePopupOption);
+        return options.parserSafe ? `await ${activePopupOption}.click();` : antdPopupOptionClickSource(step, activePopupOption);
       const preferred = preferredTargetLocator(step);
       if (preferred)
         return `await ${preferred}.click();`;
@@ -1149,7 +1149,10 @@ function antdPopoverConfirmAfterClickSource(step: FlowStep, options: EmitStepOpt
     : visibleRoot;
   const clickSource = `await ${root}.getByRole("button", { name: /^(确定|确 定)$/ }).click();`;
   if (options.parserSafe)
-    return clickSource;
+    return [
+      `await page.waitForTimeout(300);`,
+      clickSource,
+    ].join('\n');
   return [
     clickSource,
     `await ${root}.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});`,
@@ -1364,14 +1367,16 @@ function dialogConfirmLabel(step: FlowStep) {
       .trim();
 }
 
-function antdSelectOptionLocator(step: FlowStep) {
+function antdSelectOptionLocator(step: FlowStep, options: EmitStepOptions = {}) {
   if (!isAntdSelectOptionStep(step))
     return undefined;
   const optionName = antdSelectOptionName(step);
   if (!optionName)
     return undefined;
   return optionLocatorWithTextTokens(
-      `page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option")`,
+      options.parserSafe
+        ? `page.locator("${activeSelectDropdownSelector(options)} .ant-select-item-option")`
+        : `page.locator("${activeSelectDropdownSelector(options)}").last().locator(".ant-select-item-option")`,
       optionName,
   );
 }
@@ -1427,7 +1432,7 @@ function normalizeComparableText(value?: string) {
   return value?.replace(/\s+/g, ' ').trim();
 }
 
-function antdTreeSelectOptionLocator(step: FlowStep) {
+function antdTreeSelectOptionLocator(step: FlowStep, options: EmitStepOptions = {}) {
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   if (controlType !== 'tree-select-option' && !/ant-select-tree/.test(selector))
@@ -1435,10 +1440,13 @@ function antdTreeSelectOptionLocator(step: FlowStep) {
   const optionName = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text);
   if (!optionName)
     return undefined;
-  return `page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-tree-node-content-wrapper").filter({ hasText: ${stringLiteral(optionName)} })`;
+  const root = options.parserSafe
+    ? `page.locator("${activeSelectDropdownSelector(options)} .ant-select-tree-node-content-wrapper")`
+    : `page.locator("${activeSelectDropdownSelector(options)}").last().locator(".ant-select-tree-node-content-wrapper")`;
+  return `${root}.filter({ hasText: ${stringLiteral(optionName)} })`;
 }
 
-function antdCascaderOptionLocator(step: FlowStep) {
+function antdCascaderOptionLocator(step: FlowStep, options: EmitStepOptions = {}) {
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
   if (controlType !== 'cascader-option' && !/ant-cascader-menu-item/.test(selector))
@@ -1446,10 +1454,13 @@ function antdCascaderOptionLocator(step: FlowStep) {
   const optionName = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text);
   if (!optionName)
     return undefined;
-  return `page.locator(".ant-cascader-dropdown:visible").last().locator(".ant-cascader-menu-item").filter({ hasText: ${stringLiteral(optionName)} })`;
+  const root = options.parserSafe
+    ? `page.locator("${activeCascaderDropdownSelector(options)} .ant-cascader-menu-item")`
+    : `page.locator("${activeCascaderDropdownSelector(options)}").last().locator(".ant-cascader-menu-item")`;
+  return `${root}.filter({ hasText: ${stringLiteral(optionName)} })`;
 }
 
-function activeDropdownOptionLocator(step: FlowStep) {
+function activeDropdownOptionLocator(step: FlowStep, options: EmitStepOptions = {}) {
   if (step.action !== 'click' || isOrdinaryFormLabelClick(step))
     return undefined;
   const optionName = popupOptionName(step);
@@ -1468,7 +1479,7 @@ function activeDropdownOptionLocator(step: FlowStep) {
   if (!looksLikeActivePopupOption)
     return undefined;
   return optionLocatorWithTextTokens(
-      `page.locator(${stringLiteral('.ant-select-dropdown:visible .ant-select-item-option, .ant-select-dropdown:visible .ant-select-tree-node-content-wrapper, .ant-select-dropdown:visible .ant-select-tree-title, .ant-cascader-dropdown:visible .ant-cascader-menu-item')})`,
+      `page.locator(${stringLiteral(activePopupOptionRowsSelector(options))})`,
       optionName,
   );
 }
@@ -1477,6 +1488,25 @@ function optionLocatorWithTextTokens(baseLocator: string, optionName: string) {
   return optionTextTokens(optionName).reduce((locator, token) => {
     return `${locator}.filter({ hasText: ${stringLiteral(token)} })`;
   }, baseLocator);
+}
+
+function activeSelectDropdownSelector(options: EmitStepOptions = {}) {
+  return options.parserSafe ? '.ant-select-dropdown:not(.ant-select-dropdown-hidden)' : '.ant-select-dropdown:visible';
+}
+
+function activeCascaderDropdownSelector(options: EmitStepOptions = {}) {
+  return options.parserSafe ? '.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)' : '.ant-cascader-dropdown:visible';
+}
+
+function activePopupOptionRowsSelector(options: EmitStepOptions = {}) {
+  const selectDropdown = activeSelectDropdownSelector(options);
+  const cascaderDropdown = activeCascaderDropdownSelector(options);
+  return [
+    `${selectDropdown} .ant-select-item-option`,
+    `${selectDropdown} .ant-select-tree-node-content-wrapper`,
+    `${selectDropdown} .ant-select-tree-title`,
+    `${cascaderDropdown} .ant-cascader-menu-item`,
+  ].join(', ');
 }
 
 function optionTextTokens(optionName: string, options: { keepSecondaryTokens?: boolean } = {}) {
@@ -1589,11 +1619,11 @@ function antdSelectOptionParserSafeSource(step: FlowStep, options: EmitStepOptio
   const trigger = parserSafeLocator(field);
   const input = `${trigger}.locator(${stringLiteral('input:visible')})`;
   const value = stringLiteral(parserSafeSelectSearchText(optionName));
-  const optionLocator = antdSelectOptionLocator(step) || activeDropdownOptionLocator(step);
+  const optionLocator = antdSelectOptionLocator(step, options) || activeDropdownOptionLocator(step, options);
   if (!optionLocator)
     return rawSelectOptionParserSafeSource(step) || `await ${parserSafeLocator('page.locator(".ant-select-item-option")')}.click();`;
   const parserSafeOptionLocator = optionLocatorWithTextTokens(
-      'page.locator(".ant-select-dropdown:visible .ant-select-item-option")',
+      `page.locator("${activeSelectDropdownSelector({ parserSafe: true })} .ant-select-item-option")`,
       optionName,
   );
   const previousStepTargetsField = previousStepAlreadyTargetsAntdSelectField(options.previousStep, step);
@@ -1631,8 +1661,8 @@ function previousStepAlreadyTargetsAntdSelectField(previousStep: FlowStep | unde
 }
 
 function rawSelectOptionParserSafeSource(step: FlowStep) {
-  const optionLocator = antdSelectOptionLocator(step);
-  return optionLocator ? `await ${parserSafeLocator(optionLocator)}.click();` : undefined;
+  const optionLocator = antdSelectOptionLocator(step, { parserSafe: true });
+  return optionLocator ? `await ${optionLocator}.click();` : undefined;
 }
 
 function inheritedOptionClickSourceFromPreviousStep(step: FlowStep, previousStep: FlowStep | undefined, options: EmitStepOptions = {}) {
@@ -1657,7 +1687,7 @@ function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: 
     `if (!await page.locator(".ant-select-dropdown:visible").first().isVisible().catch(() => false))`,
     `  await ${triggerLocator}.click();`,
     optionName ? `if (!await ${optionLocator}.first().isVisible().catch(() => false)) {\n  if (await ${triggerLocator}.locator("input").count().catch(() => 0))\n    await ${triggerLocator}.locator("input").first().fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(async () => { await ${triggerLocator}.fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(() => {}); });\n  else\n    await ${triggerLocator}.fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(() => {});\n}` : undefined,
-    antdSelectOptionDispatchSource(optionLocator, optionName),
+    antdSelectOptionDispatchSource(optionLocator, optionName, { clickFirstMatch: true }),
     `await page.locator(".ant-select-dropdown:visible").first().waitFor({ state: "hidden", timeout: 1000 }).catch(() => {});`,
   ].filter(Boolean).join('\n');
 }
@@ -1729,7 +1759,7 @@ function selectTriggerDialog(step: FlowStep) {
   return undefined;
 }
 
-function antdPopupOptionClickSource(step: FlowStep, locator: string, options: { stabilizeAfterClickMs?: number } = {}) {
+function antdPopupOptionClickSource(step: FlowStep, locator: string, options: { stabilizeAfterClickMs?: number; clickFirstMatch?: boolean } = {}) {
   const optionName = popupOptionName(step);
   const triggerLocator = popupOptionTriggerLocator(step);
   const opener = triggerLocator ? [
@@ -1765,12 +1795,12 @@ function popupTriggerHint(step: FlowStep) {
   return stripped || toast;
 }
 
-function antdPopupOptionDispatchSource(locator: string, optionName?: string, options: { stabilizeAfterClickMs?: number } = {}) {
-  const source = antdSelectOptionDispatchSource(locator, optionName, { includeHoverEvents: true });
+function antdPopupOptionDispatchSource(locator: string, optionName?: string, options: { stabilizeAfterClickMs?: number; clickFirstMatch?: boolean } = {}) {
+  const source = antdSelectOptionDispatchSource(locator, optionName, { includeHoverEvents: true, clickFirstMatch: options.clickFirstMatch });
   return options.stabilizeAfterClickMs ? `${source}\nawait page.waitForTimeout(${options.stabilizeAfterClickMs});` : source;
 }
 
-function antdSelectOptionDispatchSource(locator: string, optionName?: string, options: { includeHoverEvents?: boolean } = {}) {
+function antdSelectOptionDispatchSource(locator: string, optionName?: string, options: { includeHoverEvents?: boolean; clickFirstMatch?: boolean } = {}) {
   const hoverLines = options.includeHoverEvents ? [
     `  element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
     `  element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
@@ -1784,6 +1814,25 @@ function antdSelectOptionDispatchSource(locator: string, optionName?: string, op
       `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
       `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
       `});`,
+    ].join('\n');
+  }
+  if (options.clickFirstMatch) {
+    return [
+      `await ${locator}.first().waitFor({ state: "visible", timeout: 10000 });`,
+      `await ${locator}.first().evaluate((element, expectedText) => {`,
+      `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
+      `  const expected = normalize(expectedText);`,
+      `  const text = normalize(element.textContent);`,
+      `  const title = normalize(element.getAttribute("title"));`,
+      `  if (!text.includes(expected) && title !== expected)`,
+      `    throw new Error(\`AntD option text mismatch: expected \${expected}, got \${text}\`);`,
+      `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled"))`,
+      `    throw new Error(\`AntD option is disabled: \${expected}\`);`,
+      ...hoverLines,
+      `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
+      `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
+      `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+      `}, ${stringLiteral(optionName)});`,
     ].join('\n');
   }
   return [
@@ -2383,7 +2432,9 @@ function parameterizeLine(line: string, step: FlowStep, segment: FlowRepeatSegme
 }
 
 function parameterizedActivePopupOptionClick(line: string, step: FlowStep, replacement: string) {
-  if (!/\.getByText\([^)]*\)\.click\(\);/.test(line))
+  const isGlobalTextClick = /\.getByText\([^)]*\)\.click\(\);/.test(line);
+  const isActivePopupLocatorClick = /ant-select-dropdown:visible|ant-cascader-dropdown:visible/.test(line) && /\.filter\(\{ hasText:/.test(line) && /\.click\(\);/.test(line);
+  if (!isGlobalTextClick && !isActivePopupLocatorClick)
     return undefined;
   if (!isPopupOptionStep(step))
     return undefined;
@@ -2411,24 +2462,15 @@ function isPopupOptionStep(step: FlowStep) {
 }
 
 function activePopupOptionDispatchSource(locator: string, expectedExpression: string) {
+  const optionLocator = `${locator}.filter({ hasText: ${expectedExpression} })`;
   return [
-    `await ${locator}.first().waitFor({ state: "visible", timeout: 10000 });`,
-    `await ${locator}.evaluateAll((elements, expectedText) => {`,
+    `await ${optionLocator}.first().waitFor({ state: "visible", timeout: 10000 });`,
+    `await ${optionLocator}.first().evaluate((element, expectedText) => {`,
     `  const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();`,
     `  const expected = normalize(expectedText);`,
-    `  const expectedTokens = expected.split(" ").filter(Boolean).filter(token => !/^(共享|独享|shared|dedicated)$/i.test(token));`,
-    `  const matchesExpected = (value) => {`,
-    `    const normalized = normalize(value);`,
-    `    return normalized === expected || expectedTokens.every(token => normalized.includes(token)) || (!!expectedTokens[0] && normalized.includes(expectedTokens[0]));`,
-    `  };`,
-    `  const element = elements.find(element => {`,
-    `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
-    `    return matchesExpected(element.getAttribute("title")) || matchesExpected(optionText) || matchesExpected(element.textContent);`,
-    `  });`,
-    `  if (!element)`,
-    `    throw new Error(\`AntD popup option not found: \${expected}\`);`,
     `  const text = normalize(element.textContent);`,
-    `  if (!matchesExpected(text) && !matchesExpected(element.getAttribute("title")))`,
+    `  const title = normalize(element.getAttribute("title"));`,
+    `  if (!text.includes(expected) && title !== expected)`,
     `    throw new Error(\`AntD popup option text mismatch: expected \${expected}, got \${text}\`);`,
     `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled") || element.classList.contains("ant-cascader-menu-item-disabled"))`,
     `    throw new Error(\`AntD popup option is disabled: \${expected}\`);`,

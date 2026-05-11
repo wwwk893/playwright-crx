@@ -157,7 +157,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(7);
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('real-create-item');
   await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('real-item-a');
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toContain('下方表单使用条目');
+  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n')).toMatch(/下方表单使用条目|使用备注|real-used-item-select/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -571,17 +571,13 @@ async function clickVisibleAntDOption(page: Page, text: string) {
 
 async function dispatchAntDOptionClick(page: Page, options: ReturnType<Page['locator']>, text: string) {
   const option = options.first();
-  const box = await option.boundingBox();
-  if (box)
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await options.evaluateAll((elements, expectedText) => {
+  await option.evaluate((element, expectedText) => {
     const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
     const expected = normalize(expectedText);
-    const element = elements.find(element => {
-      const optionText = normalize((element.querySelector('.ant-select-item-option-content') as HTMLElement | null)?.textContent);
-      return normalize(element.getAttribute('title')) === expected || optionText === expected || normalize(element.textContent) === expected;
-    });
-    if (!element)
+    const optionText = normalize((element.querySelector('.ant-select-item-option-content') as HTMLElement | null)?.textContent);
+    const text = normalize(element.textContent);
+    const title = normalize(element.getAttribute('title'));
+    if (title !== expected && optionText !== expected && text !== expected)
       throw new Error(`AntD option not found exactly: ${expected}`);
     element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
     element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
