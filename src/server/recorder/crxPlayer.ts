@@ -424,9 +424,9 @@ async function dispatchActivePopconfirmConfirmClick(mainFrame: Frame) {
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
     const roots = Array.from(document.querySelectorAll('.ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)')).filter(root => isVisible(root) && !!root.querySelector('.ant-popconfirm-buttons'));
-    const root = roots[roots.length - 1];
-    if (!root)
+    if (roots.length !== 1)
       return false;
+    const root = roots[0];
     const candidates = Array.from(root.querySelectorAll('button, [role="button"]')).filter(element => {
       const text = normalize(element.textContent).replace(/\s+/g, '');
       return isVisible(element) && /^(确定|确认|OK|YES)$/i.test(text);

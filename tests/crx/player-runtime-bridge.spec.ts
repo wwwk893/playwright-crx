@@ -245,15 +245,6 @@ test('runtime active popconfirm confirm fallback dispatches only one click', asy
             <div class="ant-popconfirm-message-title">删除此行？</div>
             <div class="ant-popconfirm-buttons">
               <button type="button">取消</button>
-              <button type="button">OK</button>
-            </div>
-          </div>
-        </div>
-        <div class="ant-popover" style="display:block; position:absolute; left:20px; top:140px; width:220px; min-height:100px;">
-          <div class="ant-popconfirm">
-            <div class="ant-popconfirm-message-title">删除此行？</div>
-            <div class="ant-popconfirm-buttons">
-              <button type="button">取消</button>
               <button id="confirm" type="button">OK</button>
             </div>
           </div>
@@ -280,5 +271,55 @@ test('runtime bridge contract', async ({ page }) => {
     await crxApp.recorder.run(code, page);
 
     await expect(page.locator('#count')).toHaveText('1');
+  });
+});
+
+test('runtime active popconfirm confirm fallback fails closed for multiple visible popconfirms', async ({ runCrxTest, mockPaths }) => {
+  await mockPaths({
+    'runtime-ambiguous-popconfirm.html': `<html>
+      <body>
+        <div id="count">0</div>
+        <div class="ant-popover" style="display:block; position:absolute; left:20px; top:20px; width:220px; min-height:100px;">
+          <div class="ant-popconfirm">
+            <div class="ant-popconfirm-message-title">删除第一行？</div>
+            <div class="ant-popconfirm-buttons">
+              <button type="button">取消</button>
+              <button class="confirm" type="button">OK</button>
+            </div>
+          </div>
+        </div>
+        <div class="ant-popover" style="display:block; position:absolute; left:20px; top:140px; width:220px; min-height:100px;">
+          <div class="ant-popconfirm">
+            <div class="ant-popconfirm-message-title">删除第二行？</div>
+            <div class="ant-popconfirm-buttons">
+              <button type="button">取消</button>
+              <button class="confirm" type="button">OK</button>
+            </div>
+          </div>
+        </div>
+        <script>
+          let count = 0;
+          for (const confirm of document.querySelectorAll('.confirm')) {
+            confirm.addEventListener('click', () => {
+              count += 1;
+              document.querySelector('#count').textContent = String(count);
+            });
+          }
+        </script>
+      </body>
+    </html>`,
+  });
+
+  await runCrxTest(async ({ crxApp, page, server, expect }) => {
+    const code = `import { test } from '@playwright/test';
+
+test('runtime bridge contract', async ({ page }) => {
+  await page.goto('${server.PREFIX}/runtime-ambiguous-popconfirm.html');
+  await page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").locator(".ant-popconfirm-buttons").getByRole("button", { name: "OK" }).click();
+});`;
+    const error = await crxApp.recorder.run(code, page).then(() => undefined, error => error);
+
+    expect(error?.message).toContain('strict mode violation');
+    await expect(page.locator('#count')).toHaveText('0');
   });
 });
