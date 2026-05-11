@@ -615,6 +615,66 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'replay compiler omits redundant AntD select trigger and search before option workaround',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: { role: 'combobox', name: 'WAN口' },
+            context: { eventId: 'ctx-trigger', capturedAt: 1000, before: { form: { label: 'WAN口' }, target: { role: 'combobox', framework: 'antd', controlType: 'select' } } },
+            sourceCode: `await page.getByRole("combobox", { name: "WAN口" }).click();`,
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'fill',
+            value: 'xtest16',
+            target: { role: 'combobox', name: 'WAN口' },
+            context: { eventId: 'ctx-search', capturedAt: 1050, before: { form: { label: 'WAN口' }, target: { role: 'combobox', framework: 'antd', controlType: 'select' } } },
+            sourceCode: `await page.getByRole('combobox', { name: 'WAN口' }).fill("xtest16");`,
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: 'xtest16:WAN1', displayName: 'xtest16:WAN1' },
+            rawAction: { action: { name: 'click', selector: 'internal:attr=[title="xtest16:WAN1"i] >> div' } },
+            sourceCode: `await page.getByTitle('xtest16:WAN1').locator('div').click();`,
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            kind: 'recorded',
+            action: 'click',
+            target: {},
+            rawAction: { action: { name: 'click', selector: 'internal:text="xtest16:WAN1"i' } },
+            sourceCode: `await page.getByText('xtest16:WAN1').click();`,
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assert(!code.includes('.fill("xtest16")'), 'exported replay should omit redundant AntD select search fills before the option workaround');
+      assert(!playback.includes("getByText('xtest16:WAN1')"), 'parser-safe replay should dedupe follow-up raw text clicks after selecting the same AntD option');
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
+      assertEqual(countBusinessFlowPlaybackActions(flow), countBusinessFlowPlaybackActionsFromReplay(flow));
+      assert(code.includes('getByRole("combobox", { name: "WAN口" })') || code.includes('page.locator(".ant-form-item").filter({ hasText: "WAN口" })'), 'exported replay should still open the select before choosing the option');
+      assert(code.includes('xtest16:WAN1'), 'exported replay should still choose the intended option');
+    },
+  },
+  {
     name: 'page select transaction projects trigger search option into one select step',
     run: () => {
       const flow = mergePageContextIntoFlow(createNamedFlow(), [
@@ -974,7 +1034,7 @@ const tests: TestCase[] = [
             action: 'click',
             target: { role: 'option', text: '选择一个VRF', displayName: 'option 选择一个VRF' },
             rawAction: { name: 'click' } as any,
-            sourceCode: 'await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text=\\"选择一个VRF\\"i").click();',
+            sourceCode: 'await page.locator(".ant-select-dropdown:visible >> .ant-select-item-option >> internal:has-text=\\"选择一个VRF\\"i").click();',
             context: {
               eventId: 'ctx-vrf-placeholder',
               capturedAt: 1000,
@@ -991,7 +1051,7 @@ const tests: TestCase[] = [
             order: 2,
             action: 'click',
             target: { role: 'option', text: 'default', displayName: 'default' },
-            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="default"i' } as any,
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:visible >> .ant-select-item-option >> internal:has-text="default"i' } as any,
             context: {
               eventId: 'ctx-vrf-default',
               capturedAt: 1100,
@@ -1021,7 +1081,7 @@ const tests: TestCase[] = [
             action: 'click',
             target: { role: 'option', text: 'default', displayName: 'default' },
             rawAction: { name: 'click' } as any,
-            sourceCode: 'await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text=\\"default\\"i").click();',
+            sourceCode: 'await page.locator(".ant-select-dropdown:visible >> .ant-select-item-option >> internal:has-text=\\"default\\"i").click();',
             context: { eventId: 'ctx-vrf-default-repeat', capturedAt: 1200, before: { form: { label: '关联VRF' }, target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] } } },
             assertions: [],
           },
@@ -1030,7 +1090,7 @@ const tests: TestCase[] = [
             order: 2,
             action: 'click',
             target: { role: 'option', text: 'default', displayName: 'default' },
-            rawAction: { name: 'click', selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) >> .ant-select-item-option >> internal:has-text="default"i' } as any,
+            rawAction: { name: 'click', selector: '.ant-select-dropdown:visible >> .ant-select-item-option >> internal:has-text="default"i' } as any,
             context: { eventId: 'ctx-vrf-default-repeat-real', capturedAt: 1300, before: { form: { label: '关联VRF' }, target: { role: 'option' as any, text: 'default', normalizedText: 'default', optionPath: ['default'] } } },
             assertions: [],
           },
@@ -3338,7 +3398,7 @@ test('demo', async ({ page }) => {
           sourceActionIds: ['a001'],
           action: 'click',
           target: { label: '关联VRF', role: 'combobox' },
-          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "关联VRF" }).locator(".ant-select-selector").first().click();`,
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "关联VRF" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();`,
           assertions: [],
         }, {
           id: 's002',
@@ -3369,7 +3429,7 @@ test('demo', async ({ page }) => {
       });
       const code = generateBusinessFlowPlaywrightCode(flow);
       assert(code.includes('for (const row of repeat_1Data)'), 'repeat loop should be emitted');
-      assert(code.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parameterized popup option should stay scoped to active AntD dropdown');
+      assert(code.includes('.ant-select-dropdown:visible'), 'parameterized popup option should stay scoped to active AntD dropdown');
       assert(code.includes('evaluateAll((elements, expectedText)'), 'parameterized popup option should validate against the active popup options');
       assert(code.includes('AntD option text mismatch'), 'parameterized popup option should fail on partial or wrong text matches');
       assert(code.includes('}, String(row.vrf));'), 'popup option should use the row variable as exact expected text');
@@ -3445,7 +3505,7 @@ test('demo', async ({ page }) => {
 
       assert(!code.includes('.ant-select-item-option'), 'select trigger placeholder must not be treated as an option');
       assert(!code.includes('AntD Select virtual dropdown replay workaround'), 'select trigger should not use option replay workaround');
-      assert(code.includes('.locator(".ant-select-selector").first().click();') || code.includes("getByRole('combobox'"), 'select trigger should replay as opening the field');
+      assert(code.includes('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();') || code.includes("getByRole('combobox'"), 'select trigger should replay as opening the field');
     },
   },
   {
@@ -4245,7 +4305,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes(`locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option").filter({ hasText: "real-item-a" })`), 'select option should replay through the visible AntD option locator scoped to the active dropdown');
+      assert(firstStep.includes(`locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option").filter({ hasText: "real-item-a" })`), 'select option should replay through the visible AntD option locator scoped to the active dropdown');
       assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'select option should replay through the AntD mouse event fallback');
       assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'select option replay should wait briefly for the dropdown to close');
       assert(!firstStep.includes('getByTitle'), 'select option should not replay through brittle title locators');
@@ -4295,7 +4355,7 @@ test('demo', async ({ page }) => {
       const firstStep = stepCodeBlock(code, 's001');
 
       assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'human-like inner option click should still use AntD dropdown replay');
-      assert(firstStep.includes('locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option")'), 'option lookup should be scoped to active dropdown');
+      assert(firstStep.includes('locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option")'), 'option lookup should be scoped to active dropdown');
       assert(!firstStep.includes('getByText'), 'human-like option replay must not use ambiguous global text locator');
     },
   },
@@ -4332,7 +4392,7 @@ test('demo', async ({ page }) => {
             scope: { form: { label: 'IP地址池' }, dialog: { title: '新建IP端口地址池', type: 'modal', visible: true } },
           },
           rawAction: { action: { name: 'fill', selector: 'internal:role=combobox[name="* IP地址池 question-circle"i]', text: '' } },
-          sourceCode: 'await page.locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector").first().locator("input").first().fill("");',
+          sourceCode: 'await page.locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().locator("input").first().fill("");',
           assertions: [],
         }],
       };
@@ -4389,7 +4449,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaybackCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector").click();';
+      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").click();';
       assert(firstStep.includes('.ant-form-item') && firstStep.includes('IP地址池'), 'runtime replay should reopen the field-scoped select before choosing the option');
       assert(!firstStep.includes('if (!await'), 'runtime replay should not include JS control flow that the parser cannot enforce');
       assert(!firstStep.includes('.fill("test1")'), 'runtime replay should not search ReactNode/IP-range labels because AntD can filter them to an empty dropdown');
@@ -4527,7 +4587,7 @@ test('demo', async ({ page }) => {
       const flow: BusinessFlow = { ...createNamedFlow(), steps: [triggerStep, optionStep] };
       const code = generateBusinessFlowPlaybackCode(flow);
       const optionBlock = stepCodeBlock(code, 's002');
-      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector").click();';
+      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").click();';
 
       assert(!optionBlock.includes(fieldClick), 'option step should not emit a second trigger click after the owning select was already opened');
       assert(!optionBlock.includes('if (!await'), 'runtime parser-safe replay must avoid JS control flow that the parser ignores');
@@ -4604,7 +4664,7 @@ test('demo', async ({ page }) => {
       const playbackOptionStep = stepCodeBlock(playbackCode, 's002');
 
       assert(optionStep.includes('AntD Select virtual dropdown replay workaround'), 'contextless option click should inherit the previous AntD select field context');
-      assert(optionStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first()'), 'fallback should reopen the owning WAN ProFormSelect trigger');
+      assert(optionStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first()'), 'fallback should reopen the owning WAN ProFormSelect trigger');
       assert(!optionStep.includes('getByText'), 'option click should not use ambiguous global text replay');
       assert(!playbackOptionStep.includes('.fill("xtest16:WAN1")'), 'parser-safe runtime should not emit a second full-label search fill after the select search was already filled');
       assertEqual(countBusinessFlowPlaybackActions(flow), 2);
@@ -4836,7 +4896,7 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'AntD workaround should be documented in generated code');
       assert(firstStep.includes('page.getByTestId("usage-form")'), 'AntD replay should open the trigger from contextual test id before falling back to .last()');
-      assert(firstStep.includes('locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option")'), 'option lookup should be scoped inside the last visible dropdown');
+      assert(firstStep.includes('locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option")'), 'option lookup should be scoped inside the last visible dropdown');
       assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'AntD replay should keep the explicit mouse event fallback');
       assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'AntD replay should wait briefly for the dropdown to close after dispatch');
     },
@@ -4877,7 +4937,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const optionStep = stepCodeBlock(code, 's002');
 
-      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'contextless tree option should inherit active dropdown scope');
+      assert(optionStep.includes('.ant-select-dropdown:visible'), 'contextless tree option should inherit active dropdown scope');
       assert(!optionStep.includes('page.getByText("华东生产区")'), 'contextless tree option should not replay through global text');
     },
   },
@@ -5042,7 +5102,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'popup option should be scoped to the active AntD dropdown');
+      assert(firstStep.includes('.ant-select-dropdown:visible'), 'popup option should be scoped to the active AntD dropdown');
       assert(firstStep.includes('.ant-select-tree-node-content-wrapper'), 'tree-select option lookup should be available');
       assert(firstStep.includes('.ant-cascader-menu-item'), 'cascader option lookup should be available');
       assert(firstStep.includes('evaluateAll((elements, expectedText)'), 'active popup option should validate exact visible option text');
@@ -5148,7 +5208,7 @@ test('demo', async ({ page }) => {
       assert(!playbackCode.includes('if (!await'), 'runtime playback code should not include unsupported control flow for active popup options');
       assert(!playbackCode.includes('.first()'), 'runtime playback code should avoid unsupported locator first() calls');
       assert(!playbackCode.includes('.last()'), 'runtime playback code should avoid unsupported locator last() calls');
-      assert(playbackCode.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'runtime playback should still target the active dropdown');
+      assert(playbackCode.includes('.ant-select-dropdown:visible'), 'runtime playback should still target the active dropdown');
       assert(playbackCode.includes('.click();'), 'runtime playback should remain parseable click actions');
     },
   },
@@ -5386,7 +5446,7 @@ test('demo', async ({ page }) => {
       for (const code of [exportedCode, playbackCode]) {
         const firstStep = stepCodeBlock(code, 's001');
         assert(firstStep.includes('filter({ hasText: "新建IPv4地址池" })'), 'trigger should keep dialog scope');
-        assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().click();'), 'trigger should click the visible AntD select selector inside the labeled form item');
+        assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();'), 'trigger should click the visible AntD select selector inside the labeled form item');
         assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'trigger should not rely on combobox accessible name for AntD ProFormSelect');
         assert(!firstStep.includes('#rc_select_14'), 'trigger should not replay the dynamic rc_select id');
       }
@@ -5422,7 +5482,7 @@ test('demo', async ({ page }) => {
       const playbackCode = generateBusinessFlowPlaybackCode(flow);
       const firstStep = stepCodeBlock(playbackCode, 's001');
       const executableStepCode = firstStep.split('\n').slice(1).join('\n');
-      assert(executableStepCode.includes('locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector").first().click();'), 'tooltip suffix should be stripped before locating the ProFormSelect trigger');
+      assert(executableStepCode.includes('locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();'), 'tooltip suffix should be stripped before locating the ProFormSelect trigger');
       assert(!executableStepCode.includes('question-circle'), 'runtime trigger should not depend on tooltip text');
       assert(!executableStepCode.includes('getByRole("combobox"') && !executableStepCode.includes('getByRole(\'combobox\''), 'runtime trigger should not use the brittle combobox role');
     },
@@ -5472,7 +5532,7 @@ test('demo', async ({ page }) => {
 
       const playbackCode = generateBusinessFlowPlaybackCode(flow);
       const firstStep = stepCodeBlock(playbackCode, 's001');
-      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "业务域" }).locator(".ant-select-selector").first().click();'), 'button-looking select trigger should click the owning form-item selector');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "业务域" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();'), 'button-looking select trigger should click the owning form-item selector');
       assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), 'trigger should not replay through duplicate button role');
       assert(!firstStep.includes('nth(4)'), 'trigger should not replay through brittle duplicate ordinal');
     },
@@ -5600,7 +5660,7 @@ test('demo', async ({ page }) => {
 
         const playbackCode = generateBusinessFlowPlaybackCode(flow);
         const firstStep = stepCodeBlock(playbackCode, 's001');
-        assert(firstStep.includes(`locator(".ant-form-item").filter({ hasText: "${sample.label}" }).locator(".ant-select-selector").first().click();`), `${sample.controlType} trigger should click the owning form-item selector`);
+        assert(firstStep.includes(`locator(".ant-form-item").filter({ hasText: "${sample.label}" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();`), `${sample.controlType} trigger should click the owning form-item selector`);
         assert(!firstStep.includes('getByRole("button"') && !firstStep.includes("getByRole('button'"), `${sample.controlType} trigger should not replay through duplicate button role`);
         assert(!firstStep.includes(`nth(${sample.nth})`), `${sample.controlType} trigger should not replay through brittle duplicate ordinal`);
       }
@@ -5657,7 +5717,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input:visible").first().fill("WAN-extra-18");'), 'search fill should target the visible input inside the scoped ProFormSelect trigger');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().locator("input:visible").first().fill("WAN-extra-18");'), 'search fill should target the visible input inside the scoped ProFormSelect trigger');
       assert(!firstStep.includes('getByRole(\'combobox\'') && !firstStep.includes('getByRole("combobox"'), 'search fill should not rely on brittle combobox accessible name');
       assert(!firstStep.includes('internal:role=combobox'), 'search fill should not replay the raw combobox selector');
     },
@@ -5756,7 +5816,7 @@ test('demo', async ({ page }) => {
               text: 'pool-proform-alpha',
             },
           },
-          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first().locator("input").first().fill("pool-proform-alpha");`,
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().locator("input").first().fill("pool-proform-alpha");`,
           assertions: [],
         }],
       };
@@ -5802,7 +5862,7 @@ test('demo', async ({ page }) => {
               text: 'pool-alpha',
             },
           },
-          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "地址池名称" }).locator(".ant-select-selector").first().locator("input").first().fill("pool-alpha");`,
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "地址池名称" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().locator("input").first().fill("pool-alpha");`,
           assertions: [],
         }, {
           id: 's002',
@@ -5859,7 +5919,7 @@ test('demo', async ({ page }) => {
               selector: 'internal:role=combobox[name="地址池名称"i]',
             },
           },
-          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "地址池名称" }).locator(".ant-select-selector").first().click();`,
+          sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "地址池名称" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();`,
           assertions: [],
         }],
       };
@@ -5920,7 +5980,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const optionStep = stepCodeBlock(code, 's002');
 
-      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'context-light option should use the active dropdown locator');
+      assert(optionStep.includes('.ant-select-dropdown:visible'), 'context-light option should use the active dropdown locator');
       assert(!optionStep.includes('getByText(\'生产VRF\')') && !optionStep.includes('getByText("生产VRF")'), 'context-light option should not replay as a page-global text click');
     },
   },
@@ -5997,7 +6057,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const optionStep = stepCodeBlock(code, 's002');
 
-      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'noisy option click should replay through the active dropdown');
+      assert(optionStep.includes('.ant-select-dropdown:visible'), 'noisy option click should replay through the active dropdown');
       assert(optionStep.includes('WAN1'), 'raw option title should survive noisy page-text capture');
       assert(!optionStep.includes('filter({ hasText: "地址池名称" }).locator(".ant-select-selector")'), 'noisy option click should not be misread as another form select trigger');
       assert(!optionStep.includes('业务流程稳定性测试页 新增IP端口池 校验配置 保存配置 保存后动作'), 'noisy selected-value assertions should not leak page-text capture into generated replay');
@@ -6142,7 +6202,7 @@ test('demo', async ({ page }) => {
       };
 
       const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
-      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector").first()'), 'option fallback should open the owning ProFormSelect trigger by form label');
+      assert(firstStep.includes('locator(".ant-form-item").filter({ hasText: "WAN口" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first()'), 'option fallback should open the owning ProFormSelect trigger by form label');
       assert(!firstStep.includes('getByRole("combobox", { name: "WAN口" })'), 'option fallback should not reopen dropdown through brittle combobox role');
     },
   },
@@ -6198,7 +6258,7 @@ test('demo', async ({ page }) => {
       };
 
       const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's002');
-      assert(code.includes('.ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)'), 'cascader option should use the cascader popup');
+      assert(code.includes('.ant-cascader-dropdown:visible'), 'cascader option should use the cascader popup');
       assert(code.includes('.ant-cascader-menu-item'), 'cascader option should use cascader menu items');
       assert(!code.includes('.ant-select-tree-node-content-wrapper'), 'cascader option must not inherit the previous tree-select context');
     },

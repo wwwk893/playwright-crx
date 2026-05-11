@@ -175,7 +175,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expectInOrder(flow.artifacts.playwrightCode, [
     'page.locator(".ant-form-item").filter({ hasText: "下方表单使用条目" })',
     '.locator(".ant-select-selector',
-    'page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last().locator(".ant-select-item-option',
+    /page\.locator\("\.ant-select-dropdown:visible(?:, \.ant-cascader-dropdown:visible)?"\)\.last\(\)\.locator\("\.ant-select-item-option/,
     '.filter({ hasText: "real-item-a" }).first().click()',
   ]);
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']下方表单使用条目["']/);

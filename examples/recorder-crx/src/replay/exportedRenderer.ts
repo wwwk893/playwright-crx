@@ -39,7 +39,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       continue;
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
+    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectFieldAction(step, effectiveFlow.steps[index + 1]) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -256,13 +256,13 @@ function looksLikeDropdownOptionStepForDedup(step: FlowStep) {
   if (isAntdSelectOptionStep(step))
     return true;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
-  const text = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text, rawSelectOptionTitle(step));
+  const text = popupOptionName(step) || rawSelectOptionTitle(step);
   return step.action === 'click' && !!text && (
     step.target?.role === 'option' ||
     step.context?.before.target?.role === 'option' ||
     step.context?.before.dialog?.type === 'dropdown' ||
     step.target?.scope?.dialog?.type === 'dropdown' ||
-    /ant-select|role=option|internal:has-text|internal:attr=\[title=/.test(selector) ||
+    /ant-select|role=option|internal:has-text|internal:attr=\[title=|internal:text=/.test(selector) ||
     (/internal:text=/.test(selector) && !!bestCompactIpRangeMatch(text))
   );
 }
@@ -753,6 +753,16 @@ function isRedundantFieldFocusClick(step: FlowStep, nextStep?: FlowStep) {
   const role = step.target?.role || step.context?.before.target?.role || '';
   const looksLikeTextField = /^(input|textarea)$/.test(controlType) || role === 'textbox' || !!(step.target?.placeholder || step.context?.before.target?.placeholder);
   return looksLikeTextField && sameFieldIdentity(step, nextStep);
+}
+
+function isRedundantSelectFieldAction(step: FlowStep, nextStep?: FlowStep) {
+  if (step.action !== 'fill' || !nextStep || step.assertions.some(assertion => assertion.enabled))
+    return false;
+  if (!isAntdSelectFieldStep(step, nextStep))
+    return false;
+  if (isAntdSelectFieldStep(nextStep) && sameFieldIdentityIgnoringDialog(step, nextStep))
+    return true;
+  return looksLikeDropdownOptionStepForDedup(nextStep) && (sameFieldIdentityIgnoringDialog(step, nextStep) || isContextlessOptionTextClickAfterSelect(nextStep, step, selectQueryForStep(step)));
 }
 
 function isRedundantSelectSearchClear(step: FlowStep, previousStep?: FlowStep) {
@@ -1361,7 +1371,7 @@ function antdSelectOptionLocator(step: FlowStep) {
   if (!optionName)
     return undefined;
   return optionLocatorWithTextTokens(
-      `page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option")`,
+      `page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option")`,
       optionName,
   );
 }
@@ -1425,7 +1435,7 @@ function antdTreeSelectOptionLocator(step: FlowStep) {
   const optionName = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text);
   if (!optionName)
     return undefined;
-  return `page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-tree-node-content-wrapper").filter({ hasText: ${stringLiteral(optionName)} })`;
+  return `page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-tree-node-content-wrapper").filter({ hasText: ${stringLiteral(optionName)} })`;
 }
 
 function antdCascaderOptionLocator(step: FlowStep) {
@@ -1436,7 +1446,7 @@ function antdCascaderOptionLocator(step: FlowStep) {
   const optionName = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text);
   if (!optionName)
     return undefined;
-  return `page.locator(".ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden)").last().locator(".ant-cascader-menu-item").filter({ hasText: ${stringLiteral(optionName)} })`;
+  return `page.locator(".ant-cascader-dropdown:visible").last().locator(".ant-cascader-menu-item").filter({ hasText: ${stringLiteral(optionName)} })`;
 }
 
 function activeDropdownOptionLocator(step: FlowStep) {
@@ -1458,7 +1468,7 @@ function activeDropdownOptionLocator(step: FlowStep) {
   if (!looksLikeActivePopupOption)
     return undefined;
   return optionLocatorWithTextTokens(
-      `page.locator(${stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item')})`,
+      `page.locator(${stringLiteral('.ant-select-dropdown:visible .ant-select-item-option, .ant-select-dropdown:visible .ant-select-tree-node-content-wrapper, .ant-select-dropdown:visible .ant-select-tree-title, .ant-cascader-dropdown:visible .ant-cascader-menu-item')})`,
       optionName,
   );
 }
@@ -1528,7 +1538,23 @@ function ipAddressValue(address: string) {
 }
 
 function popupOptionName(step: FlowStep) {
-  return generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text);
+  const action = rawAction(step.rawAction);
+  return generatedTextCandidate(
+      step.target?.text,
+      step.target?.name,
+      step.target?.displayName,
+      step.context?.before.target?.text,
+      action.text,
+      action.value,
+      textFromInternalTextSelector(action.selector),
+  );
+}
+
+function textFromInternalTextSelector(selector?: string) {
+  if (!selector)
+    return undefined;
+  const match = selector.match(/internal:text=(["'])(.*?)\1/i);
+  return match?.[2]?.replace(/\\(["'\\])/g, '$1');
 }
 
 function generatedTextCandidate(...values: unknown[]) {
@@ -1567,15 +1593,14 @@ function antdSelectOptionParserSafeSource(step: FlowStep, options: EmitStepOptio
   if (!optionLocator)
     return rawSelectOptionParserSafeSource(step) || `await ${parserSafeLocator('page.locator(".ant-select-item-option")')}.click();`;
   const parserSafeOptionLocator = optionLocatorWithTextTokens(
-      'page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option")',
+      'page.locator(".ant-select-dropdown:visible .ant-select-item-option")',
       optionName,
   );
   const previousStepTargetsField = previousStepAlreadyTargetsAntdSelectField(options.previousStep, step);
-  const previousStepFilledField = previousStepTargetsField && options.previousStep?.action === 'fill';
   const lines = [
     `await ${parserSafeLocator(parserSafeOptionLocator)}.click();`,
   ];
-  if (shouldParserSafeSearchAntdSelectOption(optionName) && !previousStepFilledField)
+  if (shouldParserSafeSearchAntdSelectOption(optionName) && !previousStepTargetsField)
     lines.unshift(`await ${input}.fill(${value});`);
   if (!previousStepTargetsField)
     lines.unshift(`await ${trigger}.click();`);
@@ -1596,7 +1621,7 @@ function parserSafeSelectSearchText(optionName: string) {
 }
 
 function previousStepAlreadyTargetsAntdSelectField(previousStep: FlowStep | undefined, optionStep: FlowStep) {
-  if (!previousStep || !sameFieldIdentity(previousStep, optionStep))
+  if (!previousStep || !sameFieldIdentityIgnoringDialog(previousStep, optionStep))
     return false;
   const source = previousStep.sourceCode || JSON.stringify(rawAction(previousStep.rawAction));
   const role = previousStep.target?.role || previousStep.context?.before.target?.role || '';
@@ -1629,11 +1654,11 @@ function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: 
   const optionName = step ? antdSelectOptionName(step) : undefined;
   return [
     `// AntD Select virtual dropdown replay workaround: locator.click() may hit search input or portal/modal overlays.`,
-    `if (!await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().isVisible().catch(() => false))`,
+    `if (!await page.locator(".ant-select-dropdown:visible").first().isVisible().catch(() => false))`,
     `  await ${triggerLocator}.click();`,
     optionName ? `if (!await ${optionLocator}.first().isVisible().catch(() => false)) {\n  if (await ${triggerLocator}.locator("input").count().catch(() => 0))\n    await ${triggerLocator}.locator("input").first().fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(async () => { await ${triggerLocator}.fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(() => {}); });\n  else\n    await ${triggerLocator}.fill(${stringLiteral(optionName)}, { timeout: 1000 }).catch(() => {});\n}` : undefined,
     antdSelectOptionDispatchSource(optionLocator, optionName),
-    `await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").first().waitFor({ state: "hidden", timeout: 1000 }).catch(() => {});`,
+    `await page.locator(".ant-select-dropdown:visible").first().waitFor({ state: "hidden", timeout: 1000 }).catch(() => {});`,
   ].filter(Boolean).join('\n');
 }
 
@@ -1672,7 +1697,7 @@ function antdSelectFieldLocator(step: FlowStep) {
     return undefined;
   const dialog = selectTriggerDialog(step);
   const root = dialogRootLocator(dialog);
-  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(formItemSearchText(label))} }).locator(${stringLiteral('.ant-select-selector')}).first()`;
+  return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(formItemSearchText(label))} }).locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()`;
 }
 
 function formItemSearchText(label: string) {
@@ -2362,7 +2387,7 @@ function parameterizedActivePopupOptionClick(line: string, step: FlowStep, repla
     return undefined;
   if (!isPopupOptionStep(step))
     return undefined;
-  return activePopupOptionDispatchSource('page.locator(' + stringLiteral('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-node-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-tree-title, .ant-cascader-dropdown:not(.ant-cascader-dropdown-hidden) .ant-cascader-menu-item') + ')', replacement);
+  return activePopupOptionDispatchSource('page.locator(' + stringLiteral('.ant-select-dropdown:visible .ant-select-item-option, .ant-select-dropdown:visible .ant-select-tree-node-content-wrapper, .ant-select-dropdown:visible .ant-select-tree-title, .ant-cascader-dropdown:visible .ant-cascader-menu-item') + ')', replacement);
 }
 
 function isPopupOptionStep(step: FlowStep) {
