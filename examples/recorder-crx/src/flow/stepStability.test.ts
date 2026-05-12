@@ -667,7 +667,8 @@ const tests: TestCase[] = [
       const playback = generateBusinessFlowPlaybackCode(flow);
 
       assert(!code.includes('.fill("xtest16")'), 'exported replay should omit redundant AntD select search fills before the option workaround');
-      assert(code.includes('.ant-select-dropdown:visible'), 'exported replay can use Playwright :visible active dropdown selectors');
+      assert(code.includes('selectOwnedOption(false)'), 'exported replay should check the trigger-owned target option before opening the select');
+      assert(!code.includes('.ant-select-dropdown:visible'), 'exported replay should not rely on global visible AntD dropdowns for trigger-owned option replay');
       assert(!playback.includes("getByText('xtest16:WAN1')"), 'parser-safe replay should dedupe follow-up raw text clicks after selecting the same AntD option');
       assert(playback.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parser-safe replay must keep the current CrxPlayer active option selector contract');
       assert(!playback.includes('.ant-select-dropdown:visible'), 'parser-safe replay must not use exported-only :visible active dropdown selectors before the runtime bridge supports them');
@@ -3925,10 +3926,10 @@ test('demo', async ({ page }) => {
       });
       const code = generateBusinessFlowPlaywrightCode(flow);
       assert(code.includes('for (const row of repeat_1Data)'), 'repeat loop should be emitted');
-      assert(code.includes('.ant-select-dropdown:visible'), 'parameterized popup option should stay scoped to active AntD dropdown');
-      assert(code.includes('.first().evaluate((element, expectedText)'), 'parameterized popup option should dispatch the first filtered active option directly');
-      assert(code.includes('AntD option text mismatch'), 'parameterized popup option should fail on wrong text matches');
-      assert(code.includes('}, String(row.vrf));'), 'popup option should use the row variable as exact expected text');
+      assert(code.includes('selectOwnedOption(false)'), 'parameterized popup option should check the trigger-owned target option before opening');
+      assert(code.includes('ownedRoots()'), 'parameterized popup option should stay scoped to the current trigger-owned dropdown/listbox');
+      assert(code.includes('const expectedText = String(row.vrf);'), 'popup option should use the row variable as exact expected text');
+      assert(code.includes('AntD option not found in trigger-owned dropdown'), 'parameterized popup option should fail when the owned dropdown does not contain the expected option');
       assert(!code.includes('|| elements[elements.length - 1]'), 'popup option must not fall back to the last partial match');
       assert(!code.includes('filter({ hasText: String(row.vrf) }).first().click()'), 'parameterized dropdown option must not use partial first-match clicks');
       assert(!code.includes('page.getByText(String(row.vrf)).click()'), 'parameterized dropdown option must not become a global text click');
@@ -4440,6 +4441,49 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'code preview suppresses modal root clicks even when context control type is polluted',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'create-user-modal',
+            displayName: '新建用户',
+            scope: { dialog: { type: 'modal', title: '新建用户', visible: false } },
+          },
+          context: {
+            eventId: 'ctx-polluted-hidden-create-user-modal',
+            capturedAt: 1010,
+            before: {
+              dialog: { type: 'modal', title: '新建用户', visible: false },
+              target: { tag: 'div', testId: 'create-user-modal', text: '新建用户', normalizedText: '新建用户', controlType: 'select' },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:testid=[data-testid="create-user-modal"s]',
+            },
+          },
+          sourceCode: `await page.getByTestId('create-user-modal').click();`,
+          assertions: [
+            createTerminalStateAssertion('modal-closed', 'a-user-modal-closed', { title: '新建用户' }),
+          ],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('has no runnable Playwright action source'), 'polluted modal root context should still be documented but not replayed');
+      assert(!code.includes('getByTestId("create-user-modal").click()') && !code.includes("getByTestId('create-user-modal').click()"), 'polluted modal root should not become a click target');
+      assert(!code.includes('state: "hidden"'), 'suppressed modal root clicks should not emit premature modal-hidden assertions');
+    },
+  },
+  {
     name: 'exported replay suppresses hidden modal container click after confirm press',
     run: () => {
       const flow: BusinessFlow = {
@@ -4867,9 +4911,10 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      assert(firstStep.includes(`locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option").filter({ hasText: "real-item-a" })`), 'select option should replay through the visible AntD option locator scoped to the active dropdown');
+      assert(firstStep.includes('selectOwnedOption(false)'), 'select option should first test whether the trigger-owned target option is visible');
+      assert(firstStep.includes('ownedRoots()'), 'select option should replay through the dropdown/listbox owned by the current trigger');
       assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'select option should replay through the AntD mouse event fallback');
-      assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'select option replay should wait briefly for the dropdown to close');
+      assert(firstStep.includes('aria-expanded'), 'select option replay should wait briefly for the owning trigger to collapse');
       assert(!firstStep.includes('getByTitle'), 'select option should not replay through brittle title locators');
     },
   },
@@ -4917,7 +4962,7 @@ test('demo', async ({ page }) => {
       const firstStep = stepCodeBlock(code, 's001');
 
       assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'human-like inner option click should still use AntD dropdown replay');
-      assert(firstStep.includes('locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option")'), 'option lookup should be scoped to active dropdown');
+      assert(firstStep.includes('ownedRoots()'), 'option lookup should be scoped to the current trigger-owned dropdown/listbox');
       assert(!firstStep.includes('getByText'), 'human-like option replay must not use ambiguous global text locator');
     },
   },
@@ -5458,9 +5503,9 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'AntD workaround should be documented in generated code');
       assert(firstStep.includes('page.getByTestId("usage-form")'), 'AntD replay should open the trigger from contextual test id before falling back to .last()');
-      assert(firstStep.includes('locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option")'), 'option lookup should be scoped inside the last visible dropdown');
+      assert(firstStep.includes('ownedRoots()'), 'option lookup should be scoped inside the trigger-owned dropdown/listbox');
       assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'AntD replay should keep the explicit mouse event fallback');
-      assert(firstStep.includes('waitFor({ state: "hidden", timeout: 1000 })'), 'AntD replay should wait briefly for the dropdown to close after dispatch');
+      assert(firstStep.includes('aria-expanded'), 'AntD replay should wait briefly for the owning trigger to collapse after dispatch');
     },
   },
   {
@@ -5520,7 +5565,8 @@ test('demo', async ({ page }) => {
       const firstStep = stepCodeBlock(code, 's001');
 
       assert(!firstStep.includes('page.locator(".ant-select-dropdown:visible").first().isVisible()'), 'AntD replay should not treat any visible dropdown as proof that the owning select is open');
-      assert(firstStep.includes('if (!await page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option").filter({ hasText: "审计员" }).first().isVisible().catch(() => false))'), 'AntD replay should test the target option before opening the owning trigger');
+      assert(firstStep.includes('if (!await selectOwnedOption(false))'), 'AntD replay should test the trigger-owned target option before opening the owning trigger');
+      assert(!firstStep.includes('.catch(async error =>'), 'AntD replay should not fall back to a stale global dropdown when owner lookup fails');
       assert(firstStep.includes('page.getByTestId("create-user-form")'), 'AntD replay should still open the owning trigger through the scoped field locator');
     },
   },
@@ -6071,7 +6117,7 @@ test('demo', async ({ page }) => {
       };
 
       const exportedCode = generateBusinessFlowPlaywrightCode(flow);
-      assert(exportedCode.includes('.first().evaluate((element, expectedText)'), 'exported Playwright code should keep the AntD dispatch workaround');
+      assert(exportedCode.includes('selectOwnedOption(true)'), 'exported Playwright code should keep the AntD dispatch workaround');
       assertEqual(countBusinessFlowPlaybackActions(flow), 1);
     },
   },
@@ -6707,7 +6753,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const optionStep = stepCodeBlock(code, 's002');
 
-      assert(optionStep.includes('.ant-select-dropdown:visible'), 'context-light option should use the active dropdown locator');
+      assert(optionStep.includes('selectOwnedOption(false)'), 'context-light option should use trigger-owned option replay');
       assert(!optionStep.includes('getByText(\'生产VRF\')') && !optionStep.includes('getByText("生产VRF")'), 'context-light option should not replay as a page-global text click');
     },
   },
@@ -6784,7 +6830,7 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaywrightCode(flow);
       const optionStep = stepCodeBlock(code, 's002');
 
-      assert(optionStep.includes('.ant-select-dropdown:visible'), 'noisy option click should replay through the active dropdown');
+      assert(optionStep.includes('selectOwnedOption(false)'), 'noisy option click should replay through the trigger-owned dropdown');
       assert(optionStep.includes('WAN1'), 'raw option title should survive noisy page-text capture');
       assert(!optionStep.includes('filter({ hasText: "地址池名称" }).locator(".ant-select-selector")'), 'noisy option click should not be misread as another form select trigger');
       assert(!optionStep.includes('业务流程稳定性测试页 新增IP端口池 校验配置 保存配置 保存后动作'), 'noisy selected-value assertions should not leak page-text capture into generated replay');
