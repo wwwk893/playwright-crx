@@ -7,7 +7,6 @@
 import type { Source } from '@recorder/recorderTypes';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import type { BusinessFlow, FlowActionType, FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowRecorderState, FlowRepeatSegment, FlowStep, FlowTarget, RecordedActionEntry, RecordingSession } from './types';
-import type { UiSemanticContext } from '../uiSemantics/types';
 import { suggestBasicIntent, suggestWaitIntent } from './intentRules';
 import { createEmptyBusinessFlow, flowAssertionId } from './types';
 import { migrateFlowToStableStepModel } from './flowMigration';

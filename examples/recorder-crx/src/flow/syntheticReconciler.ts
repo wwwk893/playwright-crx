@@ -393,6 +393,8 @@ function shouldCreateSyntheticClick(event: PageContextEvent) {
   if (!target)
     return false;
 
+  if (isNonInteractiveOverlayContainerClick(event))
+    return false;
   if (isNonInteractiveStructuralContextTarget(target))
     return false;
   if (target.testId)
@@ -404,6 +406,25 @@ function shouldCreateSyntheticClick(event: PageContextEvent) {
   return !!target.text || !!target.ariaLabel || !!target.placeholder;
 }
 
+function isNonInteractiveOverlayContainerClick(event: PageContextEvent) {
+  const target = event.before.target;
+  if (!target)
+    return false;
+  const dialog = event.before.dialog || event.after?.dialog;
+  const hasDialogEvidence = !!event.before.dialog?.title || !!event.after?.dialog?.title;
+  if (!hasDialogEvidence)
+    return false;
+  const rootByTestId = looksLikeOverlayRootTestId(target.testId || '', dialog?.type);
+  const rootContainerByTestId = rootByTestId && isOverlayRootContainerTag(target) && !hasInteractiveRole(target);
+  if (isInteractiveContextTarget(target, { ignoreActionTestId: true }) && !rootContainerByTestId)
+    return false;
+  const plainContainer = rootContainerByTestId || isPlainOverlayContainerTarget(target, dialog?.type);
+  if (!plainContainer)
+    return false;
+  const rootByText = looksLikeOverlayRootText(target, dialog?.title);
+  return rootByTestId || rootByText;
+}
+
 function isNonInteractiveStructuralContextTarget(target: ElementContext) {
   if (isInteractiveContextTarget(target))
     return false;
@@ -412,11 +433,57 @@ function isNonInteractiveStructuralContextTarget(target: ElementContext) {
     /card|section|container|wrapper|region/i.test(target.framework === 'procomponents' || target.framework === 'antd' ? String(target.testId || '') : '');
 }
 
-function isInteractiveContextTarget(target: ElementContext) {
+function isInteractiveContextTarget(target: ElementContext, options: { ignoreActionTestId?: boolean } = {}) {
   const testId = target.testId || '';
-  return /^(button|link|checkbox|radio|switch|combobox|option|menuitem|tab|treeitem)$/i.test(target.role || '') ||
-    /^(button|table-row-action|checkbox|radio|switch|select|tree-select|cascader|select-option|tree-select-option|cascader-option|menu-item|tab|date-picker|upload|input|textarea)$/i.test(target.controlType || '') ||
+  return hasInteractiveRoleOrControlType(target) ||
+    !options.ignoreActionTestId &&
     looksLikeActionTestId(testId);
+}
+
+function hasInteractiveRoleOrControlType(target: ElementContext) {
+  return /^(button|link|checkbox|radio|switch|combobox|select|option|menuitem|tab|treeitem|textbox)$/i.test(target.role || '') ||
+    /^(button|link|table-row-action|checkbox|radio|switch|select|tree-select|cascader|select-option|tree-select-option|cascader-option|menu-item|dropdown-trigger|tab|date-picker|upload|input|textarea)$/i.test(target.controlType || '');
+}
+
+function hasInteractiveRole(target: ElementContext) {
+  return /^(button|link|checkbox|radio|switch|combobox|select|option|menuitem|tab|treeitem|textbox)$/i.test(target.role || '');
+}
+
+function isPlainOverlayContainerTarget(target: ElementContext, dialogType?: string) {
+  const tag = target.tag || '';
+  const role = target.role || '';
+  const controlType = target.controlType || '';
+  if (controlType && controlType !== 'unknown')
+    return false;
+  if (role && !/^(dialog|region|presentation|none|group)$/i.test(role))
+    return false;
+  return /^(div|section|article|main|aside)$/i.test(tag) ||
+    /^(dialog|region|presentation|none|group)$/i.test(role) ||
+    looksLikeOverlayRootTestId(target.testId || '', dialogType);
+}
+
+function isOverlayRootContainerTag(target: ElementContext) {
+  return /^(div|section|article|main|aside)$/i.test(target.tag || '');
+}
+
+function looksLikeOverlayRootTestId(testId: string, dialogType?: string) {
+  if (!testId)
+    return false;
+  if (/(^|[-_])(modal|dialog|drawer|popover|overlay)([-_]|$)/i.test(testId))
+    return true;
+  return /(^|[-_])(container|wrapper|region|root)([-_]|$)/i.test(testId) &&
+    /^(modal|dialog|drawer|popover)$/i.test(dialogType || '');
+}
+
+function looksLikeOverlayRootText(target: ElementContext, dialogTitle?: string) {
+  const text = normalizePageContextText(target.normalizedText || target.text || target.title);
+  const title = normalizePageContextText(dialogTitle);
+  return !!text && !!title && (text === title || text.includes(title)) &&
+    /^(div|section|article|main|aside)$/i.test(target.tag || '');
+}
+
+function normalizePageContextText(value?: string) {
+  return value?.replace(/\s+/g, '').trim();
 }
 
 function hasSyntheticStepForEvent(steps: FlowStep[], event: PageContextEvent) {
@@ -671,10 +738,6 @@ export function moveEarlierTimedStepsBeforeLaterSyntheticClicks(steps: FlowStep[
   return ordered;
 }
 
-function draftWallTime(draft: StepDraft) {
-  return draft.entries.map(entry => entry.wallTime).find((value): value is number => typeof value === 'number');
-}
-
 export function upgradeSyntheticStepsCoveredByRecordedDrafts(steps: FlowStep[], drafts: StepDraft[]) {
   const nextSteps = [...steps];
   const remainingDrafts: StepDraft[] = [];
@@ -866,4 +929,3 @@ function firstMatch(match: RegExpMatchArray | null) {
 function cleanupSelectorText(value?: string) {
   return value?.replace(/\\(["'])/g, '$1').trim();
 }
-
