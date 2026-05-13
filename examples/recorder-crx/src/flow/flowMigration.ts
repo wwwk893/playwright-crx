@@ -34,7 +34,7 @@ export function migrateFlowToStableStepModel(flow: BusinessFlow): BusinessFlow {
           sessionId: 'legacy',
           sessionIndex: index,
           recorderIndex: index,
-          signature: legacySignature(step.rawAction, step.sourceCode, index),
+          signature: legacySignature(step.rawAction, index),
           rawAction: step.rawAction,
           sourceCode: step.sourceCode,
           createdAt: flow.createdAt,
@@ -53,11 +53,23 @@ export function migrateFlowToStableStepModel(flow: BusinessFlow): BusinessFlow {
 
   const migrated: BusinessFlow = {
     ...flow,
+    artifacts: stripDeprecatedLegacyArtifacts(flow.artifacts),
     steps: recomputeOrders(steps),
     repeatSegments: migrateRepeatSegments(flow.repeatSegments, stepIdMap),
   };
   appendRecorderActionEvents(recorder, recorder.actionLog);
   return withRecorderState(migrated, recorder);
+}
+
+export function stripDeprecatedLegacyArtifacts(artifacts: BusinessFlow['artifacts']): BusinessFlow['artifacts'] {
+  if (!artifacts)
+    return artifacts;
+  const cleaned = { ...artifacts };
+  delete cleaned.deletedActionIndexes;
+  delete cleaned.deletedActionSignatures;
+  delete cleaned.stepActionIndexes;
+  delete cleaned.stepMergedActionIndexes;
+  return cleaned;
 }
 
 function migrateRepeatSegments(segments: FlowRepeatSegment[] | undefined, stepIdMap: Map<string, string>): FlowRepeatSegment[] {
@@ -81,10 +93,10 @@ function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function legacySignature(rawAction: unknown, sourceCode: string | undefined, index: number) {
+function legacySignature(rawAction: unknown, index: number) {
   try {
-    return JSON.stringify(rawAction) || sourceCode || `legacy-${index}`;
+    return JSON.stringify(rawAction) || `legacy-${index}`;
   } catch {
-    return sourceCode || `legacy-${index}`;
+    return `legacy-${index}`;
   }
 }

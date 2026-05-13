@@ -274,7 +274,9 @@ interface RecordedActionEntry {
 
 `artifacts.recorder` 是内部状态，只用于草稿/记录恢复和继续录制稳定性。导出 `business-flow.json`、`compact-flow.yaml`、Playwright code preview 时都不能依赖或暴露 action log。
 
-迁移期允许旧记录中存在以下 legacy 字段，但新逻辑不应再写入它们作为身份来源：
+PR-12 后仅为旧文件导入兼容而允许以下 legacy 字段存在。导入/归一化时必须先迁移到
+`steps[].sourceActionIds` 与 `artifacts.recorder.actionLog`，随后从内存态和导出态剥离；
+新逻辑不应再写入它们，也不应读取它们作为行为或身份来源：
 
 ```text
 deletedActionIndexes

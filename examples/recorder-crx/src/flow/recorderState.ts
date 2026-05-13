@@ -10,16 +10,19 @@ import { maxActionSeq, maxStepSeq } from './stableIds';
 
 export function cloneRecorderState(flow: BusinessFlow): FlowRecorderState {
   const legacy = flow.artifacts?.recorder as Partial<FlowRecorderState> | undefined;
+  const adaptiveTargets = legacy?.adaptiveTargets ? { ...legacy.adaptiveTargets } : undefined;
   const recorder: FlowRecorderState = legacy?.actionLog ? {
     version: 3,
     actionLog: [...legacy.actionLog],
     eventJournal: cloneEventJournal(legacy.eventJournal),
+    adaptiveTargets,
     nextActionSeq: legacy.nextActionSeq ?? 1,
     nextStepSeq: legacy.nextStepSeq ?? 1,
     sessions: [...(legacy.sessions ?? [])],
   } : {
     version: 3,
     actionLog: legacyActionLog(flow),
+    adaptiveTargets,
     nextActionSeq: 1,
     nextStepSeq: 1,
     sessions: [],

@@ -14,6 +14,7 @@ import { projectBusinessFlow } from './businessFlowProjection';
 import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
+import { migrateFlowToStableStepModel } from './flowMigration';
 import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult } from './syntheticReconciler';
 import { buildRecipeForStep } from '../replay/recipeBuilder';
 import { createAdaptiveTargetSnapshot, withAdaptiveTargetSnapshot } from './adaptiveTargetSnapshot';
@@ -8573,6 +8574,57 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'legacy action index artifacts migrate to recorder action log and are stripped',
+    run: () => {
+      const legacyFlow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: { text: '保存' },
+          rawAction: { action: { name: 'click', selector: '#legacy-save' } },
+          sourceCode: 'await page.locator("#legacy-save-source-only").click();',
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          action: 'fill',
+          target: { label: '名称' },
+          value: 'legacy-name',
+          rawAction: { action: { name: 'fill', selector: '#legacy-name', text: 'legacy-name' } },
+          sourceCode: 'await page.locator("#legacy-name").fill("legacy-name");',
+          assertions: [],
+        }],
+        artifacts: {
+          deletedActionIndexes: [1],
+          deletedActionSignatures: { '1': 'legacy-delete' },
+          stepActionIndexes: { s001: 2 },
+          stepMergedActionIndexes: { s002: [4, 5] },
+        },
+      };
+
+      const migrated = migrateFlowToStableStepModel(legacyFlow);
+      const recorder = migrated.artifacts?.recorder;
+      assert(recorder, 'legacy indexes should be migrated into recorder state');
+      assertEqual(migrated.steps[0].sourceActionIds?.length, 1);
+      assertEqual(migrated.steps[1].sourceActionIds?.length, 2);
+      assertEqual(recorder?.actionLog.map(action => action.recorderIndex).join(','), '2,4,5');
+      assert(!recorder?.actionLog.some(action => action.signature.includes('legacy-save-source-only')), 'sourceCode must not be used as legacy identity');
+      assert(!migrated.artifacts?.deletedActionIndexes, 'normalization should strip deletedActionIndexes');
+      assert(!migrated.artifacts?.deletedActionSignatures, 'normalization should strip deletedActionSignatures');
+      assert(!migrated.artifacts?.stepActionIndexes, 'normalization should strip stepActionIndexes');
+      assert(!migrated.artifacts?.stepMergedActionIndexes, 'normalization should strip stepMergedActionIndexes');
+
+      const cleared = clearFlowRecordingHistory(migrated);
+      assert(!cleared.artifacts?.deletedActionIndexes, 'clear history should not write deletedActionIndexes');
+      assert(!cleared.artifacts?.deletedActionSignatures, 'clear history should not write deletedActionSignatures');
+      assert(!cleared.artifacts?.stepActionIndexes, 'clear history should not write stepActionIndexes');
+      assert(!cleared.artifacts?.stepMergedActionIndexes, 'clear history should not write stepMergedActionIndexes');
+      assertEqual(cleared.artifacts?.recorder?.actionLog.length, 0);
+    },
+  },
+  {
     name: 'semantic export compact yaml and AI input use compact whitelist only',
     run: () => {
       const flow = mergeActionsIntoFlow(createNamedFlow(), [clickAction('保存')], [], {});
@@ -9126,6 +9178,8 @@ test('demo', async ({ page }) => {
       assert(stored, 'snapshot should be stored under recorder internals');
       assertEqual(stored?.capturedAt, '2026-01-01T00:00:00.000Z');
       assert(!(flow.artifacts as any)?.adaptiveTargets, 'snapshot should not be stored as a top-level artifact');
+      const normalized = migrateFlowToStableStepModel(flow);
+      assert(normalized.artifacts?.recorder?.adaptiveTargets?.s001, 'normalization should preserve internal adaptive target snapshots');
     },
   },
   {
