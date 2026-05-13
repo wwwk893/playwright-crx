@@ -57,32 +57,38 @@ function assertReplayVerification(verification: GeneratedReplayVerification) {
 
 function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo, verificationLines: string[]) {
   const rawReplayRoot = path.join(__dirname, '..', '..', '.raw-generated-replay');
+  const repoRoot = path.join(__dirname, '..', '..', '..');
   fs.mkdirSync(rawReplayRoot, { recursive: true });
   const rawReplayDir = fs.mkdtempSync(path.join(rawReplayRoot, `${testInfo.workerIndex}-`));
   const specPath = path.join(rawReplayDir, 'generated-replay.spec.ts');
   const configPath = path.join(rawReplayDir, 'playwright.raw-replay.config.ts');
+  const outputPath = path.join(rawReplayDir, 'raw-replay-output.txt');
   const specSource = appendReplayVerification(code, verificationLines);
   fs.writeFileSync(specPath, specSource);
   fs.writeFileSync(configPath, [
     `import { defineConfig, devices } from '@playwright/test';`,
     `export default defineConfig({`,
+    `  testDir: ${JSON.stringify(rawReplayDir)},`,
+    `  outputDir: ${JSON.stringify(path.join(rawReplayDir, 'test-results'))},`,
     `  timeout: 120000,`,
     `  workers: 1,`,
-    `  reporter: 'line',`,
-    `  use: { ...devices['Desktop Chrome'], baseURL: ${JSON.stringify(rawReplayBaseURL())} },`,
+    `  retries: 0,`,
+    `  preserveOutput: 'always',`,
+    `  reporter: [['line']],`,
+    `  use: { ...devices['Desktop Chrome'], baseURL: ${JSON.stringify(rawReplayBaseURL())}, trace: 'off', screenshot: 'off', video: 'off' },`,
     `});`,
     ``,
   ].join('\n'));
-  const result = spawnSync('npx', ['playwright', 'test', specPath, '--config', configPath, '--workers=1', '--reporter=line'], {
-    cwd: path.join(__dirname, '..', '..'),
+  const result = spawnSync('npx', ['playwright', 'test', specPath, '--config', configPath], {
+    cwd: repoRoot,
     env: { ...process.env, CI: '0' },
     encoding: 'utf8',
     timeout: 180_000,
   });
-  const output = `${result.stdout || ''}${result.stderr || ''}`;
-  fs.writeFileSync(path.join(rawReplayDir, 'raw-replay-output.txt'), output);
-  if (result.status !== 0)
-    throw new Error(`Generated Playwright source failed as a standalone spec (exit ${result.status}). See ${rawReplayDir}/raw-replay-output.txt\n${output}`);
+  const output = `${result.stdout || ''}${result.stderr || ''}${result.error ? `\n${result.error.stack || result.error.message}` : ''}`;
+  fs.writeFileSync(outputPath, output);
+  if (result.status !== 0 || result.error)
+    throw new Error(`Generated Playwright source failed as a standalone spec (exit ${result.status}). See ${outputPath}\n${output}`);
 }
 
 function rawReplayBaseURL() {

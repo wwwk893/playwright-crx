@@ -29,6 +29,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
   const emittedRepeatStepIds = new Set<string>();
   let lastDropdownOptionIdentity = '';
   let lastDropdownOptionCompact = '';
+  let previousEmittedStep: FlowStep | undefined;
   for (const [index, step] of effectiveFlow.steps.entries()) {
     const nextEffectiveStep = nextEffectiveStepForRedundantAction(effectiveFlow.steps, index, 'exported');
     const segment = (effectiveFlow.repeatSegments ?? []).find(segment => firstSegmentStepId(effectiveFlow, segment) === step.id);
@@ -42,6 +43,8 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
     if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantExportedSelectFieldAction(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
+      continue;
+    if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -57,7 +60,8 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       lastDropdownOptionCompact = '';
     }
 
-    emitStep(lines, step, '  ', undefined, undefined, { previousStep: effectiveFlow.steps[index - 1], nextStep: effectiveFlow.steps[index + 1] });
+    emitStep(lines, step, '  ', undefined, undefined, { previousStep: previousEmittedStep, nextStep: effectiveFlow.steps[index + 1] });
+    previousEmittedStep = step;
   }
 
   lines.push('});');
@@ -88,7 +92,9 @@ export function generateBusinessFlowPlaybackCode(flow: BusinessFlow) {
       continue;
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectTriggerFocusClick(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
+    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantParserSafeSelectFieldAction(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
+      continue;
+    if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -128,7 +134,9 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
         let previousSegmentStep: FlowStep | undefined;
         for (const [stepIndex, segmentStep] of segmentSteps.entries()) {
           const nextEffectiveSegmentStep = nextEffectiveStepForRedundantAction(segmentSteps, stepIndex, 'parserSafe');
-          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) || isPlaceholderSelectOptionClick(segmentStep) || isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) || isRedundantSelectTriggerFocusClick(segmentStep, nextEffectiveSegmentStep) || isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isHiddenDialogContainerClickAfterConfirm(segmentStep, segmentSteps[stepIndex - 1]))
+          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) || isPlaceholderSelectOptionClick(segmentStep) || isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) || isRedundantParserSafeSelectFieldAction(segmentStep, nextEffectiveSegmentStep) || isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isHiddenDialogContainerClickAfterConfirm(segmentStep, segmentSteps[stepIndex - 1]))
+            continue;
+          if (isTruncatedSelectedValueDisplayEchoClick(segmentStep, previousSegmentStep))
             continue;
           count += countStepActions(segmentStep, { parserSafe: true, previousStep: previousSegmentStep, nextStep: segmentSteps[stepIndex + 1] });
           previousSegmentStep = segmentStep;
@@ -142,7 +150,9 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
       continue;
     const nextEffectiveStep = nextEffectiveStepForRedundantAction(effectiveFlow.steps, index, 'parserSafe');
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantSelectTriggerFocusClick(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
+    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantParserSafeSelectFieldAction(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
+      continue;
+    if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
       continue;
     if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
       continue;
@@ -521,8 +531,9 @@ function withInheritedAntdSelectOptionContext(flow: BusinessFlow): BusinessFlow 
 
 function inheritedAntdSelectOptionStep(step: FlowStep, activeSelectStep: FlowStep, activeSelectQuery = '') {
   const rawOptionTitle = rawSelectOptionTitle(step);
+  const recordedOptionText = recordedActiveDropdownOptionTextFromSource(step.sourceCode || '');
   const query = activeSelectQuery || selectQueryForStep(activeSelectStep);
-  const optionText = completeOptionTextFromSelectQuery(rawOptionTitle || step.target?.text || step.target?.name || step.target?.displayName || '', query) || rawOptionTitle || step.target?.text || step.target?.name || step.target?.displayName;
+  const optionText = completeOptionTextFromSelectQuery(rawOptionTitle || recordedOptionText || step.target?.text || step.target?.name || step.target?.displayName || '', query) || rawOptionTitle || recordedOptionText || step.target?.text || step.target?.name || step.target?.displayName;
   const activeForm = selectStepFormContext(activeSelectStep);
   return {
     ...step,
@@ -619,7 +630,10 @@ function comboboxNameFromSource(source: string) {
 }
 
 function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: FlowStep, inheritedQuery = '') {
-  if (step.action !== 'click' || isAntdSelectOptionStep(step))
+  if (step.action !== 'click')
+    return false;
+  const isRecordedActiveDropdownSource = isRecordedActiveAntdSelectOptionSource(step.sourceCode || '');
+  if (isAntdSelectOptionStep(step) && !isRecordedActiveDropdownSource)
     return false;
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   if (/^(checkbox|radio|switch)$/.test(controlType) || /^(checkbox|radio|switch)$/.test(step.target?.role || ''))
@@ -627,11 +641,12 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
   if (/^(tree-select-option|cascader-option|menu-item)$/.test(controlType))
     return false;
   const rawTitle = rawSelectOptionTitle(step);
-  const optionText = rawTitle || step.target?.text || step.target?.name || step.target?.displayName;
+  const recordedOptionText = recordedActiveDropdownOptionTextFromSource(step.sourceCode || '');
+  const optionText = rawTitle || recordedOptionText || step.target?.text || step.target?.name || step.target?.displayName;
   if (!optionText)
     return false;
   const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
-  if (selector && !selector.includes('internal:text') && !/getByText|text=|getByTitle/.test(step.sourceCode || '') && !/internal:attr=\[title=.*>>/.test(selector))
+  if (selector && !selector.includes('internal:text') && !/getByText|text=|getByTitle|hasText/.test(step.sourceCode || '') && !/internal:attr=\[title=.*>>/.test(selector) && !isRecordedActiveDropdownSource)
     return false;
   const query = inheritedQuery || selectQueryForStep(selectStep);
   return !query || optionText.includes(query) || !!completeOptionTextFromSelectQuery(optionText, query);
@@ -663,16 +678,20 @@ function emitRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRep
   lines.push(`  for (const row of ${segmentDataName(segment)}) {`);
   const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
   const segmentHasNonPlaceholderStep = segmentSteps.some(step => !isPlaceholderSelectOptionClick(step));
+  let previousEmittedStep: FlowStep | undefined;
   for (const [index, step] of segmentSteps.entries()) {
     const nextEffectiveStep = nextEffectiveStepForRedundantAction(segmentSteps, index, 'exported');
     if (isIntermediateSameFieldFill(step, segmentSteps, index) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantExportedSelectFieldAction(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, segmentSteps[index - 1]))
+      continue;
+    if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
       continue;
     if (isPlaceholderSelectOptionClick(step)) {
       if (!segmentHasNonPlaceholderStep)
         emitSkippedPlaceholderSelectOption(lines, step, '    ');
       continue;
     }
-    emitStep(lines, step, '    ', segment, undefined, { previousStep: segmentSteps[index - 1], nextStep: segmentSteps[index + 1] });
+    emitStep(lines, step, '    ', segment, undefined, { previousStep: previousEmittedStep, nextStep: segmentSteps[index + 1] });
+    previousEmittedStep = step;
   }
   const repeatAssertion = renderRepeatAssertionTemplate(segment);
   if (repeatAssertion)
@@ -699,7 +718,9 @@ function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment:
     let previousEmittedStep: FlowStep | undefined;
     for (const [index, step] of segmentSteps.entries()) {
       const nextEffectiveStep = nextEffectiveStepForRedundantAction(segmentSteps, index, 'parserSafe');
-      if (isIntermediateSameFieldFill(step, segmentSteps, index) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantSelectTriggerFocusClick(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, segmentSteps[index - 1]))
+      if (isIntermediateSameFieldFill(step, segmentSteps, index) || isRedundantFieldFocusClick(step, segmentSteps[index + 1]) || isRedundantParserSafeSelectFieldAction(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, segmentSteps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, segmentSteps[index - 1]))
+        continue;
+      if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
         continue;
       if (isPlaceholderSelectOptionClick(step)) {
         if (!segmentHasNonPlaceholderStep)
@@ -796,7 +817,7 @@ function isSkippedByRedundantActionLookahead(step: FlowStep, steps: FlowStep[], 
     return true;
   if (mode === 'exported' && isRedundantExportedSelectFieldAction(step, nextStep))
     return true;
-  if (mode === 'parserSafe' && isRedundantSelectTriggerFocusClick(step, nextStep))
+  if (mode === 'parserSafe' && isRedundantParserSafeSelectFieldAction(step, nextStep))
     return true;
   if (isRedundantSelectSearchClear(step, previousStep) || isRedundantDropdownEscape(step, previousStep))
     return true;
@@ -829,8 +850,38 @@ function isRedundantSelectFieldAction(step: FlowStep, nextStep?: FlowStep) {
 
 function isRedundantExportedSelectFieldAction(step: FlowStep, nextStep?: FlowStep) {
   return isRedundantSelectFieldAction(step, nextStep) ||
+    isRedundantCascaderSearchFillBeforePath(step, nextStep) ||
     isRedundantSelectTriggerFocusClick(step, nextStep) ||
     isRedundantExportedSelectTriggerBeforeOption(step, nextStep);
+}
+
+function isRedundantParserSafeSelectFieldAction(step: FlowStep, nextStep?: FlowStep) {
+  return isRedundantSelectTriggerFocusClick(step, nextStep) ||
+    isRedundantEmptySelectSearchFillBeforeOption(step, nextStep);
+}
+
+function isRedundantEmptySelectSearchFillBeforeOption(step: FlowStep, nextStep?: FlowStep) {
+  if (step.action !== 'fill' || !nextStep || step.assertions.some(assertion => assertion.enabled))
+    return false;
+  const value = String(step.value ?? rawAction(step.rawAction).text ?? rawAction(step.rawAction).value ?? '');
+  if (value !== '')
+    return false;
+  if (!isAntdSelectFieldStep(step, nextStep))
+    return false;
+  return looksLikeDropdownOptionStepForDedup(nextStep) && sameFieldIdentityIgnoringDialog(step, nextStep);
+}
+
+function isRedundantCascaderSearchFillBeforePath(step: FlowStep, nextStep?: FlowStep) {
+  if (step.action !== 'fill' || !nextStep || step.assertions.some(assertion => assertion.enabled))
+    return false;
+  if (!isAntdSelectFieldStep(step, nextStep))
+    return false;
+  const path = cascaderOptionPath(nextStep);
+  if (path.length < 2)
+    return false;
+  const filledValue = normalizeGeneratedText(String(step.value ?? rawAction(step.rawAction).text ?? rawAction(step.rawAction).value ?? '')) || '';
+  const leafValue = normalizeGeneratedText(path[path.length - 1]) || '';
+  return !!filledValue && !!leafValue && (filledValue === leafValue || leafValue.includes(filledValue) || filledValue.includes(leafValue));
 }
 
 function isRedundantExportedSelectTriggerBeforeOption(step: FlowStep, nextStep?: FlowStep) {
@@ -860,14 +911,27 @@ function isRedundantSelectedValueDisplayClick(step: FlowStep, previousStep?: Flo
   const clickedText = normalizeGeneratedText(selectedDisplayClickText(step) || '') || '';
   if (!selectedText || !clickedText)
     return false;
-  if (selectedText !== clickedText && compactDropdownOptionIdentity(selectedText) !== compactDropdownOptionIdentity(clickedText))
+  const isExactOrCompactMatch = selectedText === clickedText || compactDropdownOptionIdentity(selectedText) === compactDropdownOptionIdentity(clickedText);
+  const isTruncatedSelectedEcho = selectedText.startsWith(clickedText) && clickedText.length >= 4;
+  if (!isExactOrCompactMatch && !isTruncatedSelectedEcho)
     return false;
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
   if (!/getByText|internal:text=|text=/.test(source))
     return false;
-  if (!sameFieldIdentityIgnoringDialog(step, previousStep) && !hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText))
+  if (!sameFieldIdentityIgnoringDialog(step, previousStep) && !hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText))
     return false;
   return true;
+}
+
+function isTruncatedSelectedValueDisplayEchoClick(step: FlowStep, previousStep?: FlowStep) {
+  if (!isRedundantSelectedValueDisplayClick(step, previousStep))
+    return false;
+  const selectedText = normalizeGeneratedText(String(previousStep?.value || previousStep?.uiRecipe?.optionText || '')) || '';
+  const clickedText = normalizeGeneratedText(selectedDisplayClickText(step) || '') || '';
+  return !!selectedText && !!clickedText &&
+    selectedText.startsWith(clickedText) &&
+    selectedText !== clickedText &&
+    compactDropdownOptionIdentity(selectedText) !== compactDropdownOptionIdentity(clickedText);
 }
 
 function selectedDisplayClickText(step: FlowStep) {
@@ -884,7 +948,7 @@ function selectedDisplayClickText(step: FlowStep) {
   );
 }
 
-function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep: FlowStep, selectedText: string) {
+function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep: FlowStep, selectedText: string, clickedText?: string) {
   const previousTestIds = uniqueValues([
     previousStep.target?.testId,
     previousStep.context?.before.form?.testId,
@@ -898,7 +962,10 @@ function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep:
     if (assertion.type !== 'selected-value-visible' || !assertion.enabled)
       return false;
     const expected = normalizeGeneratedText(stringParam(assertion.expected || assertion.params?.expected) || '');
-    if (!expected || expected !== normalizedSelectedText)
+    const normalizedClickedText = normalizeGeneratedText(clickedText || '') || '';
+    const matchesSelectedText = expected === normalizedSelectedText;
+    const matchesTruncatedClickedText = !!normalizedClickedText && expected === normalizedClickedText && normalizedSelectedText?.startsWith(normalizedClickedText) && normalizedClickedText.length >= 4;
+    if (!expected || (!matchesSelectedText && !matchesTruncatedClickedText))
       return false;
     const assertionTargetTestId = stringParam(assertion.params?.targetTestId || assertion.target?.testId);
     return !!assertionTargetTestId && previousTestIds.includes(assertionTargetTestId);
@@ -1247,6 +1314,9 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
       const treeOption = antdTreeSelectOptionLocator(step, options);
       if (treeOption)
         return options.parserSafe ? `await ${treeOption}.click();` : antdPopupOptionClickSource(step, treeOption, { clickFirstMatch: true });
+      const cascaderPath = antdCascaderPathClickSource(step, options);
+      if (cascaderPath)
+        return cascaderPath;
       const cascaderOption = antdCascaderOptionLocator(step, options);
       if (cascaderOption)
         return options.parserSafe ? `await ${cascaderOption}.click();\nawait page.waitForTimeout(120);` : antdPopupOptionClickSource(step, cascaderOption, { stabilizeAfterClickMs: 120, clickFirstMatch: true });
@@ -1289,8 +1359,12 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
     case 'uncheck':
       return selector ? `await ${locatorExpressionForSelector(selector)}.uncheck();` : undefined;
     case 'select':
-    case 'selectOption':
+    case 'selectOption': {
+      const projectedAntdSelectOption = projectedAntdSelectOptionSource(step, options);
+      if (projectedAntdSelectOption)
+        return projectedAntdSelectOption;
       return selector ? `await ${locatorExpressionForSelector(selector)}.selectOption(${stringLiteral(action.options?.[0] ?? step.value ?? '')});` : undefined;
+    }
     case 'setInputFiles':
     case 'upload':
       return selector ? `await ${locatorExpressionForSelector(selector)}.setInputFiles(${stringLiteral(action.files?.[0] ?? step.value ?? '')});` : undefined;
@@ -1573,11 +1647,12 @@ function modalConfirmButtonLocator(step: FlowStep) {
   if (!label || !isLikelyDialogConfirmButton(label))
     return undefined;
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  const nameSource = buttonNameSource(label);
   if (dialog?.testId)
-    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole("button", { name: ${stringLiteral(label)} })`;
+    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole("button", { name: ${nameSource} })`;
   if (isPersistentDialog(dialog) && dialog?.title)
-    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).filter({ hasText: ${stringLiteral(dialog.title)} }).getByRole("button", { name: ${stringLiteral(label)} })`;
-  return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).last().getByRole("button", { name: ${stringLiteral(label)} })`;
+    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).filter({ hasText: ${stringLiteral(dialog.title)} }).getByRole("button", { name: ${nameSource} })`;
+  return `page.locator(${stringLiteral('.ant-modal, .ant-drawer, [role="dialog"]')}).last().getByRole("button", { name: ${nameSource} })`;
 }
 
 function dialogConfirmLabel(step: FlowStep) {
@@ -1618,7 +1693,7 @@ function isAntdSelectOptionStep(step: FlowStep) {
     return false;
   if (/^(select|tree-select|cascader)$/.test(controlType || '') && role !== 'option')
     return false;
-  const hasAntdSelector = /\.ant-select-item-option|\.ant-select-dropdown/.test(selector);
+  const hasAntdSelector = /\.ant-select-item-option|\.ant-select-dropdown/.test(selector) || isRecordedActiveAntdSelectOptionSource(step.sourceCode || '');
   const hasRawTitle = !!rawSelectOptionTitle(step);
   const fieldLabel = step.context?.before.form?.label || step.target?.scope?.form?.label || step.target?.label;
   if (/tree-select-option|cascader-option/.test(controlType || ''))
@@ -1631,6 +1706,13 @@ function isAntdSelectOptionStep(step: FlowStep) {
     hasAntdSelector ||
     isFormScopedDropdownOption ||
     (hasRawTitle && controlType === 'select-option' && (framework === 'antd' || framework === 'procomponents'));
+}
+
+function isRecordedActiveAntdSelectOptionSource(sourceCode: string) {
+  return /ant-select-dropdown(?::visible|:not\(\.ant-select-dropdown-hidden\))/.test(sourceCode) &&
+    /\.ant-select-item-option/.test(sourceCode) &&
+    /\.filter\(\{\s*hasText:/.test(sourceCode) &&
+    /\.click\(\)/.test(sourceCode);
 }
 
 function isOrdinaryFormLabelClick(step: FlowStep) {
@@ -1678,6 +1760,47 @@ function antdCascaderOptionLocator(step: FlowStep, options: EmitStepOptions = {}
     ? `page.locator("${activeCascaderDropdownSelector(options)} .ant-cascader-menu-item")`
     : `page.locator("${activeCascaderDropdownSelector(options)}").last().locator(".ant-cascader-menu-item")`;
   return `${root}.filter({ hasText: ${stringLiteral(optionName)} })`;
+}
+
+function antdCascaderPathClickSource(step: FlowStep, options: EmitStepOptions = {}) {
+  if (options.parserSafe)
+    return undefined;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const selector = rawAction(step.rawAction).selector || step.target?.selector || step.target?.locator || '';
+  if (controlType !== 'cascader-option' && !/ant-cascader-menu-item/.test(selector))
+    return undefined;
+  const path = cascaderOptionPath(step);
+  if (path.length < 2)
+    return undefined;
+  const optionRows = `page.locator("${activeCascaderDropdownSelector(options)}").last().locator(".ant-cascader-menu-item")`;
+  const firstOption = `${optionRows}.filter({ hasText: ${stringLiteral(path[0])} })`;
+  const trigger = popupOptionTriggerLocator(step);
+  const lines = [
+    trigger ? `if (!await ${firstOption}.first().isVisible().catch(() => false))\n  await ${trigger}.click();` : undefined,
+  ];
+  for (const part of path) {
+    lines.push(activePopupOptionDispatchSource(optionRows, stringLiteral(part)));
+    lines.push('await page.waitForTimeout(120);');
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
+function cascaderOptionPath(step: FlowStep) {
+  const action = rawAction(step.rawAction);
+  const contextPath = step.context?.before.target?.optionPath ||
+    step.context?.before.ui?.option?.path ||
+    step.uiRecipe?.option?.path ||
+    action.optionPath;
+  if (Array.isArray(contextPath)) {
+    const cleanPath = contextPath
+        .filter(value => typeof value === 'string')
+        .map(value => normalizeGeneratedText(value))
+        .filter((value): value is string => !!value && !isSerializedObjectText(value));
+    if (cleanPath.length > 1)
+      return cleanPath;
+  }
+  const optionName = generatedTextCandidate(step.target?.text, step.target?.name, step.target?.displayName, step.context?.before.target?.text);
+  return optionName?.split(/\s*\/\s*/).map(part => normalizeGeneratedText(part)).filter((part): part is string => !!part) ?? [];
 }
 
 function activeDropdownOptionLocator(step: FlowStep, options: EmitStepOptions = {}) {
@@ -1849,9 +1972,9 @@ function antdSelectOptionParserSafeSource(step: FlowStep, options: EmitStepOptio
     return rawSelectOptionParserSafeSource(step) || `await ${parserSafeLocator(antdSelectOptionLocator(step) || activeDropdownOptionLocator(step) || 'page.locator(".ant-select-item-option")')}.click();`;
   const trigger = parserSafeLocator(field);
   const input = `${trigger}.locator(${stringLiteral('input:visible')})`;
-  const value = stringLiteral(parserSafeSelectSearchText(optionName));
+  const value = stringLiteral(parserSafeSelectSearchTextForStep(step, optionName));
   const optionLocator = antdSelectOptionLocator(step, options) || activeDropdownOptionLocator(step, options);
-  if (!optionLocator)
+  if (!optionLocator && !isAntdProjectedSelectStep(step))
     return rawSelectOptionParserSafeSource(step) || `await ${parserSafeLocator('page.locator(".ant-select-item-option")')}.click();`;
   const parserSafeOptionLocator = optionLocatorWithTextTokens(
       `page.locator("${activeSelectDropdownSelector({ parserSafe: true })} .ant-select-item-option")`,
@@ -1882,6 +2005,16 @@ function parserSafeSelectSearchText(optionName: string) {
   return tokens[0] || optionTextTokens(optionName)[0] || optionName;
 }
 
+function parserSafeSelectSearchTextForStep(step: FlowStep, optionName: string) {
+  return projectedSelectSearchText(step) || parserSafeSelectSearchText(optionName);
+}
+
+function projectedSelectSearchText(step?: FlowStep) {
+  if (step?.action !== 'select')
+    return undefined;
+  return normalizeGeneratedText(rawAction(step.rawAction).searchText || '');
+}
+
 function previousStepAlreadyTargetsAntdSelectField(previousStep: FlowStep | undefined, optionStep: FlowStep) {
   if (!previousStep || !sameFieldIdentityIgnoringDialog(previousStep, optionStep))
     return false;
@@ -1897,8 +2030,22 @@ function rawSelectOptionParserSafeSource(step: FlowStep) {
   return optionLocator ? `await ${optionLocator}.click();` : undefined;
 }
 
+function projectedAntdSelectOptionSource(step: FlowStep, options: EmitStepOptions = {}) {
+  if (!isAntdProjectedSelectStep(step))
+    return undefined;
+  const triggerLocator = antdSelectFieldLocator(step);
+  const optionName = antdSelectOptionName(step);
+  if (!triggerLocator || !optionName)
+    return undefined;
+  if (options.parserSafe)
+    return antdSelectOptionParserSafeSource(step, options);
+  return antdOwnedSelectOptionClickSource(triggerLocator, optionName, projectedSelectSearchText(step));
+}
+
 function inheritedOptionClickSourceFromPreviousStep(step: FlowStep, previousStep: FlowStep | undefined, options: EmitStepOptions = {}) {
-  if (!previousStep || !isAntdSelectFieldStep(previousStep) || !isContextlessOptionTextClickAfterSelect(step, previousStep, selectQueryForStep(previousStep)))
+  const recordedActiveDropdownSource = isRecordedActiveAntdSelectOptionSource(step.sourceCode || '');
+  const previousLooksLikeSelectTrigger = !!previousStep && (isAntdSelectFieldStep(previousStep) || (recordedActiveDropdownSource && !!antdSelectFieldLocator(previousStep)));
+  if (!previousStep || !previousLooksLikeSelectTrigger || !isContextlessOptionTextClickAfterSelect(step, previousStep, selectQueryForStep(previousStep)))
     return undefined;
   const inheritedStep = inheritedAntdSelectOptionStep(step, previousStep, selectQueryForStep(previousStep));
   const selectOption = antdSelectOptionLocator(inheritedStep) || activeDropdownOptionLocator(inheritedStep);
@@ -1908,14 +2055,17 @@ function inheritedOptionClickSourceFromPreviousStep(step: FlowStep, previousStep
 }
 
 function parserSafeLocator(locator: string) {
-  return locator.replace(/\.(?:first|last)\(\)/g, '');
+  return locator
+      .replace(/\.locator\((["'])\.ant-select-selector, \.ant-cascader-picker, \.ant-select\1\)\.(?:first|last)\(\)/g, '.locator($1.ant-select-selector, .ant-cascader-picker$1)')
+      .replace(/\.locator\((["'])\.ant-select-selector, \.ant-cascader-picker, \.ant-cascader\1\)\.(?:first|last)\(\)/g, '.locator($1.ant-select-selector, .ant-cascader-picker$1)')
+      .replace(/\.(?:first|last)\(\)/g, '');
 }
 
 function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: string) {
   const triggerLocator = step ? antdSelectTriggerLocator(step) : `page.locator(".ant-select-selector").last()`;
   const optionName = step ? antdSelectOptionName(step) : undefined;
   if (optionName)
-    return antdOwnedSelectOptionClickSource(triggerLocator, optionName);
+    return antdOwnedSelectOptionClickSource(triggerLocator, optionName, projectedSelectSearchText(step));
   return [
     `// AntD Select virtual dropdown replay workaround: locator.click() may hit search input or portal/modal overlays.`,
     `if (!await ${optionLocator}.first().isVisible().catch(() => false))`,
@@ -1925,12 +2075,13 @@ function antdSelectOptionClickSource(step: FlowStep | undefined, optionLocator: 
   ].filter(Boolean).join('\n');
 }
 
-function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: string) {
+function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: string, searchText?: string) {
   return [
     `// AntD Select virtual dropdown replay workaround: dispatch the target option owned by this trigger, not a stale global dropdown.`,
     `await (async () => {`,
     `  const trigger = ${triggerLocator};`,
     `  const expectedText = ${stringLiteral(optionName)};`,
+    searchText ? `  const searchText = ${stringLiteral(searchText)};` : undefined,
     `  const inputSelector = ${stringLiteral('input[aria-controls], input[aria-owns], input[role="combobox"], input')};`,
     `  const selectOwnedOption = async (dispatch) => {`,
     `    const result = await trigger.locator(inputSelector).first().evaluate(async (input, payload) => {`,
@@ -2013,8 +2164,10 @@ function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: st
     `    });`,
     `    return !!result;`,
     `  };`,
-    `  if (!await selectOwnedOption(false))`,
+    `  if (!await selectOwnedOption(false)) {`,
     `    await trigger.click();`,
+    searchText ? `    await trigger.locator(inputSelector).first().fill(searchText);` : undefined,
+    `  }`,
     `  await selectOwnedOption(true);`,
     `  await trigger.locator(${stringLiteral('input[aria-expanded="false"]')}).first().waitFor({ state: "attached", timeout: 1000 }).catch(() => {});`,
     `})();`,
@@ -2025,6 +2178,26 @@ function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: st
 function antdSelectOptionName(step: FlowStep) {
   const contextTarget = step.context?.before.target;
   const rawTitle = rawSelectOptionTitle(step);
+  const recordedOptionText = recordedActiveDropdownOptionTextFromSource(step.sourceCode || '');
+  const action = rawAction(step.rawAction);
+  if (step.action === 'select') {
+    return generatedTextCandidate(
+        step.value,
+        action.selectedText,
+        step.uiRecipe?.optionText,
+        contextTarget?.selectedOption,
+        contextTarget?.optionPath?.[contextTarget.optionPath.length - 1],
+        recordedOptionText,
+        rawTitle,
+        step.target?.text,
+        step.target?.name,
+        step.target?.displayName,
+        contextTarget?.title,
+        contextTarget?.text,
+        contextTarget?.normalizedText,
+        contextTarget?.ariaLabel,
+    );
+  }
   return generatedTextCandidate(
       contextTarget?.title,
       contextTarget?.selectedOption,
@@ -2032,11 +2205,21 @@ function antdSelectOptionName(step: FlowStep) {
       contextTarget?.text,
       contextTarget?.normalizedText,
       contextTarget?.ariaLabel,
+      step.uiRecipe?.optionText,
+      action.selectedText,
       step.target?.text,
       step.target?.name,
       step.target?.displayName,
       rawTitle,
+      recordedOptionText,
   );
+}
+
+function recordedActiveDropdownOptionTextFromSource(sourceCode: string) {
+  if (!isRecordedActiveAntdSelectOptionSource(sourceCode))
+    return undefined;
+  const match = sourceCode.match(/\.filter\(\{\s*hasText:\s*(["'])([\s\S]*?)\1\s*\}\)/);
+  return match?.[2]?.replace(/\\(["'\\])/g, '$1');
 }
 
 function antdSelectTriggerLocator(step: FlowStep) {
@@ -2045,20 +2228,34 @@ function antdSelectTriggerLocator(step: FlowStep) {
 
 function antdSelectFieldLocator(step: FlowStep) {
   const targetTestId = step.target?.testId || step.context?.before.target?.testId;
-  if (targetTestId)
-    return `page.getByTestId(${stringLiteral(targetTestId)})`;
-  const formTestId = step.context?.before.form?.testId || step.target?.scope?.form?.testId;
-  if (formTestId)
-    return `page.getByTestId(${stringLiteral(formTestId)}).locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()`;
   const label = step.context?.before.form?.label ||
     step.target?.scope?.form?.label ||
     step.target?.label ||
     popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName);
+  if (targetTestId) {
+    const testIdLocator = `page.getByTestId(${stringLiteral(targetTestId)})`;
+    return isContainerTestIdForSelectField(targetTestId) ? selectFieldLocatorWithinRoot(testIdLocator, label) || `${testIdLocator}.locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()` : testIdLocator;
+  }
+  const formTestId = step.context?.before.form?.testId || step.target?.scope?.form?.testId;
+  if (formTestId) {
+    const formRoot = `page.getByTestId(${stringLiteral(formTestId)})`;
+    return isContainerTestIdForSelectField(formTestId) ? selectFieldLocatorWithinRoot(formRoot, label) || `${formRoot}.locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()` : `${formRoot}.locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()`;
+  }
   if (!label)
     return undefined;
   const dialog = selectTriggerDialog(step);
   const root = dialogRootLocator(dialog);
+  return selectFieldLocatorWithinRoot(root, label);
+}
+
+function selectFieldLocatorWithinRoot(root: string, label: string | undefined) {
+  if (!label)
+    return undefined;
   return `${root}.locator(${stringLiteral('.ant-form-item')}).filter({ hasText: ${stringLiteral(formItemSearchText(label))} }).locator(${stringLiteral('.ant-select-selector, .ant-cascader-picker, .ant-select')}).first()`;
+}
+
+function isContainerTestIdForSelectField(testId: string) {
+  return /(modal|drawer|dialog|form)$/i.test(testId) || looksLikeStructuralContainerTestId(testId);
 }
 
 function formItemSearchText(label: string) {
@@ -2464,15 +2661,31 @@ function dialogScopedLocator(step: FlowStep) {
   if (!dialog || !targetName)
     return undefined;
   const role = dialog.type === 'popover' && step.target?.role === 'tooltip' ? 'button' : step.target?.role || 'button';
+  const nameSource = roleNameSource(role, targetName);
   if (dialog.testId)
-    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, { name: ${nameSource} })`;
   if (dialog.type === 'popover')
-    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).last().getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).last().getByRole(${stringLiteral(role)}, { name: ${nameSource} })`;
   if (!dialog.title)
     return undefined;
   return `page.locator(${stringLiteral(dialogRootSelector(dialog))})` +
     `.filter({ hasText: ${stringLiteral(dialog.title)} })` +
-    `.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+    `.getByRole(${stringLiteral(role)}, { name: ${nameSource} })`;
+}
+
+function roleNameSource(role: string, targetName: string) {
+  return role === 'button' ? buttonNameSource(targetName) : stringLiteral(targetName);
+}
+
+function buttonNameSource(targetName: string) {
+  const compact = normalizeGeneratedText(targetName)?.replace(/\s+/g, '') || '';
+  if (compact === '保存')
+    return '/^(保存|保\\s*存)$/';
+  if (compact === '确定')
+    return '/^(确定|确\\s*定)$/';
+  if (compact === '确认')
+    return '/^(确认|确\\s*认)$/';
+  return stringLiteral(targetName);
 }
 
 function dialogRootSelector(dialog?: FlowDialogScope) {
@@ -2600,6 +2813,9 @@ function rawAction(value: unknown) {
     value?: string;
     timeout?: number;
     key?: string;
+    searchText?: string;
+    selectedText?: string;
+    optionPath?: string[];
     options?: string[];
     files?: string[];
   };

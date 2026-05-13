@@ -250,6 +250,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJson(recorderPage);
+  writeGeneratedReplayDiagnostic(test.info(), 'async-create-use', flow);
 
   expect(flow.flow.name).toBe('真实 AntD ProComponents 条目流程');
   expect(flow.steps.length).toBeGreaterThanOrEqual(7);
@@ -316,27 +317,34 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-wan-select').locator('input').fill('WAN-extra-18');
   await clickVisibleAntDOption(page, 'edge-lab:WAN-extra-18');
   await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN-extra-18');
-  await networkResourceDialog.getByText('独享地址池').click();
+  await waitForRecordedMarker(recorderPage, 'WAN-extra-18');
+  const dedicatedPoolLabel = networkResourceDialog.locator('label').filter({ hasText: '独享地址池' }).first();
+  await humanClick(dedicatedPoolLabel);
   await expect(networkResourceDialog.locator('input[type="radio"][value="dedicated"]')).toBeChecked();
+  await waitForRecordedMarker(recorderPage, '独享地址池');
   await page.getByTestId('network-resource-vrf-select').click();
   await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
   await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
+  await waitForRecordedMarker(recorderPage, '生产VRF');
   const arpProxyItem = networkResourceDialog.locator('.ant-form-item').filter({ hasText: '能力开关' });
   const arpProxyCheckbox = arpProxyItem.getByRole('checkbox', { name: '开启代理ARP' });
-  await arpProxyItem.locator('.ant-checkbox-wrapper').filter({ hasText: '开启代理ARP' }).click();
+  await humanClick(arpProxyItem.locator('.ant-checkbox-wrapper').filter({ hasText: '开启代理ARP' }));
   await expect(arpProxyCheckbox).toBeChecked();
-  await page.getByText('启用健康检查').click();
+  await waitForRecordedMarker(recorderPage, '开启代理ARP');
+  await humanClick(page.getByText('启用健康检查'));
   await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
   await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
   await page.getByTestId('network-resource-scope-tree').click();
   await clickVisibleAntDTreeNode(page, '华东生产区');
   await expect(page.getByTestId('network-resource-scope-tree')).toContainText('华东生产区');
-  await page.getByTestId('network-resource-egress-cascader').click();
+  await waitForRecordedMarker(recorderPage, '华东生产区');
+  await humanClick(page.getByTestId('network-resource-egress-cascader'));
   await clickVisibleAntDCascaderOption(page, '上海');
   await clickVisibleAntDCascaderOption(page, '一号机房');
   await clickVisibleAntDCascaderOption(page, 'NAT集群A');
   await expect(page.getByTestId('network-resource-egress-cascader')).toContainText('NAT集群A');
+  await waitForRecordedMarker(recorderPage, 'NAT集群A');
   await page.getByPlaceholder('服务名称').fill('https-admin');
   await page.getByPlaceholder('监听端口').fill('8443');
   await expect(page.getByPlaceholder('监听端口')).toHaveValue('8443');
@@ -357,7 +365,7 @@ test('records real ProFormField network configuration fields and replays generat
     '8443',
     'ProFormField 全量组合录制',
   ])
-    await expect.poll(() => recorderStepSubjects(recorderPage), { timeout: 25_000 }).toContain(marker);
+    await waitForRecordedMarker(recorderPage, marker);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -517,6 +525,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await expect(recorderPage.locator('.repeat-segment-card')).toContainText('批量创建IPv4地址池');
 
   flow = await exportBusinessFlowJson(recorderPage);
+  writeGeneratedReplayDiagnostic(test.info(), 'ipv4-pool', flow);
   expect(flow.repeatSegments?.[0]?.stepIds).toEqual(repeatStepIds);
   expect(flow.repeatSegments?.[0]?.stepIds).not.toContain(saveConfigStepId);
   expect(flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName)).toEqual(expect.arrayContaining(['poolName', 'port', 'startIp', 'endIp']));
@@ -529,10 +538,11 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
   expect(flow.artifacts.playwrightCode).toContain('2.2.2.2');
-  expectInOrder(flow.artifacts.playwrightCode, [
-    'page.locator(".ant-form-item").filter({ hasText: "WAN口" })',
-    '.locator(".ant-select-selector',
-  ]);
+  expectTriggerOwnedAntdOptionReplay(
+      flow.artifacts.playwrightCode,
+      /const trigger = [\s\S]{0,520}(?:ipv4-address-pool-form|WAN口)[\s\S]{0,320}\.locator\(["'][^"']*\.ant-select-selector/,
+      'xtest16:WAN1',
+  );
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 
@@ -736,6 +746,14 @@ async function recorderStepSubjects(recorderPage: Page) {
   return (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
 }
 
+async function waitForRecordedMarker(recorderPage: Page, marker: string | RegExp, timeout = 25_000) {
+  const subjectText = () => recorderStepSubjects(recorderPage);
+  if (typeof marker === 'string')
+    await expect.poll(subjectText, { timeout }).toContain(marker);
+  else
+    await expect.poll(subjectText, { timeout }).toMatch(marker);
+}
+
 async function clickVisibleAntDOption(page: Page, text: string) {
   const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
   const exactText = new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`);
@@ -931,13 +949,29 @@ function expectInOrder(text: string, markers: Array<string | RegExp>) {
 
 function expectScopedActiveAntdOptionReplay(code: string, fieldLabel: string, optionText: string) {
   const scopedTrigger = new RegExp(`page\\.locator\\(["']\\.ant-form-item["']\\)\\.filter\\(\\{\\s*hasText:\\s*["']${escapeRegExp(fieldLabel)}["']\\s*\\}\\)[\\s\\S]{0,240}\\.locator\\(["'][^"']*\\.ant-select-selector`);
-  const triggerIndex = code.search(scopedTrigger);
-  expect(triggerIndex, `missing scoped AntD select trigger for ${fieldLabel}`).toBeGreaterThanOrEqual(0);
+  expectTriggerOwnedAntdOptionReplay(code, scopedTrigger, optionText, `missing scoped AntD select trigger for ${fieldLabel}`);
+}
 
+function expectTriggerOwnedAntdOptionReplay(code: string, trigger: RegExp | string, optionText: string, message = 'missing stable AntD select trigger') {
+  const triggerIndex = typeof trigger === 'string' ? code.indexOf(trigger) : code.search(trigger);
+  expect(triggerIndex, message).toBeGreaterThanOrEqual(0);
   const tail = code.slice(triggerIndex);
-  expect(tail, 'AntD option replay should stay scoped to the active visible dropdown').toMatch(/page\.locator\(["'][^"']*\.ant-select-dropdown:visible[\s\S]*?["']\)(?:\.last\(\)\.locator\(["'][^"']*\.ant-select-item-option[\s\S]*?["']\)|[\s\S]{0,260}\.ant-select-item-option)/);
-  expect(tail, `AntD option replay should filter the active dropdown by ${optionText}`).toMatch(new RegExp(`\\.filter\\(\\{\\s*hasText:\\s*["']${escapeRegExp(optionText)}["']\\s*\\}\\)`));
-  expect(tail, 'AntD option replay should actively choose the filtered option').toMatch(/(?:\.first\(\)\.click\(\)|dispatchEvent\(new MouseEvent\(["']mousedown["'])/);
+  const blockEnd = tail.indexOf('})();');
+  const block = blockEnd >= 0 ? tail.slice(0, blockEnd) : tail.slice(0, 5000);
+  expect(block, 'AntD option replay should use the trigger-owned dropdown helper').toContain('selectOwnedOption');
+  expect(block, 'AntD option replay should check the trigger-owned target before reopening the select').toContain('if (!await selectOwnedOption(false))');
+  expect(block, 'AntD option replay should dispatch through the trigger-owned dropdown helper').toContain('await selectOwnedOption(true);');
+  expect(code, `AntD option replay should preserve option text ${optionText}`).toContain(optionText);
+  expect(block, `AntD option replay should pin exact option text ${optionText}`).toMatch(new RegExp(`const expectedText = (?:${escapeRegExp(JSON.stringify(optionText))}|String\\(row\\.[A-Za-z_$][\\w$]*\\));`));
+  expect(block, 'AntD option replay should inspect trigger ownership attrs').toContain('aria-controls');
+  expect(block, 'AntD option replay should inspect trigger ownership attrs').toContain('aria-owns');
+  expect(block, 'AntD option replay should inspect active descendant ownership').toContain('aria-activedescendant');
+  expect(block, 'AntD option replay should search visible AntD dropdown roots').toContain('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
+  expect(block, 'AntD option replay should dispatch the AntD mouse event sequence').toContain('dispatchEvent(new MouseEvent("mousedown"');
+  expect(block, 'AntD option replay should not use a broad active dropdown fallback').not.toContain('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible');
+  expect(code, 'AntD option replay must not use a broad text click fallback').not.toMatch(new RegExp(`page\\.getByText\\(["']${escapeRegExp(optionText)}["']\\)\\.click\\(\\)`));
+  expect(code, 'AntD option replay must not use title fallback').not.toMatch(new RegExp(`getByTitle\\(["']${escapeRegExp(optionText)}["']\\)`));
+  expect(code, 'AntD option replay must not bind to generated rc-select ids').not.toContain('#rc_select_');
 }
 
 function assertNoNetworkResourceSubmitBeforeRequiredFields(code: string) {

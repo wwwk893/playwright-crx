@@ -4,4 +4,7 @@ lib/
 .ace-tool
 .DS_Store
 .codex/
+tests/.raw-generated-replay/
+tests/test-results/
+tests/playwright-report/
 benchmarks/agent_models/results/

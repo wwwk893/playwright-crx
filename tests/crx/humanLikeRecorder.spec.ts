@@ -402,8 +402,12 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
-  expect(flow.artifacts.playwrightCode).toContain('page.locator(".ant-form-item").filter({ hasText: "WAN口" })');
-  expect(flow.artifacts.playwrightCode).toContain('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();');
+  expectTriggerOwnedAntdOptionReplay(
+      flow.artifacts.playwrightCode,
+      /const trigger = [\s\S]{0,520}(?:ipv4-address-pool-form|WAN口)[\s\S]{0,320}\.locator\(["'][^"']*\.ant-select-selector/,
+      'xtest16:WAN1',
+      'xtest16',
+  );
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']\*? ?WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('role=button[name="选择一个WAN口"');
   expect(flow.artifacts.playwrightCode).not.toContain('nth(4)');
@@ -1050,4 +1054,30 @@ async function openInsertMenuAfterStepLikeUser(recorderPage: Page, stepId: strin
 
 function escapeRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function expectTriggerOwnedAntdOptionReplay(code: string, trigger: RegExp | string, optionText: string, searchText?: string) {
+  const triggerIndex = typeof trigger === 'string' ? code.indexOf(trigger) : code.search(trigger);
+  expect(triggerIndex, 'generated replay should use a stable AntD select trigger').toBeGreaterThanOrEqual(0);
+  const tail = code.slice(triggerIndex);
+  const blockEnd = tail.indexOf('})();');
+  const block = blockEnd >= 0 ? tail.slice(0, blockEnd) : tail.slice(0, 5000);
+  expect(block).toContain('selectOwnedOption');
+  expect(block).toContain('if (!await selectOwnedOption(false))');
+  expect(block).toContain('await selectOwnedOption(true);');
+  expect(code).toContain(optionText);
+  expect(block).toMatch(new RegExp(`const expectedText = (?:${escapeRegExp(JSON.stringify(optionText))}|String\\(row\\.[A-Za-z_$][\\w$]*\\));`));
+  expect(block).toContain('aria-controls');
+  expect(block).toContain('aria-owns');
+  expect(block).toContain('aria-activedescendant');
+  expect(block).toContain('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
+  expect(block).toContain('dispatchEvent(new MouseEvent("mousedown"');
+  if (searchText) {
+    expect(block).toContain(`const searchText = ${JSON.stringify(searchText)};`);
+    expect(block).toContain('.fill(searchText);');
+  }
+  expect(block).not.toContain('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible');
+  expect(code).not.toMatch(new RegExp(`page\\.getByText\\(["']${escapeRegExp(optionText)}["']\\)\\.click\\(\\)`));
+  expect(code).not.toMatch(new RegExp(`getByTitle\\(["']${escapeRegExp(optionText)}["']\\)`));
+  expect(code).not.toContain('#rc_select_');
 }

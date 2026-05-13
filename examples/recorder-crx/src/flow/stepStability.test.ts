@@ -942,13 +942,14 @@ const tests: TestCase[] = [
       assert(!code.includes('// s002 '), 'interleaved placeholder option step should be omitted from exported generated code');
       assert(!/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']\*? ?WAN口["']/.test(code), 'exported replay should not keep the brittle required combobox focus click');
       assert(code.includes('// s003 选择: WAN口'), 'projected select transaction should still be emitted');
-      assert(code.includes('page.locator(".ant-form-item").filter({ hasText: "WAN口" })'), 'projected select transaction should open the field through the scoped AntD locator');
+      assert(code.includes('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first()'), 'projected select transaction should open the concrete AntD trigger inside the scoped field');
       assert(code.includes('xtest16:WAN1'), 'projected select transaction should still select the intended WAN option');
       assert(!playback.includes('// s001 '), 'non-adjacent redundant combobox focus click should be omitted from parser-safe runtime playback');
       assert(!playback.includes('// s002 '), 'interleaved placeholder option step should be omitted from parser-safe runtime playback');
       assert(!/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']\*? ?WAN口["']/.test(playback), 'parser-safe runtime playback should not keep the brittle required combobox focus click');
       assert(playback.includes('// s003 选择: WAN口'), 'parser-safe runtime playback should still emit the projected select transaction');
-      assert(playback.includes('page.locator(".ant-form-item").filter({ hasText: "WAN口" })'), 'parser-safe runtime playback should open the field through the scoped AntD locator');
+      assert(playback.includes('.locator(".ant-select-selector, .ant-cascader-picker")'), 'parser-safe runtime playback should open the concrete AntD trigger inside the scoped field');
+      assert(!playback.includes('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select")'), 'parser-safe runtime playback should avoid a multi-match selector that includes both AntD root and selector');
       assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
 
       const repeatFlow: BusinessFlow = {
@@ -1009,7 +1010,10 @@ const tests: TestCase[] = [
       assertEqual(flow.steps[0].target?.label, 'WAN口');
       assertEqual(flow.steps[0].uiRecipe?.kind, 'select-option');
       assertTextInOrder(code, [/WAN口/, /wan/, /WAN1/]);
-      assert(code.includes('.locator(".ant-select-item-option'), 'select option code should target option rows, not nested text nodes');
+      assert(code.includes('selectOwnedOption(false)'), 'projected select transaction should use trigger-owned option replay');
+      assert(code.includes('const expectedText = "WAN1";'), 'projected select transaction should pin the selected option text');
+      assert(code.includes('querySelectorAll(".ant-select-item-option")'), 'select option code should target option rows, not nested text nodes');
+      assert(!code.includes('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible'), 'projected select transaction should not replay through a broad visible dropdown');
       assert(!code.includes('.getByText("WAN1", { exact: true })'), 'select option code should avoid getByText strict-mode duplicates inside AntD option rows');
       assertTextInOrder(playback, [/WAN口/, /WAN1/]);
     },
@@ -1033,14 +1037,14 @@ const tests: TestCase[] = [
         pageSelectOptionEvent('ctx-recorded-select-option', 1100, 'WAN口', 'WAN1'),
       ]);
       const code = generateBusinessFlowPlaywrightCode(merged);
-      const searchFillCount = (code.match(/\.fill\((['"])wan\1\)/g) ?? []).length;
 
       assertEqual(merged.steps.map(step => step.action), ['select']);
       assertEqual(merged.steps[0].id, firstLowLevelStepId);
       assertEqual(merged.steps[0].value, 'WAN1');
       assert((merged.steps[0].sourceActionIds?.length ?? 0) >= 3, 'select step should preserve low-level recorder sourceActionIds');
       assertEqual(merged.steps.filter(step => step.action === 'fill' && step.value === 'wan').length, 0);
-      assertEqual(searchFillCount, 1);
+      assert(code.includes('const searchText = "wan";'), 'select replay should preserve the transaction search text inside the owned helper');
+      assert(code.includes('.fill(searchText);'), 'select replay should search through the trigger-owned input');
       assert(!code.includes('const selectField_'), 'select code must stay parser-safe for in-panel runtime playback');
     },
   },
@@ -1089,7 +1093,8 @@ const tests: TestCase[] = [
       assertEqual(merged.steps.map(step => step.action), ['select']);
       assertEqual(merged.steps[0].id, firstLowLevelStepId);
       assertEqual(merged.steps[0].value, 'WAN1');
-      assertEqual((code.match(/\.fill\((['"])wan\1\)/g) ?? []).length, 1);
+      assert(code.includes('const searchText = "wan";'), 'delayed select transaction should preserve the recorded search text inside the owned helper');
+      assert(code.includes('.fill(searchText);'), 'delayed select transaction should search through the trigger-owned input');
     },
   },
   {
@@ -1103,7 +1108,9 @@ const tests: TestCase[] = [
 
       assert(!code.includes('[object Object]'), 'select option replay must not use object-like optionPath text');
       assert(!code.includes('.fill("test1")'), 'select option replay should not infer a search fill for ReactNode/object-valued options');
-      assert(code.includes('filter({ hasText: "test1" })'), 'select option replay should click by the inferred visible search token');
+      assert(code.includes('selectOwnedOption(false)'), 'select option replay should use the trigger-owned dropdown helper');
+      assert(code.includes('const expectedText = "test1 1.1.1.1--2.2.2.2 共享";'), 'select option replay should preserve the selected option text in the owned helper');
+      assert(!code.includes('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible'), 'select option replay should not fall back to a broad visible dropdown');
       assert(code.includes('test1 1.1.1.1--2.2.2.2 共享'), 'select option replay should preserve selected text in the business step');
     },
   },
@@ -2864,7 +2871,43 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]")'), 'should start from dialog scope');
       assert(firstStep.includes('filter({ hasText: "新建用户" })'), 'should filter dialog by title');
-      assert(firstStep.includes('getByRole("button", { name: "确定" })'), 'should click confirm button inside dialog');
+      assert(firstStep.includes('getByRole("button", { name: /^(确定|确\\s*定)$/ })'), 'should click confirm button inside dialog with whitespace-tolerant name matching');
+    },
+  },
+  {
+    name: 'context-light modal save button uses whitespace-tolerant name matching',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: {
+            role: 'button',
+            name: 'button 保 存',
+            text: 'button 保 存',
+          },
+          context: {
+            eventId: 'ctx-save',
+            capturedAt: 1,
+            before: {
+              target: {
+                tag: 'button',
+                role: 'button',
+                text: '保 存',
+                normalizedText: '保 存',
+                controlType: 'button',
+              },
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").last().getByRole("button", { name: /^(保存|保\\s*存)$/ })'), 'context-light modal save should tolerate AntD button text spacing');
+      assert(!firstStep.includes('getByRole("button", { name: "保存" })'), 'context-light modal save should not require one exact spacing form');
     },
   },
   {
@@ -3272,7 +3315,7 @@ test('demo', async ({ page }) => {
 
       const code = generateBusinessFlowPlaywrightCode(flow);
 
-      assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "二次确认" }).getByRole("button", { name: "确 定" }).click();'), 'real second modal confirmation should be kept and scoped to the active dialog');
+      assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "二次确认" }).getByRole("button", { name: /^(确定|确\\s*定)$/ }).click();'), 'real second modal confirmation should be kept and scoped to the active dialog');
       assert(!code.includes('page.getByRole("button", { name: "确 定" }).click();'), 'second modal confirmation should not use a page-global ambiguous role locator');
     },
   },
@@ -3791,6 +3834,179 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'repeat segment terminal table assertion keeps dynamic rowKey templates',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 'p001',
+            order: 1,
+            action: 'fill',
+            target: { placeholder: '请输入地址池ID', label: '地址池ID' },
+            value: 'pool-42',
+            sourceCode: `await page.getByPlaceholder('请输入地址池ID').fill('pool-42');`,
+            assertions: [],
+          },
+          {
+            id: 'p002',
+            order: 2,
+            action: 'click',
+            target: { testId: 'modal-confirm', text: '确定' },
+            sourceCode: `await page.getByTestId('modal-confirm').click();`,
+            assertions: [],
+          },
+        ],
+        repeatSegments: [{
+          id: 'repeat-pools',
+          name: '批量新建地址池',
+          stepIds: ['p001', 'p002'],
+          parameters: [{
+            id: 'p-pool',
+            label: '地址池ID',
+            sourceStepId: 'p001',
+            currentValue: 'pool-42',
+            variableName: 'poolId',
+            enabled: true,
+          }],
+          rows: [
+            { id: 'row-1', values: { 'p-pool': 'pool-42' } },
+            { id: 'row-2', values: { 'p-pool': 'pool-43' } },
+          ],
+          assertionTemplate: {
+            subject: 'table',
+            type: 'tableRowExists',
+            description: '地址池行存在：{{poolId}}',
+            params: {
+              tableTestId: 'pool-table',
+              rowKey: '{{poolId}}',
+              columnValue: '{{poolId}}',
+            },
+          },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const loopBody = code.slice(code.indexOf('for (const row of'), code.indexOf('\n  }', code.indexOf('for (const row of')));
+
+      assert(loopBody.includes('data-row-key'), 'dynamic rowKey template should render a data-row-key selector');
+      assert(loopBody.includes('String(row.poolId)'), 'dynamic rowKey template should preserve the row.poolId expression');
+      assert(loopBody.includes('toContainText(String(row.poolId));'), 'dynamic rowKey assertion should still verify the generated row text');
+      assert(!loopBody.includes("getByRole('row').first()"), 'dynamic rowKey template must not fall back to the first row');
+    },
+  },
+  {
+    name: 'repeat segment terminal table assertion interpolates mixed dynamic rowKey templates',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 'p001',
+          order: 1,
+          action: 'fill',
+          target: { placeholder: '请输入地址池ID', label: '地址池ID' },
+          value: '42',
+          sourceCode: `await page.getByPlaceholder('请输入地址池ID').fill('42');`,
+          assertions: [],
+        }],
+        repeatSegments: [{
+          id: 'repeat-pools',
+          name: '批量新建地址池',
+          stepIds: ['p001'],
+          parameters: [{
+            id: 'p-pool',
+            label: '地址池ID',
+            sourceStepId: 'p001',
+            currentValue: '42',
+            variableName: 'poolId',
+            enabled: true,
+          }],
+          rows: [
+            { id: 'row-1', values: { 'p-pool': '42' } },
+            { id: 'row-2', values: { 'p-pool': '43' } },
+          ],
+          assertionTemplate: {
+            subject: 'table',
+            type: 'tableRowExists',
+            description: '地址池行存在：pool-{{poolId}}',
+            params: {
+              tableTestId: 'pool-table',
+              rowKey: 'pool-{{poolId}}',
+              columnValue: 'pool-{{poolId}}',
+            },
+          },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const loopStart = code.indexOf('for (const row of');
+      const loopBody = code.slice(loopStart, code.indexOf('\n  }', loopStart));
+
+      assert(loopBody.includes('data-row-key'), 'mixed dynamic rowKey should render a data-row-key selector');
+      assert(loopBody.includes('pool-${String(row.poolId)'), 'mixed dynamic rowKey should interpolate row.poolId inside the data-row-key selector');
+      assert(loopBody.includes('toContainText(`pool-${String(row.poolId)}`);'), 'mixed dynamic column assertion should stay dynamic');
+      assert(!loopBody.includes("getByRole('row').first()"), 'mixed dynamic rowKey must not fall back to the first row');
+      assert(!loopBody.includes('"pool-row.poolId"'), 'mixed dynamic rowKey must not become a static row.poolId literal');
+    },
+  },
+  {
+    name: 'repeat segment terminal row-not-exists assertion keeps dynamic rowKey templates',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 'p001',
+          order: 1,
+          action: 'click',
+          target: { testId: 'delete-pool', text: '删除' },
+          sourceCode: `await page.getByTestId('delete-pool').click();`,
+          assertions: [],
+        }],
+        repeatSegments: [{
+          id: 'repeat-delete-pools',
+          name: '批量删除地址池',
+          stepIds: ['p001'],
+          parameters: [{
+            id: 'p-pool',
+            label: '地址池ID',
+            sourceStepId: 'p001',
+            currentValue: 'pool-42',
+            variableName: 'poolId',
+            enabled: true,
+          }],
+          rows: [
+            { id: 'row-1', values: { 'p-pool': 'pool-42' } },
+            { id: 'row-2', values: { 'p-pool': 'pool-43' } },
+          ],
+          assertionTemplate: {
+            subject: 'table',
+            type: 'row-not-exists',
+            description: '地址池行已删除：{{poolId}}',
+            params: {
+              tableTestId: 'pool-table',
+              rowKey: '{{poolId}}',
+            },
+          },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const loopStart = code.indexOf('for (const row of');
+      const loopBody = code.slice(loopStart, code.indexOf('\n  }', loopStart));
+
+      assert(loopBody.includes('data-row-key'), 'row-not-exists dynamic rowKey should render a data-row-key selector');
+      assert(loopBody.includes('String(row.poolId)'), 'row-not-exists dynamic rowKey should preserve row.poolId');
+      assert(loopBody.includes('.not.toBeVisible();'), 'row-not-exists should render a negative terminal assertion');
+      assert(!loopBody.includes("getByRole('row').first()"), 'row-not-exists dynamic rowKey must not fall back to first row');
+    },
+  },
+  {
     name: 'repeat segment emits interpolated terminal table assertion templates dynamically',
     run: () => {
       const flow: BusinessFlow = {
@@ -4003,6 +4219,150 @@ test('demo', async ({ page }) => {
       assert(!code.includes('.ant-select-item-option'), 'select trigger placeholder must not be treated as an option');
       assert(!code.includes('AntD Select virtual dropdown replay workaround'), 'select trigger should not use option replay workaround');
       assert(code.includes('.locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();') || code.includes("getByRole('combobox'"), 'select trigger should replay as opening the field');
+    },
+  },
+  {
+    name: 'projected select step uses selected value over placeholder context for owned replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'select',
+          value: '生产VRF',
+          target: {
+            role: 'combobox',
+            label: '关联VRF',
+            name: '选择一个VRF',
+            text: '选择一个VRF',
+            displayName: '选择一个VRF',
+            testId: 'network-resource-vrf-select',
+            scope: { form: { testId: 'network-resource-vrf-select', label: '关联VRF', name: '关联VRF' } },
+          },
+          uiRecipe: {
+            kind: 'select-option',
+            library: 'pro-components',
+            component: 'select',
+            formKind: 'pro-form',
+            fieldKind: 'select',
+            fieldLabel: '关联VRF',
+            fieldName: 'vrf',
+            optionText: '选择一个VRF',
+            targetText: '选择一个VRF',
+          },
+          context: {
+            eventId: 'ctx-vrf-projected-select',
+            capturedAt: 1000,
+            before: {
+              form: { label: '关联VRF', name: 'vrf' },
+              target: {
+                tag: 'div',
+                text: '选择一个VRF',
+                normalizedText: '选择一个VRF',
+                ariaLabel: '选择一个VRF',
+                framework: 'procomponents',
+                controlType: 'select',
+              },
+              dialog: { type: 'dropdown', visible: true },
+            },
+          },
+          rawAction: null,
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(code.includes('const expectedText = "生产VRF";'), 'owned select replay should pin the committed selected value');
+      assert(code.includes('await expect(page.getByTestId("network-resource-vrf-select")).toContainText("生产VRF"'), 'selected-value assertion should verify the committed selected value');
+      assert(!code.includes('const expectedText = "选择一个VRF";'), 'placeholder text must not be used as the replay option');
+      assert(!code.includes('toContainText("选择一个VRF"'), 'placeholder text must not be used as the selected-value assertion');
+    },
+  },
+  {
+    name: 'parser-safe projected select trigger scopes container test ids by field label',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'select',
+          value: 'default',
+          target: {
+            role: 'combobox',
+            label: '关联VRF',
+            name: 'default',
+            displayName: 'default',
+            testId: 'ip-port-pool-form',
+            scope: { form: { testId: 'ip-port-pool-form', label: '关联VRF', name: 'vrf' } },
+          },
+          uiRecipe: {
+            kind: 'select-option',
+            library: 'pro-components',
+            component: 'select',
+            formKind: 'pro-form',
+            fieldKind: 'select',
+            fieldLabel: '关联VRF',
+            fieldName: 'vrf',
+            optionText: 'default',
+          },
+          context: { eventId: 'ctx-port-pool-container-select', capturedAt: 1000, before: { form: { testId: 'ip-port-pool-form', label: '关联VRF', name: 'vrf' }, target: { controlType: 'select', role: 'option' as any, text: 'default', selectedOption: 'default', framework: 'procomponents' } } },
+          rawAction: { name: 'select', searchText: 'default', selectedText: 'default' },
+          assertions: [],
+        }],
+      };
+
+      const playback = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+
+      assert(playback.includes('page.getByTestId("ip-port-pool-form").locator(".ant-form-item").filter({ hasText: "关联VRF" }).locator(".ant-select-selector, .ant-cascader-picker").click();'), 'parser-safe playback should scope the container test id to the owning form item before opening the select');
+      assert(playback.includes('page.getByTestId("ip-port-pool-form").locator(".ant-form-item").filter({ hasText: "关联VRF" }).locator(".ant-select-selector, .ant-cascader-picker").locator("input:visible").fill("default");'), 'parser-safe playback should search inside the same labeled trigger');
+      assert(!playback.includes('page.getByTestId("ip-port-pool-form").locator(".ant-select-selector, .ant-cascader-picker").click();'), 'parser-safe playback must not click every select trigger under a multi-select container');
+      assert(!playback.includes('.ant-select-selector, .ant-cascader-picker, .ant-select'), 'parser-safe playback must not include both AntD root and selector because CrxPlayer cannot preserve first()');
+    },
+  },
+  {
+    name: 'parser-safe projected select keeps control test ids out of form-item nesting',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'select',
+          value: '系统管理员',
+          target: {
+            role: 'combobox',
+            label: '角色',
+            name: '系统管理员',
+            displayName: '系统管理员',
+            scope: { form: { testId: 'role-select', label: '角色', name: 'role' } },
+          },
+          uiRecipe: {
+            kind: 'select-option',
+            library: 'antd',
+            component: 'select',
+            formKind: 'form',
+            fieldKind: 'select',
+            fieldLabel: '角色',
+            fieldName: 'role',
+            optionText: '系统管理员',
+          },
+          context: { eventId: 'ctx-role-control-select', capturedAt: 1000, before: { form: { testId: 'role-select', label: '角色', name: 'role' }, target: { controlType: 'select', role: 'option' as any, text: '系统管理员', selectedOption: '系统管理员', framework: 'antd' } } },
+          rawAction: { name: 'select', selectedText: '系统管理员' },
+          assertions: [],
+        }],
+      };
+
+      const playback = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+
+      assert(playback.includes('page.getByTestId("role-select").locator(".ant-select-selector, .ant-cascader-picker").click();'), 'parser-safe playback should treat *-select test ids as the control root');
+      assert(!playback.includes('page.getByTestId("role-select").locator(".ant-form-item")'), 'parser-safe playback must not search for form items inside a select control test id');
+      assert(!playback.includes('.ant-select-selector, .ant-cascader-picker, .ant-select'), 'parser-safe playback must still avoid the AntD root alternative');
     },
   },
   {
@@ -4919,6 +5279,58 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'code preview regenerates recorded active AntD dropdown option source through owned trigger contract',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001'],
+            action: 'click',
+            target: {
+              label: '下方表单使用条目',
+              role: 'combobox',
+              scope: { form: { label: '下方表单使用条目' } },
+            },
+            context: {
+              eventId: 'ctx-active-trigger',
+              capturedAt: 1000,
+              before: {},
+            },
+            rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="下方表单使用条目"i]' } },
+            sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "下方表单使用条目" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();`,
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a002'],
+            action: 'click',
+            target: {},
+            rawAction: { action: { name: 'click', selector: '.ant-select-dropdown .ant-select-item-option' } },
+            sourceCode: `await page.locator(".ant-select-dropdown:visible, .ant-cascader-dropdown:visible").last().locator(".ant-select-item-option, .ant-cascader-menu-item, .ant-select-tree-treenode, .ant-select-tree-node-content-wrapper").filter({ hasText: "real-item-a" }).first().click();`,
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's002');
+
+      assert(code.includes('filter({ hasText: "下方表单使用条目" })') && code.includes('.ant-select-selector'), 'select option should reopen the scoped form trigger');
+      assert(firstStep.includes('dispatch the target option owned by this trigger'), 'select option should use the owned-dropdown replay contract');
+      assert(firstStep.includes('const expectedText = "real-item-a";'), 'select option should parse exact option text from recorded hasText source');
+      assert(firstStep.includes('aria-controls') && firstStep.includes('aria-owns') && firstStep.includes('aria-activedescendant'), 'select option should inspect trigger ownership attrs');
+      assert(firstStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'select option should search visible AntD dropdown roots');
+      assert(firstStep.includes('dispatchEvent(new MouseEvent("mousedown"'), 'select option should dispatch the AntD mouse event sequence');
+      assert(!firstStep.includes('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible'), 'select option should not preserve the old active dropdown locator source');
+      assert(!firstStep.includes('filter({ hasText: "real-item-a" }).first().click()'), 'select option should not preserve partial first-match option clicks');
+    },
+  },
+  {
     name: 'human-like AntD option inner content click still replays through active dropdown workaround',
     run: () => {
       const flow: BusinessFlow = {
@@ -5056,13 +5468,122 @@ test('demo', async ({ page }) => {
       const code = generateBusinessFlowPlaybackCode(flow);
       const firstStep = stepCodeBlock(code, 's001');
 
-      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").click();';
+      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker").click();';
       assert(firstStep.includes('.ant-form-item') && firstStep.includes('IP地址池'), 'runtime replay should reopen the field-scoped select before choosing the option');
       assert(!firstStep.includes('if (!await'), 'runtime replay should not include JS control flow that the parser cannot enforce');
       assert(!firstStep.includes('.fill("test1")'), 'runtime replay should not search ReactNode/IP-range labels because AntD can filter them to an empty dropdown');
       assert(firstStep.includes('.ant-select-item-option') && firstStep.includes('hasText: "test1"'), 'runtime replay should click the active dropdown option by the primary token');
       assert(firstStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'runtime option click should keep enough identifying tokens to avoid partial test1/test12 ambiguity');
       assertEqual(firstStep.split(fieldClick).length - 1, 1);
+    },
+  },
+  {
+    name: 'parser-safe ReactNode select skips empty search fill before option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            name: '* IP地址池 question-circle',
+            scope: { form: { label: 'IP地址池' }, dialog: { title: '新建IP端口地址池', type: 'modal', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-ip-pool-trigger',
+            capturedAt: 900,
+            before: {
+              form: { label: 'IP地址池' },
+              dialog: { title: '新建IP端口地址池', type: 'modal', visible: true },
+              target: {
+                tag: 'div',
+                role: 'combobox',
+                text: '* IP地址池 question-circle',
+                normalizedText: '* IP地址池 question-circle',
+                framework: 'procomponents',
+                controlType: 'select',
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="* IP地址池 question-circle"i]' } },
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'fill',
+          value: '',
+          target: {
+            role: 'combobox',
+            label: 'IP地址池',
+            name: '* IP地址池 question-circle',
+            scope: { form: { label: 'IP地址池' }, dialog: { title: '新建IP端口地址池', type: 'modal', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-ip-pool-empty-search',
+            capturedAt: 950,
+            before: {
+              form: { label: 'IP地址池' },
+              dialog: { title: '新建IP端口地址池', type: 'modal', visible: true },
+              target: {
+                tag: 'input',
+                role: 'combobox',
+                text: '',
+                normalizedText: '',
+                framework: 'procomponents',
+                controlType: 'select',
+              },
+            },
+          },
+          rawAction: { action: { name: 'fill', selector: 'internal:role=combobox[name="* IP地址池 question-circle"i]', text: '' } },
+          sourceCode: 'await page.locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().locator("input:visible").first().fill("");',
+          assertions: [],
+        }, {
+          id: 's003',
+          order: 3,
+          kind: 'recorded',
+          sourceActionIds: ['a003'],
+          action: 'click',
+          target: {
+            text: 'test11.1.1.1--2.2.2.2共享',
+            scope: {
+              form: { label: 'IP地址池' },
+              dialog: { title: '新建IP端口地址池', type: 'modal', visible: true },
+            },
+          },
+          context: {
+            eventId: 'ctx-react-node-option-after-empty-search',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'IP地址池' },
+              dialog: { title: '选择一个IP地址池', type: 'dropdown', visible: true },
+              target: {
+                tag: 'div',
+                role: 'option',
+                text: 'test11.1.1.1--2.2.2.2共享',
+                selectedOption: 'test11.1.1.1--2.2.2.2共享',
+                normalizedText: 'test11.1.1.1--2.2.2.2共享',
+                framework: 'procomponents',
+                controlType: 'select-option',
+              },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:text="test1"i' } },
+          sourceCode: `await page.getByText('test1').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaybackCode(flow);
+      const optionStep = stepCodeBlock(code, 's003');
+
+      assert(!code.includes('.fill("")'), 'parser-safe replay should drop the empty internal select search before the option click');
+      assert(code.includes('IP地址池'), 'parser-safe replay should keep the field identity around the option click');
+      assert(optionStep.includes('.ant-select-item-option') && optionStep.includes('hasText: "test1"'), 'parser-safe replay should still click the ReactNode option by primary token');
+      assert(optionStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'parser-safe replay should keep the IP range token for uniqueness');
     },
   },
   {
@@ -5194,7 +5715,7 @@ test('demo', async ({ page }) => {
       const flow: BusinessFlow = { ...createNamedFlow(), steps: [triggerStep, optionStep] };
       const code = generateBusinessFlowPlaybackCode(flow);
       const optionBlock = stepCodeBlock(code, 's002');
-      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").click();';
+      const fieldClick = 'locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker").click();';
 
       assert(!optionBlock.includes(fieldClick), 'option step should not emit a second trigger click after the owning select was already opened');
       assert(!optionBlock.includes('if (!await'), 'runtime parser-safe replay must avoid JS control flow that the parser ignores');
@@ -5367,6 +5888,125 @@ test('demo', async ({ page }) => {
       assert(optionStep.includes('AntD Select virtual dropdown replay workaround'), 'truncated option should still use AntD select replay workaround');
       assert(optionStep.includes('edge-lab:WAN-extra-18'), 'truncated option text should be completed from the select search query');
       assert(!optionStep.includes(`getByText('edge-lab:WAN-extra-')`), 'truncated global text source should not be reused');
+    },
+  },
+  {
+    name: 'projected select skips truncated selected-value echo clicks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            sourceActionIds: ['a001', 'a002'],
+            action: 'select',
+            target: {
+              role: 'combobox',
+              label: 'WAN口',
+              name: 'WAN口',
+              displayName: 'WAN口',
+              testId: 'network-resource-wan-select',
+              scope: {
+                form: {
+                  testId: 'network-resource-wan-select',
+                  label: 'WAN口',
+                  name: 'WAN口',
+                },
+              },
+            },
+            value: 'edge-lab:WAN-extra-18',
+            context: {
+              eventId: 'ctx-wan-select',
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'dropdown', visible: true },
+                form: { label: 'WAN口', name: 'wan' },
+                target: {
+                  tag: 'div',
+                  role: 'option',
+                  title: 'edge-lab:WAN-extra-18',
+                  text: 'edge-lab:WAN-extra-18',
+                  selectedOption: 'edge-lab:WAN-extra-18',
+                  normalizedText: 'edge-lab:WAN-extra-18',
+                  framework: 'procomponents',
+                  controlType: 'select-option',
+                },
+                ui: {
+                  library: 'pro-components',
+                  component: 'select',
+                  targetText: 'edge-lab:WAN-extra-18',
+                  form: {
+                    formKind: 'antd-form',
+                    fieldKind: 'select',
+                    label: 'WAN口',
+                    name: 'wan',
+                  },
+                  overlay: { type: 'select-dropdown', visible: true },
+                  option: { text: 'edge-lab:WAN-extra-18', path: ['edge-lab:WAN-extra-18'] },
+                  locatorHints: [],
+                  confidence: 0.9,
+                  reasons: [],
+                },
+              },
+            },
+            uiRecipe: {
+              kind: 'select-option',
+              library: 'antd',
+              component: 'select',
+              fieldKind: 'select',
+              fieldLabel: 'WAN口',
+              fieldName: 'wan',
+              optionText: 'edge-lab:WAN-extra-18',
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            sourceActionIds: ['a003'],
+            action: 'click',
+            target: {
+              selector: 'internal:text="edge-lab:WAN-extra-"i',
+              text: 'edge-lab:WAN-extra-',
+              locator: 'internal:text="edge-lab:WAN-extra-"i',
+            },
+            rawAction: {
+              action: {
+                name: 'click',
+                selector: 'internal:text="edge-lab:WAN-extra-"i',
+              },
+            },
+            sourceCode: `await page.getByText("edge-lab:WAN-extra-").click();`,
+            assertions: [{
+              id: 's002-terminal-1',
+              type: 'selected-value-visible',
+              subject: 'element',
+              target: {
+                role: 'combobox',
+                label: 'WAN口',
+                name: 'WAN口',
+                displayName: 'WAN口',
+                testId: 'network-resource-wan-select',
+              },
+              expected: 'edge-lab:WAN-extra-',
+              params: {
+                targetTestId: 'network-resource-wan-select',
+                expected: 'edge-lab:WAN-extra-',
+              },
+              enabled: true,
+            }],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('selectOwnedOption'), 'the owning Select replay should remain emitted');
+      assert(code.includes('edge-lab:WAN-extra-18'), 'the full selected option should remain the replay target');
+      assert(!code.includes('getByText("edge-lab:WAN-extra-")'), 'truncated selected-value echo click should not be emitted');
+      assert(!code.includes('toContainText("edge-lab:WAN-extra-")'), 'truncated selected-value echo assertion should not be emitted');
     },
   },
   {
@@ -5827,6 +6467,274 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('.ant-cascader-dropdown:visible'), 'exported cascader replay should stay scoped to the visible cascader popup');
       assert(firstStep.includes('.first().evaluate((element, expectedText)'), 'exported cascader replay should dispatch the first filtered option without re-querying an evaluateAll collection');
       assert(!firstStep.includes('evaluateAll((elements, expectedText)'), 'exported cascader replay should not use the flaky active popup collection scan');
+    },
+  },
+  {
+    name: 'exported cascader path replay clicks each path segment in order',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: 'combobox * 出口路径',
+            name: 'combobox * 出口路径',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-repeat-cascader-trigger',
+            capturedAt: 800,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'div',
+                text: 'combobox * 出口路径',
+                normalizedText: 'combobox * 出口路径',
+                framework: 'antd',
+                controlType: 'cascader',
+                role: 'combobox',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=combobox[name="* 出口路径"i]',
+            },
+          },
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'fill',
+          value: 'NAT集群A',
+          target: {
+            testId: 'network-resource-egress-cascader',
+            text: '选择出口路径',
+            name: '选择出口路径',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-repeat-cascader-search',
+            capturedAt: 900,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'input',
+                text: '选择出口路径',
+                normalizedText: '选择出口路径',
+                testId: 'network-resource-egress-cascader',
+                framework: 'antd',
+                controlType: 'cascader',
+                role: 'combobox',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="network-resource-egress-cascader"] >> input',
+              text: 'NAT集群A',
+            },
+          },
+          sourceCode: 'await page.getByTestId("network-resource-egress-cascader").locator("input:visible").first().fill("NAT集群A");',
+          assertions: [],
+        }, {
+          id: 's003',
+          order: 3,
+          kind: 'recorded',
+          sourceActionIds: ['a003'],
+          action: 'click',
+          target: {
+            text: '上海 / 一号机房 / NAT集群A',
+            name: '上海 / 一号机房 / NAT集群A',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-cascader-path-option',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', title: '出口路径选项', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'li',
+                text: '上海 / 一号机房 / NAT集群A',
+                normalizedText: '上海 / 一号机房 / NAT集群A',
+                optionPath: ['上海', '一号机房', 'NAT集群A'],
+                framework: 'antd',
+                controlType: 'cascader-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: '.ant-cascader-dropdown .ant-cascader-menu-item >> text=NAT集群A',
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's003');
+
+      assertTextInOrder(firstStep, [/hasText: "上海"/, /hasText: "一号机房"/, /hasText: "NAT集群A"/]);
+      assert(!firstStep.includes('hasText: "上海 / 一号机房 / NAT集群A"'), 'cascader path replay must not look for the whole path as one menu item');
+      assert(!code.includes('locator("input:visible").first().fill("NAT集群A")'), 'cascader path replay should skip the intermediate search fill before hierarchical path clicks');
+      assertEqual((firstStep.match(/await page\.waitForTimeout\(120\);/g) ?? []).length, 3);
+    },
+  },
+  {
+    name: 'repeat segment cascader path replay parameterizes the leaf path segment',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            text: 'combobox * 出口路径',
+            name: 'combobox * 出口路径',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-repeat-cascader-trigger',
+            capturedAt: 800,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'div',
+                text: 'combobox * 出口路径',
+                normalizedText: 'combobox * 出口路径',
+                framework: 'antd',
+                controlType: 'cascader',
+                role: 'combobox',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:role=combobox[name="* 出口路径"i]',
+            },
+          },
+          assertions: [],
+        }, {
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          sourceActionIds: ['a002'],
+          action: 'fill',
+          value: 'NAT集群A',
+          target: {
+            testId: 'network-resource-egress-cascader',
+            text: '选择出口路径',
+            name: '选择出口路径',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-repeat-cascader-search',
+            capturedAt: 900,
+            before: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'input',
+                text: '选择出口路径',
+                normalizedText: '选择出口路径',
+                testId: 'network-resource-egress-cascader',
+                framework: 'antd',
+                controlType: 'cascader',
+                role: 'combobox',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="network-resource-egress-cascader"] >> input',
+              text: 'NAT集群A',
+            },
+          },
+          sourceCode: 'await page.getByTestId("network-resource-egress-cascader").locator("input:visible").first().fill("NAT集群A");',
+          assertions: [],
+        }, {
+          id: 's003',
+          order: 3,
+          kind: 'recorded',
+          sourceActionIds: ['a003'],
+          action: 'click',
+          target: {
+            text: '上海 / 一号机房 / NAT集群A',
+            name: '上海 / 一号机房 / NAT集群A',
+            scope: { form: { label: '出口路径' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-repeat-cascader-path-option',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'dropdown', title: '出口路径选项', visible: true },
+              form: { label: '出口路径' },
+              target: {
+                tag: 'li',
+                text: '上海 / 一号机房 / NAT集群A',
+                normalizedText: '上海 / 一号机房 / NAT集群A',
+                optionPath: ['上海', '一号机房', 'NAT集群A'],
+                framework: 'antd',
+                controlType: 'cascader-option',
+              },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: '.ant-cascader-dropdown .ant-cascader-menu-item >> text=NAT集群A',
+            },
+          },
+          assertions: [],
+        }],
+        repeatSegments: [{
+          id: 'repeat-network',
+          name: '批量新建网络资源',
+          stepIds: ['s001', 's002', 's003'],
+          parameters: [{
+            id: 'p-path',
+            label: '出口路径',
+            sourceStepId: 's003',
+            currentValue: 'NAT集群A',
+            variableName: 'path',
+            enabled: true,
+          }],
+          rows: [
+            { id: 'row-1', values: { 'p-path': 'NAT集群A' } },
+            { id: 'row-2', values: { 'p-path': 'NAT集群B' } },
+          ],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const loopStart = code.indexOf('for (const row of');
+      const loopBody = code.slice(loopStart, code.indexOf('\n  }', loopStart));
+
+      assertTextInOrder(loopBody, [/hasText: "上海"/, /hasText: "一号机房"/, /hasText: String\(row\.path\)/]);
+      assert(!loopBody.includes('hasText: "上海 / 一号机房 / NAT集群A"'), 'repeat cascader path replay must not look for the whole path as one menu item');
+      assert(loopBody.includes('}, String(row.path));'), 'repeat cascader path replay should validate the dynamic leaf option');
+      assert(!loopBody.includes('locator("input:visible").first().fill("NAT集群A")'), 'repeat cascader path replay should skip the intermediate cascader search fill before hierarchical path clicks');
     },
   },
   {
