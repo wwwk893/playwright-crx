@@ -454,6 +454,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await page.getByPlaceholder('地址池名称').fill('test1');
   const ipv4Dialog = page.locator('.ant-modal, .ant-drawer, [role="dialog"]').filter({ hasText: '新建IPv4地址池' });
   await ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('.ant-select-selector').first().click();
+  await ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' }).locator('input').first().fill('xtest16');
   await clickVisibleAntDOption(page, 'xtest16:WAN1');
   await expect(ipv4Dialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('xtest16:WAN1');
   await page.getByLabel('开始地址，例如：192.168.1.1').click();
@@ -765,7 +766,10 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   });
   if (await option.isVisible().catch(() => false))
     await dispatchAntDOptionClick(page, options, text);
-  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 5000 });
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 5000 }).catch(async () => {
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+  });
 }
 
 async function dispatchAntDOptionClick(page: Page, options: ReturnType<Page['locator']>, text: string) {

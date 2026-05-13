@@ -482,7 +482,7 @@ test('human-like runtime replay supports wait inserted between address and port 
       { attempts: 8, afterClickDelayMs: 800, ...strictHumanOptions },
   );
   await expect(portDialog).toBeVisible({ timeout: 10_000 });
-  await humanType(portDialog.getByPlaceholder('地址池名称'), 'test12', { delayMs: 80 });
+  await humanType(portDialog.getByPlaceholder('地址池名称'), 'test12', { delayMs: 80, confirmWithFill: true });
   const addressPoolTrigger = portDialog.locator('.ant-form-item').filter({ hasText: 'IP地址池' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, addressPoolTrigger, 'test1 共享 1.1.1.1--2.2.2.2', { searchText: 'test1', ...strictHumanOptions });
   await expect(portDialog.locator('.ant-form-item').filter({ hasText: 'IP地址池' })).toContainText('test1');

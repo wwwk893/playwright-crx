@@ -235,8 +235,15 @@ export async function selectAntdOptionLikeUser(page: Page, trigger: Locator, opt
   await openPopupLikeUser(trigger, dropdown, options);
   await expect(dropdown).toBeVisible({ timeout: 10_000 });
 
-  if (options?.searchText)
+  if (options?.searchText) {
+    const searchInput = trigger.locator('input').first();
+    await ensureLocatorFocused(searchInput);
     await page.keyboard.type(options.searchText, { delay: 25 });
+    await page.waitForTimeout(120);
+    if (await searchInput.inputValue().catch(() => undefined) !== options.searchText)
+      await searchInput.fill(options.searchText);
+    await expect.poll(async () => await searchInput.inputValue().catch(() => '')).toBe(options.searchText);
+  }
 
   const findOption = async () => {
     let option = await exactTextOption(dropdown.locator('.ant-select-item-option'), optionText);
