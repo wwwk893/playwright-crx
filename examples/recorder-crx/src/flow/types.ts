@@ -272,9 +272,13 @@ export interface BusinessFlow {
     playwrightCode?: string;
     storageState?: unknown;
     deletedStepIds?: string[];
+    /** @deprecated PR-12 migrates this into artifacts.recorder.actionLog and strips it on normalization/export. */
     deletedActionIndexes?: number[];
+    /** @deprecated PR-12 migrates this into artifacts.recorder.actionLog and strips it on normalization/export. */
     deletedActionSignatures?: Record<string, string>;
+    /** @deprecated PR-12 migrates this into steps[].sourceActionIds + artifacts.recorder.actionLog and strips it on normalization/export. */
     stepActionIndexes?: Record<string, number>;
+    /** @deprecated PR-12 migrates this into steps[].sourceActionIds + artifacts.recorder.actionLog and strips it on normalization/export. */
     stepMergedActionIndexes?: Record<string, number[]>;
     recorder?: FlowRecorderState;
     aiIntent?: {

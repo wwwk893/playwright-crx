@@ -234,13 +234,15 @@ function hasEnabledAssertion(flow: BusinessFlow) {
 }
 
 function actionCountForMergeBoundary(flow: BusinessFlow) {
-  const recorderActionCount = flow.artifacts?.recorder?.actionLog.length ?? 0;
+  const recorderActionLog = flow.artifacts?.recorder?.actionLog ?? [];
+  const recorderActionCount = recorderActionLog.length;
   const playbackActionCount = countBusinessFlowPlaybackActions(flow);
-  const actionIndexes = [
-    ...Object.values(flow.artifacts?.stepActionIndexes ?? {}),
-    ...Object.values(flow.artifacts?.stepMergedActionIndexes ?? {}).flat(),
-  ].filter(actionIndex => actionIndex >= 0);
-  const highestActionCount = actionIndexes.length ? Math.max(...actionIndexes) + 1 : 0;
+  const actionsById = new Map(recorderActionLog.map(action => [action.id, action]));
+  const sourceActionIndexes = flow.steps
+      .flatMap(step => step.sourceActionIds ?? [])
+      .map(actionId => actionsById.get(actionId)?.recorderIndex)
+      .filter((recorderIndex): recorderIndex is number => typeof recorderIndex === 'number' && recorderIndex >= 0);
+  const highestActionCount = sourceActionIndexes.length ? Math.max(...sourceActionIndexes) + 1 : 0;
   return Math.max(flow.steps.length, recorderActionCount, playbackActionCount, highestActionCount);
 }
 

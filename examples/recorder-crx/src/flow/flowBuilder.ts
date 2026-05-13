@@ -9,7 +9,7 @@ import { asLocator } from '@isomorphic/locatorGenerators';
 import type { BusinessFlow, FlowActionType, FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowRecorderState, FlowRepeatSegment, FlowStep, FlowTarget, RecordedActionEntry, RecordingSession } from './types';
 import { suggestBasicIntent, suggestWaitIntent } from './intentRules';
 import { createEmptyBusinessFlow, flowAssertionId } from './types';
-import { migrateFlowToStableStepModel } from './flowMigration';
+import { migrateFlowToStableStepModel, stripDeprecatedLegacyArtifacts } from './flowMigration';
 import { cloneRecorderState, withRecorderState } from './recorderState';
 import { appendRecorderActionEvents, createEmptyEventJournal } from './eventJournal';
 import { projectBusinessFlow } from './businessFlowProjection';
@@ -151,13 +151,9 @@ export function clearFlowRecordingHistory(flow: BusinessFlow): BusinessFlow {
     repeatSegments: [],
     network: [],
     artifacts: {
-      ...flow.artifacts,
+      ...stripDeprecatedLegacyArtifacts(flow.artifacts),
       playwrightCode: undefined,
       deletedStepIds: [],
-      deletedActionIndexes: [],
-      deletedActionSignatures: {},
-      stepActionIndexes: {},
-      stepMergedActionIndexes: {},
       recorder: {
         version: 3,
         actionLog: [],

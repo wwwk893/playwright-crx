@@ -356,8 +356,5 @@ function actionIndexForStep(flow: BusinessFlow, stepId: string) {
   const step = flow.steps.find(step => step.id === stepId);
   const actionId = step?.sourceActionIds?.[0];
   const action = flow.artifacts?.recorder?.actionLog.find(action => action.id === actionId);
-  if (typeof action?.recorderIndex === 'number')
-    return action.recorderIndex;
-  const legacyActionIndex = flow.artifacts?.stepActionIndexes?.[stepId];
-  return typeof legacyActionIndex === 'number' ? legacyActionIndex : undefined;
+  return typeof action?.recorderIndex === 'number' ? action.recorderIndex : undefined;
 }
