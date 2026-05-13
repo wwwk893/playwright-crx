@@ -1703,9 +1703,9 @@ function activePopupOptionRowsSelector(options: EmitStepOptions = {}) {
 
 function optionTextTokens(optionName: string, options: { keepSecondaryTokens?: boolean; parserSafeRuntimeBridge?: boolean } = {}) {
   const normalized = normalizeGeneratedText(optionName) || '';
-  const parserSafeRuntimeBridgeToken = parserSafeRuntimeBridgeOptionTextToken(normalized, options);
-  if (parserSafeRuntimeBridgeToken)
-    return [parserSafeRuntimeBridgeToken];
+  const parserSafeRuntimeBridgeTokens = parserSafeRuntimeBridgeOptionTextTokens(normalized, options);
+  if (parserSafeRuntimeBridgeTokens?.length)
+    return parserSafeRuntimeBridgeTokens;
   const tokens = normalized.split(/\s+/).filter(Boolean);
   if (tokens.length <= 1) {
     const compactTokens = compactOptionTextTokens(normalized, options);
@@ -1716,30 +1716,24 @@ function optionTextTokens(optionName: string, options: { keepSecondaryTokens?: b
   return uniqueValues(identityTokens.length ? identityTokens : [optionName]);
 }
 
-function parserSafeRuntimeBridgeOptionTextToken(text: string, options: { parserSafeRuntimeBridge?: boolean } = {}) {
+function parserSafeRuntimeBridgeOptionTextTokens(text: string, options: { parserSafeRuntimeBridge?: boolean } = {}) {
   const rangeMatch = bestCompactIpRangeMatch(text);
   if (!options.parserSafeRuntimeBridge || !rangeMatch)
     return undefined;
-  const secondaryToken = secondaryOptionTokenAroundRange(text, rangeMatch);
-  if (secondaryToken) {
-    const compactRange = rangeMatch.text.replace(/\s+/g, '');
-    const prefix = text.slice(0, rangeMatch.index).trim();
-    const primaryPrefix = prefix.split(/\s+/).filter(token => token && !isSecondaryOptionToken(token)).join('');
-    if (primaryPrefix)
-      return `${primaryPrefix}${compactRange}${secondaryToken}`;
-  }
+  const prefixTokens = text.slice(0, rangeMatch.index).trim().split(/\s+/).filter(Boolean);
+  const suffixTokens = text.slice(rangeMatch.index + rangeMatch.text.length).trim().split(/\s+/).filter(Boolean);
+  const compactRange = rangeMatch.text.replace(/\s+/g, '');
+  const orderedTokens = [...prefixTokens, compactRange, ...suffixTokens].filter(Boolean);
   const compact = text.replace(/\s+/g, '');
-  return compact && compact !== text ? compact : undefined;
+  if (!orderedTokens.some(isSecondaryOptionToken))
+    return compact && compact !== text ? [compact] : undefined;
+  if (!compact)
+    return undefined;
+  return [compact];
 }
 
 function isSecondaryOptionToken(token: string) {
   return /^(共享|独享|shared|dedicated)$/i.test(token);
-}
-
-function secondaryOptionTokenAroundRange(text: string, rangeMatch: { text: string; index: number }) {
-  const prefixTokens = text.slice(0, rangeMatch.index).trim().split(/\s+/).filter(Boolean);
-  const suffixTokens = text.slice(rangeMatch.index + rangeMatch.text.length).trim().split(/\s+/).filter(Boolean);
-  return [...suffixTokens, ...prefixTokens].find(isSecondaryOptionToken);
 }
 
 function compactOptionTextTokens(text: string, options: { keepSecondaryTokens?: boolean } = {}) {
