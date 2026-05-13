@@ -16,6 +16,8 @@
 import type { BusinessFlow, FlowAssertion, FlowRepeatSegment, FlowStep } from '../flow/types';
 import { actionLabel, summarizeStepSubject } from '../flow/display';
 import { asLocator } from '@isomorphic/locatorGenerators';
+import { isRecipeBackedAntdSelectOption, recipeOptionSearchText, recipeOptionText } from './antDRecipeRenderers';
+import { buildRecipeForStep } from './recipeBuilder';
 import { renderRepeatAssertionTemplate } from './terminalAssertions';
 
 export function createEffectiveReplayFlow(flow: BusinessFlow): BusinessFlow {
@@ -766,9 +768,20 @@ function isRedundantSelectedValueDisplayClick(step: FlowStep, previousStep?: Flo
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
   if (!/getByText|internal:text=|text=/.test(source))
     return false;
+  if (isExactOrCompactMatch && isWeakSelectedValueTextEcho(step))
+    return true;
   if (!sameFieldIdentityIgnoringDialog(step, previousStep) && !hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText))
     return false;
   return true;
+}
+
+function isWeakSelectedValueTextEcho(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  return !step.target?.testId &&
+    !step.context?.before.target?.testId &&
+    !step.target?.scope?.table &&
+    !step.context?.before.table &&
+    !/^(button|link|checkbox|radio|switch|tab|menuitem)$/i.test(role || '');
 }
 
 export function isTruncatedSelectedValueDisplayEchoClick(step: FlowStep, previousStep?: FlowStep) {
@@ -823,6 +836,9 @@ function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep:
 function isAntdProjectedSelectStep(step: FlowStep) {
   if (step.action !== 'select')
     return false;
+  const recipe = buildRecipeForStep(step);
+  if (isRecipeBackedAntdSelectOption(recipe))
+    return true;
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
   return step.uiRecipe?.kind === 'select-option' ||
     /ant-select-selector|ant-cascader-picker|ant-select-dropdown|ant-cascader-dropdown/.test(source);
@@ -1530,6 +1546,9 @@ function hasPageContextAntdOption(step: FlowStep) {
 }
 
 function isAntdSelectOptionStep(step: FlowStep) {
+  const recipe = buildRecipeForStep(step);
+  if (isRecipeBackedAntdSelectOption(recipe))
+    return true;
   if (isOrdinaryFormLabelClick(step))
     return false;
   const contextTarget = step.context?.before.target;
@@ -1871,7 +1890,8 @@ function parserSafeSelectSearchTextForStep(step: FlowStep, optionName: string) {
 function projectedSelectSearchText(step?: FlowStep, selectedOptionText?: string) {
   if (!step || (step.action !== 'select' && !selectedOptionText))
     return undefined;
-  return normalizeGeneratedText(rawAction(step.rawAction).searchText || '') || inferredOwnedSelectSearchText(step, selectedOptionText);
+  const recipeSearchText = recipeOptionSearchText(buildRecipeForStep(step));
+  return normalizeGeneratedText(recipeSearchText || rawAction(step.rawAction).searchText || '') || inferredOwnedSelectSearchText(step, selectedOptionText);
 }
 
 function inferredOwnedSelectSearchText(step: FlowStep, selectedOptionText?: string) {
@@ -1906,15 +1926,16 @@ function rawSelectOptionParserSafeSource(step: FlowStep) {
 }
 
 function projectedAntdSelectOptionSource(step: FlowStep, options: EmitStepOptions = {}) {
-  if (!isAntdProjectedSelectStep(step))
+  const recipe = buildRecipeForStep(step);
+  if (!isRecipeBackedAntdSelectOption(recipe) && !isAntdProjectedSelectStep(step))
     return undefined;
   const triggerLocator = antdSelectFieldLocator(step);
-  const optionName = antdSelectOptionName(step);
+  const optionName = recipeOptionText(recipe) || antdSelectOptionName(step);
   if (!triggerLocator || !optionName)
     return undefined;
   if (options.parserSafe)
     return antdSelectOptionParserSafeSource(step, options);
-  return antdOwnedSelectOptionClickSource(triggerLocator, optionName, projectedSelectSearchText(step, optionName));
+  return antdOwnedSelectOptionClickSource(triggerLocator, optionName, recipeOptionSearchText(recipe) || projectedSelectSearchText(step, optionName));
 }
 
 function inheritedOptionClickSourceFromPreviousStep(step: FlowStep, previousStep: FlowStep | undefined, options: EmitStepOptions = {}) {
@@ -2000,15 +2021,16 @@ function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: st
     `      };`,
     `      const findVisibleOwnedOption = () => {`,
     `        const options = ownedRoots().flatMap(root => Array.from(root.querySelectorAll(".ant-select-item-option")));`,
-    `        return options.find(element => {`,
+    `        const optionMatches = options.map(element => {`,
     `          const dropdown = element.closest(".ant-select-dropdown");`,
     `          if (!isDropdownVisible(dropdown) || !isElementVisible(element))`,
-    `            return false;`,
+    `            return undefined;`,
     `          const content = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
     `          const text = normalize(element.textContent);`,
     `          const title = normalize(element.getAttribute("title"));`,
-    `          return title === expected || content === expected || text === expected || content.includes(expected) || text.includes(expected);`,
-    `        });`,
+    `          return { element, exact: title === expected || content === expected || text === expected, partial: content.includes(expected) || text.includes(expected) };`,
+    `        }).filter(Boolean);`,
+    `        return optionMatches.find(match => match.exact)?.element || optionMatches.find(match => match.partial)?.element;`,
     `      };`,
     `      let element = findVisibleOwnedOption();`,
     `      const deadline = Date.now() + (payload.dispatch ? 10000 : 0);`,
@@ -2051,6 +2073,9 @@ function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: st
 }
 
 function antdSelectOptionName(step: FlowStep) {
+  const recipeText = recipeOptionText(buildRecipeForStep(step));
+  if (recipeText)
+    return recipeText;
   const contextTarget = step.context?.before.target;
   const rawTitle = rawSelectOptionTitle(step);
   const recordedOptionText = recordedActiveDropdownOptionTextFromSource(step.sourceCode || '');
@@ -2248,10 +2273,17 @@ function antdSelectOptionDispatchSource(locator: string, optionName?: string, op
     `    const normalized = normalize(value);`,
     `    return normalized === expected || expectedTokens.every(token => normalized.includes(token)) || (!!expectedTokens[0] && normalized.includes(expectedTokens[0]));`,
     `  };`,
-    `  const element = elements.find(element => {`,
+    `  const exactElement = elements.find(element => {`,
+    `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
+    `    const title = normalize(element.getAttribute("title"));`,
+    `    const text = normalize(element.textContent);`,
+    `    return title === expected || optionText === expected || text === expected;`,
+    `  });`,
+    `  const fallbackElement = elements.find(element => {`,
     `    const optionText = normalize(element.querySelector(".ant-select-item-option-content")?.textContent);`,
     `    return matchesExpected(element.getAttribute("title")) || matchesExpected(optionText) || matchesExpected(element.textContent);`,
     `  });`,
+    `  const element = exactElement || fallbackElement;`,
     `  if (!element)`,
     `    throw new Error(\`AntD option not found: \${expected}\`);`,
     `  const text = normalize(element.textContent);`,

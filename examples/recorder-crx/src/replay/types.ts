@@ -13,6 +13,9 @@ export type {
   UiActionRecipeOption,
   UiActionRecipeTarget,
   UiActionReplayContract,
+  UiReplayExportedStrategy,
+  UiReplayParserSafeStrategy,
+  UiReplayRuntimeFallback,
 } from '../uiSemantics/recipes';
 
 export type RuntimeBridgeKind = 'runtime-bridge' | 'dom-dispatch' | 'native-event' | 'none';

@@ -65,16 +65,42 @@ export type UiActionRecipeTarget = {
 };
 
 export type UiActionRecipeOption = {
+  text?: string;
   searchText?: string;
   displayText?: string;
   exactTokens?: string[];
   path?: string[];
 };
 
+export type UiReplayRuntimeFallback =
+  | 'active-antd-popup-option'
+  | 'duplicate-testid-ordinal'
+  | 'active-popconfirm-confirm';
+
+export type UiReplayExportedStrategy =
+  | 'locator-click'
+  | 'locator-fill'
+  | 'native-select-option'
+  | 'antd-owned-option-dispatch'
+  | 'antd-tree-option-dispatch'
+  | 'antd-cascader-path-dispatch'
+  | 'table-row-action'
+  | 'dialog-scoped-button'
+  | 'popover-confirm'
+  | 'control-toggle';
+
+export type UiReplayParserSafeStrategy =
+  | 'simple-locator-action'
+  | 'native-select-option'
+  | 'field-trigger-search-option'
+  | 'active-popup-option'
+  | 'table-row-scoped-action'
+  | 'dialog-scoped-action';
+
 export type UiActionReplayContract = {
-  exportedStrategy?: string;
-  parserSafeStrategy?: string;
-  runtimeFallback?: string;
+  exportedStrategy?: UiReplayExportedStrategy;
+  parserSafeStrategy?: UiReplayParserSafeStrategy;
+  runtimeFallback?: UiReplayRuntimeFallback;
 };
 
 export interface UiActionRecipe {
