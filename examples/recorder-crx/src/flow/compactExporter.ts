@@ -20,6 +20,7 @@ import type { StepContextSnapshot } from './pageContextTypes';
 type CompactValue = string | number | boolean | null | CompactValue[] | { [key: string]: CompactValue | undefined };
 
 export function toCompactFlow(flow: BusinessFlow): string {
+  // Internal recorder diagnostics, including adaptive target snapshots, are intentionally omitted.
   const compact = {
     flow: flow.flow.name,
     id: flow.flow.id,
