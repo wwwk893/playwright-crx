@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { TestInfo } from '@playwright/test';
-import type { Page, BrowserContext } from 'playwright-core';
+import type { Page } from 'playwright-core';
 import { test, expect } from './crxRecorderTest';
+import { replayGeneratedPlaywrightCode } from './helpers/replayAssertions';
+import { humanClick, selectAntdOptionLikeUser } from './humanLike';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -50,6 +51,77 @@ test('shows grouped settings accordion from the flow library', async ({ page, at
   await expect(aiDetails.locator('input[type="password"]')).toBeVisible();
 });
 
+test('generated replay terminal verification fails when a created row is missing', async ({ context }) => {
+  const code = generatedReplayCode('false green missing created row', [
+    `await page.goto('/antd-users-real.html');`,
+  ]);
+
+  await expect(replayGeneratedPlaywrightCode(context, code, test.info(), {
+    verify: async replayPage => {
+      const usersTable = replayPage.getByTestId('users-table');
+      await expect(usersTable.getByRole('row').filter({ hasText: /charlie\.qa[\s\S]*审计员/ })).toBeVisible({ timeout: 1000 });
+    },
+    standalone: [
+      `const usersTable = page.getByTestId("users-table");`,
+      `await expect(usersTable.getByRole('row').filter({ hasText: /charlie\\.qa[\\s\\S]*审计员/ })).toBeVisible({ timeout: 1000 });`,
+    ],
+  })).rejects.toThrow(/charlie|toBeVisible|Timed out|Timeout/i);
+});
+
+test('generated replay terminal verification catches save before required fields', async ({ context }) => {
+  const code = generatedReplayCode('false green save before required fields', [
+    `await page.goto('/antd-pro-form-fields.html');`,
+    `await page.getByTestId('network-resource-add').click();`,
+    `await page.getByTestId('network-resource-save').click();`,
+  ]);
+
+  await expect(replayGeneratedPlaywrightCode(context, code, test.info(), {
+    verify: async replayPage => {
+      const table = replayPage.getByTestId('network-resource-table');
+      await expect(table.getByRole('row').filter({ hasText: /missing-resource/ })).toBeVisible({ timeout: 1000 });
+      await expect(replayPage.getByTestId('network-resource-modal')).toBeHidden({ timeout: 1000 });
+    },
+    standalone: [
+      `const table = page.getByTestId("network-resource-table");`,
+      `await expect(table.getByRole('row').filter({ hasText: /missing-resource/ })).toBeVisible({ timeout: 1000 });`,
+      `await expect(page.getByTestId("network-resource-modal")).toBeHidden({ timeout: 1000 });`,
+    ],
+  })).rejects.toThrow(/missing-resource|toBeVisible|Timed out|Timeout/i);
+});
+
+test('generated replay terminal verification fails when a row is not deleted', async ({ context }) => {
+  const code = generatedReplayCode('false green row not deleted', [
+    `await page.goto('/antd-wan-transport-real.html');`,
+  ]);
+
+  await expect(replayGeneratedPlaywrightCode(context, code, test.info(), {
+    verify: async replayPage => {
+      const table = replayPage.getByTestId('wan-transport-table');
+      await expect(table.locator('[data-row-key="nova_public"]')).toHaveCount(0, { timeout: 1000 });
+    },
+    standalone: [
+      `const table = page.getByTestId("wan-transport-table");`,
+      `await expect(table.locator('[data-row-key="nova_public"]')).toHaveCount(0, { timeout: 1000 });`,
+    ],
+  })).rejects.toThrow(/nova_public|toHaveCount|Timed out|Timeout/i);
+});
+
+test('generated replay terminal verification fails when the modal is still open', async ({ context }) => {
+  const code = generatedReplayCode('false green modal still open', [
+    `await page.goto('/antd-users-real.html');`,
+    `await page.getByTestId('create-user-btn').click();`,
+  ]);
+
+  await expect(replayGeneratedPlaywrightCode(context, code, test.info(), {
+    verify: async replayPage => {
+      await expect(replayPage.getByRole('dialog', { name: '新建用户' })).toBeHidden({ timeout: 1000 });
+    },
+    standalone: [
+      `await expect(page.getByRole('dialog', { name: '新建用户' })).toBeHidden({ timeout: 1000 });`,
+    ],
+  })).rejects.toThrow(/新建用户|toBeHidden|Timed out|Timeout/i);
+});
+
 test('records a real AntD user business flow through the plugin UI, exports it, and replays generated Playwright code @smoke', async ({ context, page, attachRecorder, baseURL }) => {
   test.setTimeout(120_000);
 
@@ -75,17 +147,20 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
 
   await page.getByTestId('create-user-btn').locator('svg').click();
   await page.getByPlaceholder('请输入用户名').fill('alice');
+  const createUserDialog = page.getByRole('dialog', { name: '新建用户' });
   await page.getByTestId('role-select').click();
   await clickVisibleAntDOption(page, '审计员');
+  await expect(page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByTestId('role-select')).toContainText('审计员');
-  await page.getByTestId('modal-confirm').locator('span').click();
+  await page.bringToFront();
+  await createUserDialog.getByTestId('modal-confirm').press('Enter');
   await expect(page.getByTestId('create-user-modal')).not.toBeVisible();
 
-  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(4);
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(5);
   await expect.poll(recordedSubjects).toContain('create-user-btn');
   await expect.poll(recordedSubjects).toContain('alice');
   await expect.poll(recordedSubjects).toContain('审计员');
-  await expect.poll(recordedSubjects, { timeout: 20_000 }).toContain('审计员');
+  await expect.poll(recordedSubjects, { timeout: 20_000 }).toMatch(/modal-confirm|确\s*定/);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -117,10 +192,22 @@ test('records a real AntD user business flow through the plugin UI, exports it, 
   expect(flow.artifacts.playwrightCode).toMatch(/getByTestId\(["']create-user-btn["']\)/);
   expect(flow.artifacts.playwrightCode).toMatch(/getByRole\(["']textbox["'],\s*\{\s*name:\s*["']\*?\s*用户名["']|getByLabel\(["']用户名["']\)/);
   expect(flow.artifacts.playwrightCode).toContain('审计员');
+  expect(flow.artifacts.playwrightCode).toMatch(/modal-confirm|getByRole\(["']button["'],\s*\{\s*name:\s*["']确\s*定["']/);
   expect(exportedYaml).toContain('AntD 用户流程 E2E');
   expect(exportedYaml).toMatch(/modal-confirm|确 定|确定|审计员/);
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), {
+    verify: async replayPage => {
+      const usersTable = replayPage.getByTestId('users-table');
+      await expect(usersTable.getByRole('row').filter({ hasText: /alice[\s\S]*审计员/ })).toBeVisible({ timeout: 10_000 });
+      await expect(replayPage.getByRole('dialog', { name: '新建用户' })).toBeHidden({ timeout: 10_000 });
+    },
+    standalone: [
+      `const usersTable = page.getByTestId("users-table");`,
+      `await expect(usersTable.getByRole('row').filter({ hasText: /alice[\\s\\S]*审计员/ })).toBeVisible({ timeout: 10000 });`,
+      `await expect(page.getByRole('dialog', { name: '新建用户' })).toBeHidden({ timeout: 10000 });`,
+    ],
+  });
 });
 
 test('records a real AntD ProComponents async create-and-use flow @smoke', async ({ context, page, attachRecorder, baseURL }) => {
@@ -163,6 +250,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   const flow = await exportBusinessFlowJson(recorderPage);
+  writeGeneratedReplayDiagnostic(test.info(), 'async-create-use', flow);
 
   expect(flow.flow.name).toBe('真实 AntD ProComponents 条目流程');
   expect(flow.steps.length).toBeGreaterThanOrEqual(7);
@@ -172,17 +260,27 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
-  expectInOrder(flow.artifacts.playwrightCode, [
-    'page.locator(".ant-form-item").filter({ hasText: "下方表单使用条目" })',
-    '.locator(".ant-select-selector',
-    /page\.locator\("\.ant-select-dropdown:visible(?:, \.ant-cascader-dropdown:visible)?"\)\.last\(\)\.locator\("\.ant-select-item-option/,
-    '.filter({ hasText: "real-item-a" }).first().click()',
-  ]);
+  expectScopedActiveAntdOptionReplay(flow.artifacts.playwrightCode, '下方表单使用条目', 'real-item-a');
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']下方表单使用条目["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
+  expect(flow.artifacts.playwrightCode).not.toMatch(/page\.getByText\(["']real-item-a["']\)\.click\(\)/);
+  expect(flow.artifacts.playwrightCode).not.toMatch(/getByTitle\(["']real-item-a["']\)/);
   expect(flow.artifacts.playwrightCode).toContain('下方表单使用刚保存的条目');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), {
+    verify: async replayPage => {
+      const itemsTable = replayPage.getByTestId('real-items-table');
+      await expect(itemsTable.getByRole('row').filter({ hasText: /real-item-a[\s\S]*真实运营/ })).toBeVisible({ timeout: 10_000 });
+      await expect(replayPage.getByTestId('real-used-item-select')).toContainText('real-item-a', { timeout: 10_000 });
+      await expect(replayPage.getByTestId('real-create-item-modal')).toBeHidden({ timeout: 10_000 });
+    },
+    standalone: [
+      `const itemsTable = page.getByTestId("real-items-table");`,
+      `await expect(itemsTable.getByRole('row').filter({ hasText: /real-item-a[\\s\\S]*真实运营/ })).toBeVisible({ timeout: 10000 });`,
+      `await expect(page.getByTestId("real-used-item-select")).toContainText("real-item-a", { timeout: 10000 });`,
+      `await expect(page.getByTestId("real-create-item-modal")).toBeHidden({ timeout: 10000 });`,
+    ],
+  });
 });
 
 
@@ -206,7 +304,6 @@ test('records real ProFormField network configuration fields and replays generat
   await page.goto(`${baseURL}/antd-pro-form-fields.html`);
   await expect(page.getByText('网络配置资源')).toBeVisible();
   await attachRecorder(page, { mode: 'business-flow' });
-  const stepSubjects = async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
   await page.getByTestId('network-resource-add').click();
   const networkResourceDialog = page.getByRole('dialog', { name: '新建网络资源' });
   await expect(networkResourceDialog).toBeVisible();
@@ -220,27 +317,34 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-wan-select').locator('input').fill('WAN-extra-18');
   await clickVisibleAntDOption(page, 'edge-lab:WAN-extra-18');
   await expect(page.getByTestId('network-resource-wan-select')).toContainText('edge-lab:WAN-extra-18');
-  await networkResourceDialog.getByText('独享地址池').click();
+  await waitForRecordedMarker(recorderPage, 'WAN-extra-18');
+  const dedicatedPoolLabel = networkResourceDialog.locator('label').filter({ hasText: '独享地址池' }).first();
+  await humanClick(dedicatedPoolLabel);
   await expect(networkResourceDialog.locator('input[type="radio"][value="dedicated"]')).toBeChecked();
+  await waitForRecordedMarker(recorderPage, '独享地址池');
   await page.getByTestId('network-resource-vrf-select').click();
   await page.getByTestId('network-resource-vrf-select').locator('input').fill('生产');
   await clickVisibleAntDOption(page, '生产VRF');
   await expect(page.getByTestId('network-resource-vrf-select')).toContainText('生产VRF');
+  await waitForRecordedMarker(recorderPage, '生产VRF');
   const arpProxyItem = networkResourceDialog.locator('.ant-form-item').filter({ hasText: '能力开关' });
   const arpProxyCheckbox = arpProxyItem.getByRole('checkbox', { name: '开启代理ARP' });
-  await arpProxyItem.locator('.ant-checkbox-wrapper').filter({ hasText: '开启代理ARP' }).click();
+  await humanClick(arpProxyItem.locator('.ant-checkbox-wrapper').filter({ hasText: '开启代理ARP' }));
   await expect(arpProxyCheckbox).toBeChecked();
-  await page.getByText('启用健康检查').click();
+  await waitForRecordedMarker(recorderPage, '开启代理ARP');
+  await humanClick(page.getByText('启用健康检查'));
   await expect(page.getByTestId('network-resource-health-url')).toBeVisible();
   await page.getByTestId('network-resource-health-url').fill('https://probe.example/health');
   await page.getByTestId('network-resource-scope-tree').click();
   await clickVisibleAntDTreeNode(page, '华东生产区');
   await expect(page.getByTestId('network-resource-scope-tree')).toContainText('华东生产区');
-  await page.getByTestId('network-resource-egress-cascader').click();
+  await waitForRecordedMarker(recorderPage, '华东生产区');
+  await humanClick(page.getByTestId('network-resource-egress-cascader'));
   await clickVisibleAntDCascaderOption(page, '上海');
   await clickVisibleAntDCascaderOption(page, '一号机房');
   await clickVisibleAntDCascaderOption(page, 'NAT集群A');
   await expect(page.getByTestId('network-resource-egress-cascader')).toContainText('NAT集群A');
+  await waitForRecordedMarker(recorderPage, 'NAT集群A');
   await page.getByPlaceholder('服务名称').fill('https-admin');
   await page.getByPlaceholder('监听端口').fill('8443');
   await expect(page.getByPlaceholder('监听端口')).toHaveValue('8443');
@@ -250,13 +354,18 @@ test('records real ProFormField network configuration fields and replays generat
   await page.getByTestId('network-resource-save').click();
   await expect(page.getByRole('row', { name: /pool-proform-alpha/ })).toBeVisible({ timeout: 10_000 });
 
-  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(9);
-  await expect.poll(stepSubjects).toContain('network-resource-add');
-  await expect.poll(stepSubjects).toContain('pool-proform-alpha');
-  await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|network-resource-wan-select/);
-  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/类型|独享地址池|poolType/);
-  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/开启代理ARP|arpProxy/);
-  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/NAT集群A|出口路径|egressPath/);
+  await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(12);
+  for (const marker of [
+    '独享地址池',
+    '生产VRF',
+    '开启代理ARP',
+    '华东生产区',
+    'NAT集群A',
+    'https-admin',
+    '8443',
+    'ProFormField 全量组合录制',
+  ])
+    await waitForRecordedMarker(recorderPage, marker);
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -269,13 +378,27 @@ test('records real ProFormField network configuration fields and replays generat
   expect(flow.steps.some((step: any) => step.target?.testId === 'network-resource-name' || step.target?.placeholder === '地址池名称' || step.target?.label === '资源名称')).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.placeholder, step.target?.testId].some(value => /WAN口|选择一个WAN口|network-resource-wan-select/.test(String(value || ''))))).toBeTruthy();
   expect(flow.steps.some((step: any) => [step.target?.label, step.target?.displayName, step.target?.name, step.target?.text].some(value => /类型|独享地址池|poolType/.test(String(value || ''))))).toBeTruthy();
+  const serializedProFormSteps = JSON.stringify(flow.steps, null, 2);
   const serializedProFormTargets = JSON.stringify(flow.steps.map((step: any) => step.target), null, 2);
+  for (const marker of [
+    'pool-proform-alpha',
+    'edge-lab:WAN-extra-18',
+    '生产VRF',
+    'https://probe.example/health',
+    '华东生产区',
+    'NAT集群A',
+    'https-admin',
+    '8443',
+    'ProFormField 全量组合录制',
+  ])
+    expect(serializedProFormSteps, `exported flow should keep ProForm value: ${marker}`).toContain(marker);
   expect(serializedProFormTargets).toMatch(/开启代理ARP|arpProxy/);
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-form-fields.html');
   expect(flow.artifacts.playwrightCode).toContain('pool-proform-alpha');
   expect(flow.artifacts.playwrightCode).toContain('edge-lab:WAN-extra-18');
   expect(flow.artifacts.playwrightCode).not.toContain('edge-lab:WAN1-copy');
   expect(flow.artifacts.playwrightCode).toContain('生产VRF');
+  expect(flow.artifacts.playwrightCode).toMatch(/开启代理ARP|arpProxy/);
   expect(flow.artifacts.playwrightCode).toContain('华东生产区');
   expect(flow.artifacts.playwrightCode).toContain('NAT集群A');
   expect(flow.artifacts.playwrightCode).toContain('https-admin');
@@ -290,25 +413,18 @@ test('records real ProFormField network configuration fields and replays generat
   ]);
   assertNoNetworkResourceSubmitBeforeRequiredFields(flow.artifacts.playwrightCode);
 
+  const proFormTerminalRowPattern = /pool-proform-alpha[\s\S]*edge-lab:WAN-extra-18[\s\S]*生产VRF[\s\S]*华东生产区[\s\S]*NAT集群A[\s\S]*已开启[\s\S]*启用[\s\S]*https-admin:8443[\s\S]*ProFormField 全量组合录制/;
   const replayVerification = [
-    `await expect(page.getByTestId("network-resource-table")).toContainText("pool-proform-alpha", { timeout: 10000 });`,
-    `await expect(page.getByTestId("network-resource-table")).toContainText("edge-lab:WAN-extra-18");`,
-    `await expect(page.getByTestId("network-resource-table")).toContainText("生产VRF");`,
-    `await expect(page.getByTestId("network-resource-table")).toContainText("华东生产区");`,
-    `await expect(page.getByTestId("network-resource-table")).toContainText("NAT集群A");`,
-    `await expect(page.getByTestId("network-resource-table")).toContainText("https-admin:8443");`,
-    `await expect(page.getByTestId("network-resource-table")).toContainText("ProFormField 全量组合录制");`,
+    `const networkTable = page.getByTestId("network-resource-table");`,
+    `await expect(networkTable.getByRole('row').filter({ hasText: /pool-proform-alpha[\\s\\S]*edge-lab:WAN-extra-18[\\s\\S]*生产VRF[\\s\\S]*华东生产区[\\s\\S]*NAT集群A[\\s\\S]*已开启[\\s\\S]*启用[\\s\\S]*https-admin:8443[\\s\\S]*ProFormField 全量组合录制/ })).toBeVisible({ timeout: 10000 });`,
   ];
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), async replayPage => {
-    const table = replayPage.getByTestId('network-resource-table');
-    await expect(table).toContainText('pool-proform-alpha', { timeout: 10_000 });
-    await expect(table).toContainText('edge-lab:WAN-extra-18');
-    await expect(table).toContainText('生产VRF');
-    await expect(table).toContainText('华东生产区');
-    await expect(table).toContainText('NAT集群A');
-    await expect(table).toContainText('https-admin:8443');
-    await expect(table).toContainText('ProFormField 全量组合录制');
-  }, replayVerification);
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), {
+    verify: async replayPage => {
+      const table = replayPage.getByTestId('network-resource-table');
+      await expect(table.getByRole('row').filter({ hasText: proFormTerminalRowPattern })).toBeVisible({ timeout: 10_000 });
+    },
+    standalone: replayVerification,
+  });
 });
 
 
@@ -369,6 +485,8 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await expect.poll(stepSubjects).toContain('site-ip-address-pool-create-button');
   await expect.poll(stepSubjects).toContain('test1');
   await expect.poll(stepSubjects).toMatch(/WAN口|选择一个WAN口|xtest16:WAN1/);
+  await expect.poll(stepSubjects, { timeout: 25_000 }).toMatch(/ipv4-address-pool-confirm|确\s*定/);
+  await expect.poll(stepSubjects, { timeout: 25_000 }).toContain('site-save-button');
 
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -407,6 +525,7 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   await expect(recorderPage.locator('.repeat-segment-card')).toContainText('批量创建IPv4地址池');
 
   flow = await exportBusinessFlowJson(recorderPage);
+  writeGeneratedReplayDiagnostic(test.info(), 'ipv4-pool', flow);
   expect(flow.repeatSegments?.[0]?.stepIds).toEqual(repeatStepIds);
   expect(flow.repeatSegments?.[0]?.stepIds).not.toContain(saveConfigStepId);
   expect(flow.repeatSegments?.[0]?.parameters.map((parameter: any) => parameter.variableName)).toEqual(expect.arrayContaining(['poolName', 'port', 'startIp', 'endIp']));
@@ -419,14 +538,40 @@ test('records an IPv4 address pool ProFormSelect WAN flow and replays generated 
   expect(flow.artifacts.playwrightCode).toContain('xtest16:WAN1');
   expect(flow.artifacts.playwrightCode).toContain('1.1.1.1');
   expect(flow.artifacts.playwrightCode).toContain('2.2.2.2');
-  expectInOrder(flow.artifacts.playwrightCode, [
-    'page.locator(".ant-form-item").filter({ hasText: "WAN口" })',
-    '.locator(".ant-select-selector',
-  ]);
+  expectTriggerOwnedAntdOptionReplay(
+      flow.artifacts.playwrightCode,
+      /const trigger = [\s\S]{0,520}(?:ipv4-address-pool-form|WAN口)[\s\S]{0,320}\.locator\(["'][^"']*\.ant-select-selector/,
+      'xtest16:WAN1',
+  );
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']WAN口["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
+  const ipv4Segment = flow.repeatSegments[0];
+  const valueFor = (row: any, variableName: string) => {
+    const parameter = [...ipv4Segment.parameters].reverse().find((parameter: any) => parameter.variableName === variableName || parameter.variableName.startsWith(variableName));
+    return row.values[parameter?.id];
+  };
+  const ipv4TerminalRows = ipv4Segment.rows.map((row: any) => ({
+    poolName: valueFor(row, 'poolName'),
+    port: valueFor(row, 'port'),
+    startIp: valueFor(row, 'startIp'),
+    endIp: valueFor(row, 'endIp'),
+  }));
+  const ipv4RowRegex = (row: typeof ipv4TerminalRows[number]) => new RegExp([row.poolName, row.port, row.startIp, row.endIp].map(escapeRegExp).join('[\\s\\S]*'));
+  const ipv4ReplayVerification = [
+    `const ipv4Table = page.getByTestId("site-ip-address-pool-table");`,
+    ...ipv4TerminalRows.map(row => `await expect(ipv4Table.getByRole('row').filter({ hasText: /${[row.poolName, row.port, row.startIp, row.endIp].map(escapeRegExp).join('[\\s\\S]*')}/ })).toBeVisible({ timeout: 10000 });`),
+    `await expect(page.getByRole('dialog', { name: '新建IPv4地址池' })).toBeHidden({ timeout: 10000 });`,
+  ];
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), {
+    verify: async replayPage => {
+      const ipv4Table = replayPage.getByTestId('site-ip-address-pool-table');
+      for (const row of ipv4TerminalRows)
+        await expect(ipv4Table.getByRole('row').filter({ hasText: ipv4RowRegex(row) })).toBeVisible({ timeout: 10_000 });
+      await expect(replayPage.getByRole('dialog', { name: '新建IPv4地址池' })).toBeHidden({ timeout: 10_000 });
+    },
+    standalone: ipv4ReplayVerification,
+  });
 });
 
 
@@ -449,19 +594,24 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await page.goto(`${baseURL}/antd-business-flow-stability.html`);
   await expect(page.getByText('业务流程稳定性测试页')).toBeVisible();
   await attachRecorder(page, { mode: 'business-flow' });
+  await expect.poll(() => recorderStepSubjects(recorderPage), { timeout: 15_000 }).toContain('antd-business-flow-stability.html');
   await page.getByTestId('site-ip-add').click();
+  await expect(page.getByTestId('event-log')).toContainText('add');
+  await expect.poll(() => recorderStepSubjects(recorderPage), { timeout: 15_000 }).toMatch(/site-ip-add|新增IP端口池/);
   await page.getByPlaceholder('地址池名称').fill('pool-alpha');
-  await page.getByTestId('site-save-button').click();
-  await expect(page.getByRole('row', { name: /pool-alpha/ })).toBeVisible({ timeout: 10_000 });
   await page.getByPlaceholder('填写使用备注').fill('初始保存后备注');
+  await page.getByTestId('site-save-button').click();
+  await expect(page.getByRole('row', { name: /pool-alpha.*初始保存后备注/ })).toBeVisible({ timeout: 10_000 });
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
 
   let flow = await exportBusinessFlowJson(recorderPage);
-  const addStepId = flow.steps.find((step: any) => step.target?.testId === 'site-ip-add')?.id || requiredStepId(flow, (step: any) => step.action === 'navigate', 'initial anchor step');
+  const navigateStepId = requiredStepId(flow, (step: any) => step.action === 'navigate', 'stability page navigation step');
+  const addStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-add' || /新增IP端口池/.test(String(step.target?.name || step.target?.text || step.target?.displayName || '')), 'site ip add step');
   const fillStepId = requiredStepId(flow, (step: any) => step.value === 'pool-alpha', 'pool name fill step');
+  const remarkStepId = requiredStepId(flow, (step: any) => step.value === '初始保存后备注', 'remark fill step');
   const saveStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-save-button' || /保存配置/.test(String(step.target?.name || step.target?.text || step.target?.displayName || '')), 'save step');
 
   await openInsertMenuAfterStep(recorderPage, addStepId);
@@ -477,16 +627,22 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   const validateStepId = requiredStepId(flow, (step: any) => step.target?.testId === 'site-ip-validate', 'inserted validate step');
   expect(stepIndex(flow, validateStepId)).toBe(stepIndex(flow, addStepId) + 1);
 
-  await openInsertMenuAfterStep(recorderPage, saveStepId);
+  await openInsertMenuAfterStep(recorderPage, remarkStepId);
   await recorderPage.getByRole('button', { name: '插入等待' }).click();
   await expect(recorderPage.locator('.review-step-list')).toContainText('等待');
 
   flow = await exportBusinessFlowJson(recorderPage);
   const waitStepId = requiredStepId(flow, (step: any) => step.action === 'wait', 'inserted wait step');
-  expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, saveStepId) + 1);
+  expect(stepIndex(flow, waitStepId)).toBe(stepIndex(flow, remarkStepId) + 1);
 
   await openStepCheckPanel(recorderPage);
-  await recorderPage.getByRole('button', { name: '选择全部' }).click();
+  const repeatStepIds = flow.steps
+      .filter((step: any) => stepIndex(flow, step.id) >= stepIndex(flow, addStepId) && stepIndex(flow, step.id) <= stepIndex(flow, saveStepId))
+      .map((step: any) => step.id);
+  expect(repeatStepIds).toEqual(expect.arrayContaining([addStepId, validateStepId, fillStepId, remarkStepId, saveStepId, waitStepId]));
+  expect(repeatStepIds).not.toContain(navigateStepId);
+  for (const stepId of repeatStepIds)
+    await recorderPage.locator(`button[aria-label="选择 ${stepId} 作为循环步骤"]`).click();
   await expect(recorderPage.locator('.repeat-create-actions .primary')).toBeEnabled();
   await recorderPage.locator('.repeat-create-actions .primary').click();
   await expect(recorderPage.locator('.repeat-editor')).toBeVisible({ timeout: 10_000 });
@@ -503,31 +659,62 @@ test('keeps plugin edits stable across middle insert, wait, repeat segment, save
   await continueOpenedRecord(recorderPage);
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
-  await page.getByTestId('stability-wan-select').click();
-  await page.getByTestId('stability-wan-select').locator('input').fill('WAN1');
-  await clickVisibleAntDOption(page, 'WAN1');
+  await selectAntdOptionLikeUser(page, page.getByTestId('stability-wan-select'), 'WAN1', { searchText: 'WAN1' });
   await expect(page.getByTestId('stability-wan-select')).toContainText('WAN1', { timeout: 10_000 });
-  await expect.poll(async () => (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n'), { timeout: 15_000 }).toContain('WAN1');
+  await expect.poll(() => recorderStepSubjects(recorderPage), { timeout: 15_000 }).toContain('WAN1');
   await page.waitForTimeout(250);
   await page.getByPlaceholder('填写使用备注').fill('循环后继续补步骤');
   await page.getByTestId('site-post-save-action').click();
   await expect(page.getByTestId('event-log')).toContainText('post-save');
-  await page.waitForTimeout(1200);
+  await expect.poll(() => recorderStepSubjects(recorderPage), { timeout: 15_000 }).toMatch(/site-post-save-action|保存后动作/);
   await recorderPage.getByRole('button', { name: '停止录制' }).click();
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
   await recorderPage.getByRole('button', { name: '保存记录' }).click();
 
   await openSavedRecord(recorderPage, flowName);
   flow = await exportBusinessFlowJson(recorderPage);
-  expect(flow.repeatSegments?.[0]?.stepIds).toEqual(expect.arrayContaining([fillStepId, saveStepId, waitStepId]));
+  expect(flow.repeatSegments?.[0]?.stepIds).toEqual(repeatStepIds);
+  expect(flow.repeatSegments?.[0]?.stepIds).not.toContain(navigateStepId);
   expect(flow.steps.some((step: any) => step.target?.testId === 'site-ip-validate')).toBeTruthy();
   expect(flow.steps.some((step: any) => step.action === 'wait')).toBeTruthy();
   expect(flow.artifacts.playwrightCode).toContain('for (const row of');
   expect(flow.artifacts.playwrightCode).toMatch(/批量保存地址池|批量执行/);
+  const stabilityLoopStart = flow.artifacts.playwrightCode.indexOf('for (const row of');
+  const stabilityLoopBody = flow.artifacts.playwrightCode.slice(stabilityLoopStart, flow.artifacts.playwrightCode.indexOf('\n  }', stabilityLoopStart));
+  expect(stabilityLoopBody).not.toContain('page.goto(');
+  expectInOrder(stabilityLoopBody, [
+    'site-ip-add',
+    'site-ip-validate',
+    /String\(row\.poolName\)/,
+    /String\(row\.remark\)/,
+    /waitForTimeout\(1000\)/,
+    'site-save-button',
+  ]);
   expect(flow.artifacts.playwrightCode).toContain('WAN1');
   expect(flow.artifacts.playwrightCode).not.toContain('WAN1-copy');
 
-  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info());
+  const stabilitySegment = flow.repeatSegments[0];
+  const stabilityPoolParameter = stabilitySegment.parameters.find((parameter: any) => parameter.variableName === 'poolName');
+  const stabilityPoolNames = stabilityPoolParameter ? stabilitySegment.rows.map((row: any) => row.values[stabilityPoolParameter.id]) : ['pool-alpha'];
+  const stabilityRemarkParameter = stabilitySegment.parameters.find((parameter: any) => parameter.variableName === 'remark');
+  const stabilityRows = stabilitySegment.rows.map((row: any, index: number) => ({
+    poolName: stabilityPoolNames[index],
+    remark: stabilityRemarkParameter ? row.values[stabilityRemarkParameter.id] : undefined,
+  }));
+  const stabilityReplayVerification = [
+    `const stabilityPoolTable = page.getByTestId("site-ip-address-pool-table");`,
+    ...stabilityRows.map((row: { poolName: string, remark?: string }) => `await expect(stabilityPoolTable.getByRole('row').filter({ hasText: /${[row.poolName, row.remark].filter(Boolean).map(escapeRegExp).join('[\\s\\S]*')}/ })).toBeVisible({ timeout: 10000 });`),
+    `await expect(page.getByTestId("event-log")).toContainText("post-save", { timeout: 10000 });`,
+  ];
+  await replayGeneratedPlaywrightCode(context, flow.artifacts.playwrightCode, test.info(), {
+    verify: async replayPage => {
+      const stabilityPoolTable = replayPage.getByTestId('site-ip-address-pool-table');
+      for (const row of stabilityRows)
+        await expect(stabilityPoolTable.getByRole('row').filter({ hasText: new RegExp([row.poolName, row.remark].filter(Boolean).map(escapeRegExp).join('[\\s\\S]*')) })).toBeVisible({ timeout: 10_000 });
+      await expect(replayPage.getByTestId('event-log')).toContainText('post-save', { timeout: 10_000 });
+    },
+    standalone: stabilityReplayVerification,
+  });
 });
 
 // L2 deterministic recorder helpers: these specs intentionally use Playwright's
@@ -553,6 +740,18 @@ async function fillFlowMeta(recorderPage: Page, label: string, value: string) {
     label === '页面' ? '起始 URL / 页面 · 页面' :
     label;
   await recorderPage.locator('.flow-form-sheet label').filter({ hasText: sheetLabel }).locator('input, textarea, select').first().fill(value);
+}
+
+async function recorderStepSubjects(recorderPage: Page) {
+  return (await recorderPage.locator('.flow-step-subject').allInnerTexts()).join('\n');
+}
+
+async function waitForRecordedMarker(recorderPage: Page, marker: string | RegExp, timeout = 25_000) {
+  const subjectText = () => recorderStepSubjects(recorderPage);
+  if (typeof marker === 'string')
+    await expect.poll(subjectText, { timeout }).toContain(marker);
+  else
+    await expect.poll(subjectText, { timeout }).toMatch(marker);
 }
 
 async function clickVisibleAntDOption(page: Page, text: string) {
@@ -738,27 +937,6 @@ function writeGeneratedReplayDiagnostic(testInfo: TestInfo, name: string, flow: 
   fs.writeFileSync(path.join(diagnosticDir, 'business-flow.json'), JSON.stringify(flow, null, 2));
 }
 
-async function replayGeneratedPlaywrightCode(context: BrowserContext, code: string, testInfo?: TestInfo, verify?: (page: Page) => Promise<void>, standaloneVerification?: string[]) {
-  if (testInfo) {
-    const rawReplayDir = testInfo.outputPath('raw-generated-replay');
-    fs.mkdirSync(rawReplayDir, { recursive: true });
-    fs.writeFileSync(path.join(rawReplayDir, 'generated-before-inline.spec.ts'), code);
-  }
-  const body = testBody(code);
-  const replayPage = await context.newPage();
-  try {
-    const replay = new Function('page', 'expect', `return (async () => {\n${body}\n})();`);
-    await replay(replayPage, expect);
-    if (verify)
-      await verify(replayPage);
-  } finally {
-    await replayPage.close();
-  }
-  if (testInfo)
-    runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, standaloneVerification);
-}
-
-
 function expectInOrder(text: string, markers: Array<string | RegExp>) {
   let offset = 0;
   for (const marker of markers) {
@@ -767,6 +945,33 @@ function expectInOrder(text: string, markers: Array<string | RegExp>) {
     expect(index, `missing marker after offset ${offset}: ${String(marker)}`).toBeGreaterThanOrEqual(0);
     offset += index + 1;
   }
+}
+
+function expectScopedActiveAntdOptionReplay(code: string, fieldLabel: string, optionText: string) {
+  const scopedTrigger = new RegExp(`page\\.locator\\(["']\\.ant-form-item["']\\)\\.filter\\(\\{\\s*hasText:\\s*["']${escapeRegExp(fieldLabel)}["']\\s*\\}\\)[\\s\\S]{0,240}\\.locator\\(["'][^"']*\\.ant-select-selector`);
+  expectTriggerOwnedAntdOptionReplay(code, scopedTrigger, optionText, `missing scoped AntD select trigger for ${fieldLabel}`);
+}
+
+function expectTriggerOwnedAntdOptionReplay(code: string, trigger: RegExp | string, optionText: string, message = 'missing stable AntD select trigger') {
+  const triggerIndex = typeof trigger === 'string' ? code.indexOf(trigger) : code.search(trigger);
+  expect(triggerIndex, message).toBeGreaterThanOrEqual(0);
+  const tail = code.slice(triggerIndex);
+  const blockEnd = tail.indexOf('})();');
+  const block = blockEnd >= 0 ? tail.slice(0, blockEnd) : tail.slice(0, 5000);
+  expect(block, 'AntD option replay should use the trigger-owned dropdown helper').toContain('selectOwnedOption');
+  expect(block, 'AntD option replay should check the trigger-owned target before reopening the select').toContain('if (!await selectOwnedOption(false))');
+  expect(block, 'AntD option replay should dispatch through the trigger-owned dropdown helper').toContain('await selectOwnedOption(true);');
+  expect(code, `AntD option replay should preserve option text ${optionText}`).toContain(optionText);
+  expect(block, `AntD option replay should pin exact option text ${optionText}`).toMatch(new RegExp(`const expectedText = (?:${escapeRegExp(JSON.stringify(optionText))}|String\\(row\\.[A-Za-z_$][\\w$]*\\));`));
+  expect(block, 'AntD option replay should inspect trigger ownership attrs').toContain('aria-controls');
+  expect(block, 'AntD option replay should inspect trigger ownership attrs').toContain('aria-owns');
+  expect(block, 'AntD option replay should inspect active descendant ownership').toContain('aria-activedescendant');
+  expect(block, 'AntD option replay should search visible AntD dropdown roots').toContain('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
+  expect(block, 'AntD option replay should dispatch the AntD mouse event sequence').toContain('dispatchEvent(new MouseEvent("mousedown"');
+  expect(block, 'AntD option replay should not use a broad active dropdown fallback').not.toContain('.ant-select-dropdown:visible, .ant-cascader-dropdown:visible');
+  expect(code, 'AntD option replay must not use a broad text click fallback').not.toMatch(new RegExp(`page\\.getByText\\(["']${escapeRegExp(optionText)}["']\\)\\.click\\(\\)`));
+  expect(code, 'AntD option replay must not use title fallback').not.toMatch(new RegExp(`getByTitle\\(["']${escapeRegExp(optionText)}["']\\)`));
+  expect(code, 'AntD option replay must not bind to generated rc-select ids').not.toContain('#rc_select_');
 }
 
 function assertNoNetworkResourceSubmitBeforeRequiredFields(code: string) {
@@ -794,63 +999,15 @@ function assertNoNetworkResourceSubmitBeforeRequiredFields(code: string) {
     expect(tailAfterFinalSave, `required field marker should not appear after final network-resource-save: ${marker}`).not.toContain(marker);
 }
 
-function appendReplayVerification(code: string, verificationLines: string[]) {
-  if (!verificationLines.length)
-    return code;
-  const bodyEnd = code.lastIndexOf('\n});');
-  if (bodyEnd < 0)
-    throw new Error(`Unable to append generated replay verification:\n${code}`);
-  return `${code.slice(0, bodyEnd)}\n\n  // business terminal-state verification added by the E2E harness\n  ${verificationLines.join('\n  ')}\n${code.slice(bodyEnd)}`;
-}
-
-function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo, verificationLines: string[] = []) {
-  const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
-  fs.mkdirSync(rawReplayRoot, { recursive: true });
-  const rawReplayDir = fs.mkdtempSync(path.join(rawReplayRoot, `${testInfo.workerIndex}-`));
-  const specPath = path.join(rawReplayDir, 'generated-replay.spec.ts');
-  const configPath = path.join(rawReplayDir, 'playwright.raw-replay.config.ts');
-  const specSource = appendReplayVerification(code, verificationLines);
-  fs.writeFileSync(specPath, specSource);
-  fs.writeFileSync(configPath, [
-    `import { defineConfig, devices } from '@playwright/test';`,
-    `export default defineConfig({`,
-    `  timeout: 120000,`,
-    `  workers: 1,`,
-    `  reporter: 'line',`,
-    `  use: { ...devices['Desktop Chrome'], baseURL: ${JSON.stringify(rawReplayBaseURL())} },`,
+function generatedReplayCode(name: string, lines: string[]) {
+  return [
+    `import { test, expect } from '@playwright/test';`,
+    ``,
+    `test(${JSON.stringify(name)}, async ({ page }) => {`,
+    ...lines.map(line => `  ${line}`),
     `});`,
     ``,
-  ].join('\n'));
-  const result = spawnSync('npx', ['playwright', 'test', specPath, '--config', configPath, '--workers=1', '--reporter=line'], {
-    cwd: path.join(__dirname, '..'),
-    env: { ...process.env, CI: '0' },
-    encoding: 'utf8',
-    timeout: 180_000,
-  });
-  const output = `${result.stdout || ''}${result.stderr || ''}`;
-  fs.writeFileSync(path.join(rawReplayDir, 'raw-replay-output.txt'), output);
-  if (result.status !== 0)
-    throw new Error(`Generated Playwright source failed as a standalone spec (exit ${result.status}). See ${rawReplayDir}/raw-replay-output.txt\n${output}`);
-}
-
-function rawReplayBaseURL() {
-  return process.env.PLAYWRIGHT_CRX_TEST_BASE_URL || `http://127.0.0.1:${process.env.PLAYWRIGHT_CRX_TEST_PORT || '3107'}`;
-}
-
-function testBody(code: string) {
-  const header = code.match(/test\([^,]+,\s*async\s*\(\{\s*page\s*\}\)\s*=>\s*\{/);
-  if (!header)
-    throw new Error(`Unable to find generated Playwright test header:\n${code}`);
-  const bodyStart = (header.index ?? 0) + header[0].length;
-  let bodyEnd = code.lastIndexOf('\n});');
-  if (bodyEnd < bodyStart)
-    bodyEnd = code.lastIndexOf('});');
-  if (bodyEnd < bodyStart)
-    throw new Error(`Unable to extract generated Playwright test body:\n${code}`);
-  return code.slice(bodyStart, bodyEnd)
-      .split('\n')
-      .filter(line => !line.trimStart().startsWith('//'))
-      .join('\n');
+  ].join('\n');
 }
 
 function antDUsersFixture() {

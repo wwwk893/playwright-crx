@@ -4,7 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  */
-import type { RecorderEventJournal, RecorderEventEnvelope } from '../capture/eventEnvelope';
+import type { RecorderEventJournal } from '../capture/eventEnvelope';
 import type { PageContextEvent, StepContextSnapshot } from '../flow/pageContextTypes';
 import { cloneRecorderState, withRecorderState } from '../flow/recorderState';
 import { nextStableStepId, recomputeOrders } from '../flow/stableIds';
@@ -635,10 +635,6 @@ function normalize(value: string) {
 
 function unique(values: string[]) {
   return Array.from(new Set(values));
-}
-
-function popupFieldLabel(value?: string) {
-  return value?.replace(/^[*＊]\s*/, '').trim();
 }
 
 function uiComponentForTransaction(transaction: SelectTransaction) {

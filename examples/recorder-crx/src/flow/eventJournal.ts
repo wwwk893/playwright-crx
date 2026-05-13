@@ -53,9 +53,8 @@ export function ensureEventJournal(recorder: FlowRecorderState): RecorderEventJo
 export function appendRecorderActionEvents(recorder: FlowRecorderState, entries: RecordedActionEntry[]): boolean {
   const journal = ensureEventJournal(recorder);
   let changed = false;
-  for (const entry of entries) {
+  for (const entry of entries)
     changed = appendEvent(journal, recorderActionEntryToEvent(entry)) || changed;
-  }
   journal.highWaterMarks.recorderActionCount = recorderEventCount(journal);
   return changed;
 }

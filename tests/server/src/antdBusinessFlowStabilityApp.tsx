@@ -76,7 +76,7 @@ function StabilityFixture() {
           </Form>
 
           <Table
-            data-testid='stability-table'
+            data-testid='site-ip-address-pool-table'
             rowKey='key'
             size='small'
             pagination={false}

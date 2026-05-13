@@ -58,5 +58,6 @@ jobs:
             tests/playwright-report
             tests/test-results
             tests/.raw-generated-replay
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
