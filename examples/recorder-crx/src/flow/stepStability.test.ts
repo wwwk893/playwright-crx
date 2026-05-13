@@ -24,10 +24,13 @@ import { rankAdaptiveLocatorCandidates } from './locatorCandidates';
 import { mergeRecorderActionsIntoFlow } from './recorderActionMerge';
 import {
   countBusinessFlowPlaybackActions as countBusinessFlowPlaybackActionsFromReplay,
+  generateAssertionCodePreview as generateAssertionCodePreviewFromReplay,
   generateBusinessFlowPlaybackCode as generateBusinessFlowPlaybackCodeFromReplay,
   generateBusinessFlowPlaywrightCode as generateBusinessFlowPlaywrightCodeFromReplay,
 } from '../replay';
 import { generateBusinessFlowPlaybackCode as generateParserSafeBusinessFlowCode } from '../replay/parserSafeRenderer';
+import { generateBusinessFlowPlaywrightCode as generateExportedBusinessFlowCode } from '../replay/exportedRenderer';
+import { countBusinessFlowPlaybackActions as countParserSafeBusinessFlowActions } from '../replay/actionCounter';
 import type { UiActionRecipe as ReplayUiActionRecipe } from '../replay/types';
 import { filterPageContextEventsForCapture } from './pageContextCapture';
 import { finalizeRecordingSession } from './sessionFinalizer';
@@ -641,14 +644,18 @@ const tests: TestCase[] = [
       const exportedFromReplay = generateBusinessFlowPlaywrightCodeFromReplay(flow);
       const parserSafeFromFacade = generateBusinessFlowPlaybackCode(flow);
       const parserSafeFromReplay = generateBusinessFlowPlaybackCodeFromReplay(flow);
+      const assertionPreviewFromFacade = generateAssertionCodePreview(flow);
 
       assertEqual(exportedFromReplay, exportedFromFacade);
+      assertEqual(generateExportedBusinessFlowCode(flow), exportedFromFacade);
       assertEqual(parserSafeFromReplay, parserSafeFromFacade);
       assertEqual(generateParserSafeBusinessFlowCode(flow), parserSafeFromFacade);
       assert(parserSafeFromReplay.includes('.ant-select-item-option'), 'parser-safe renderer should preserve select option replay');
       assert(!parserSafeFromReplay.includes('if (!await'), 'parser-safe renderer must not emit exported-only control flow');
       assertEqual(countBusinessFlowPlaybackActionsFromReplay(flow), countBusinessFlowPlaybackActions(flow));
+      assertEqual(countParserSafeBusinessFlowActions(flow), countBusinessFlowPlaybackActions(flow));
       assertEqual(countBusinessFlowPlaybackActionsFromReplay(flow), runnableLineCount(parserSafeFromReplay));
+      assertEqual(generateAssertionCodePreviewFromReplay(flow), assertionPreviewFromFacade);
     },
   },
   {
@@ -801,10 +808,18 @@ const tests: TestCase[] = [
       assert(!playback.includes('page.getByText("edge-lab:WAN1").click()'), 'parser-safe replay should omit the redundant selected-value display click');
       assert(code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText("edge-lab:WAN1");'), 'exported replay should preserve the selected-value terminal assertion');
       assert(code.includes('String(row.port)'), 'repeat rendering should still parameterize the real select option');
+
+      const flowWithoutSelectedValueAssertion: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => step.id === 's002' ? { ...step, assertions: [] } : step),
+      };
+      const parserSafeWithoutAssertion = generateBusinessFlowPlaybackCode(flowWithoutSelectedValueAssertion);
+      assert(!parserSafeWithoutAssertion.includes('page.getByText("edge-lab:WAN1").click()'), 'parser-safe replay should dedupe an exact selected-value echo even without a terminal selected-value assertion');
+      assertEqual(countBusinessFlowPlaybackActions(flowWithoutSelectedValueAssertion), runnableLineCount(parserSafeWithoutAssertion));
     },
   },
   {
-    name: 'parser-safe AntD IPv4 pool option uses compact runtime bridge token',
+    name: 'parser-safe AntD IPv4 pool option preserves secondary marker order after range',
     run: () => {
       const flow: BusinessFlow = {
         ...createNamedFlow(),
@@ -857,9 +872,19 @@ const tests: TestCase[] = [
       const optionStep = stepCodeBlock(playback, 's002');
 
       assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parser-safe replay should keep the active dropdown runtime bridge contract');
-      assert(optionStep.includes('hasText: "test11.1.1.1--2.2.2.2共享"'), 'parser-safe replay should use the compact DOM text token expected by the runtime bridge');
-      assert(!optionStep.includes('hasText: "test1"'), 'parser-safe replay should not split ReactNode IPv4 pool labels into non-exact bridge tokens');
-      assert(!optionStep.includes('hasText: "1.1.1.1--2.2.2.2"'), 'parser-safe replay should not rely on an IP range fragment that is not a runtime bridge token');
+      assertParserSafeIpOptionCompactToken(optionStep, 'test11.1.1.1--2.2.2.2共享');
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
+    },
+  },
+  {
+    name: 'parser-safe AntD IPv4 pool option preserves secondary marker order before range',
+    run: () => {
+      const flow = createIpPoolSelectFlow('test1 共享 1.1.1.1--2.2.2.2');
+      const playback = generateBusinessFlowPlaybackCode(flow);
+      const optionStep = stepCodeBlock(playback, 's002');
+
+      assert(optionStep.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'), 'parser-safe replay should keep the active dropdown runtime bridge contract');
+      assertParserSafeIpOptionCompactToken(optionStep, 'test1共享1.1.1.1--2.2.2.2');
       assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
     },
   },
@@ -1132,6 +1157,58 @@ const tests: TestCase[] = [
       assertEqual(merged.steps[0].value, 'WAN1');
       assert(code.includes('const searchText = "wan";'), 'delayed select transaction should preserve the recorded search text inside the owned helper');
       assert(code.includes('.fill(searchText);'), 'delayed select transaction should search through the trigger-owned input');
+    },
+  },
+  {
+    name: 'projected AntD select infers colon-prefix search text when explicit search evidence is missing',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'select',
+          target: { label: 'WAN口', name: 'WAN口', scope: { form: { label: 'WAN口' } } },
+          value: 'xtest16:WAN1',
+          context: {
+            eventId: 'ctx-wan-select',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'WAN口' },
+              target: {
+                role: 'option',
+                text: 'xtest16:WAN1',
+                selectedOption: 'xtest16:WAN1',
+                normalizedText: 'xtest16:WAN1',
+                framework: 'antd',
+                controlType: 'select-option',
+              },
+            },
+          },
+          uiRecipe: {
+            kind: 'select-option',
+            library: 'antd',
+            component: 'Select',
+            fieldKind: 'select',
+            fieldLabel: 'WAN口',
+            optionText: 'xtest16:WAN1',
+          },
+          rawAction: {
+            name: 'select',
+            selectedText: 'xtest16:WAN1',
+          },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assert(code.includes('const searchText = "xtest16";'), 'exported owned select replay should infer the stable search prefix from colon-delimited option text');
+      assert(code.includes('.fill(searchText);'), 'exported owned select replay should use the inferred search prefix before dispatching');
+      assert(playback.includes('.locator("input:visible").fill("xtest16");'), 'parser-safe replay should keep the inferred search prefix as a flat fill action');
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
     },
   },
   {
@@ -5411,6 +5488,8 @@ test('demo', async ({ page }) => {
       const firstStep = stepCodeBlock(code, 's001');
 
       assert(firstStep.includes('AntD Select virtual dropdown replay workaround'), 'human-like inner option click should still use AntD dropdown replay');
+      assert(firstStep.includes('const searchText = "xtest16";'), 'colon-prefixed AntD option clicks should infer stable search text');
+      assert(firstStep.includes('await trigger.locator(inputSelector).first().fill(searchText);'), 'inferred search text should be typed before dispatching the owned option');
       assert(firstStep.includes('ownedRoots()'), 'option lookup should be scoped to the current trigger-owned dropdown/listbox');
       assert(!firstStep.includes('getByText'), 'human-like option replay must not use ambiguous global text locator');
     },
@@ -5509,8 +5588,7 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('.ant-form-item') && firstStep.includes('IP地址池'), 'runtime replay should reopen the field-scoped select before choosing the option');
       assert(!firstStep.includes('if (!await'), 'runtime replay should not include JS control flow that the parser cannot enforce');
       assert(!firstStep.includes('.fill("test1")'), 'runtime replay should not search ReactNode/IP-range labels because AntD can filter them to an empty dropdown');
-      assert(firstStep.includes('.ant-select-item-option') && firstStep.includes('hasText: "test1"'), 'runtime replay should click the active dropdown option by the primary token');
-      assert(firstStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'runtime option click should keep enough identifying tokens to avoid partial test1/test12 ambiguity');
+      assertParserSafeIpOptionCompactToken(firstStep, 'test11.1.1.1--2.2.2.2共享');
       assertEqual(firstStep.split(fieldClick).length - 1, 1);
     },
   },
@@ -5619,8 +5697,7 @@ test('demo', async ({ page }) => {
 
       assert(!code.includes('.fill("")'), 'parser-safe replay should drop the empty internal select search before the option click');
       assert(code.includes('IP地址池'), 'parser-safe replay should keep the field identity around the option click');
-      assert(optionStep.includes('.ant-select-item-option') && optionStep.includes('hasText: "test1"'), 'parser-safe replay should still click the ReactNode option by primary token');
-      assert(optionStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'parser-safe replay should keep the IP range token for uniqueness');
+      assertParserSafeIpOptionCompactToken(optionStep, 'test11.1.1.1--2.2.2.2共享');
     },
   },
   {
@@ -5687,8 +5764,7 @@ test('demo', async ({ page }) => {
       const optionStep = stepCodeBlock(code, 's001');
 
       assert(optionStep.includes('.locator("input:visible").fill("test1");'), 'parser-safe projected select should preserve the explicit search text before choosing the compact IP option');
-      assert(optionStep.includes('.ant-select-item-option') && optionStep.includes('hasText: "test1"'), 'parser-safe projected select should still click the active dropdown option by the primary token');
-      assert(optionStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'parser-safe projected select should keep the IP range token for uniqueness');
+      assertParserSafeIpOptionCompactToken(optionStep, 'test11.1.1.1--2.2.2.2共享');
       assertEqual(countBusinessFlowPlaybackActions(flow), 3);
     },
   },
@@ -5826,7 +5902,8 @@ test('demo', async ({ page }) => {
       assert(!optionBlock.includes(fieldClick), 'option step should not emit a second trigger click after the owning select was already opened');
       assert(!optionBlock.includes('if (!await'), 'runtime parser-safe replay must avoid JS control flow that the parser ignores');
       assert(!optionBlock.includes('.fill("test1")'), 'option step should not search ReactNode/IP-range labels because AntD can filter them to an empty dropdown');
-      assert(optionBlock.includes('.ant-select-item-option') && optionBlock.includes('hasText: "test1"'), 'option step should still click the active dropdown option');
+      assert(optionBlock.includes('.ant-select-item-option'), 'option step should still click the active dropdown option');
+      assertParserSafeIpOptionCompactToken(optionBlock, 'test11.1.1.1--2.2.2.2共享');
       assertEqual(countBusinessFlowPlaybackActions(flow), 2);
     },
   },
@@ -9784,6 +9861,65 @@ function stepCodeBlock(code: string, stepId: string) {
 
 function runnableLineCount(code: string) {
   return code.split(/\r?\n/).filter(line => /^(await|const|let|var)\s/.test(line.trim())).length;
+}
+
+function createIpPoolSelectFlow(optionText: string): BusinessFlow {
+  const compactOptionText = optionText.replace(/\s+/g, '');
+  return {
+    ...createNamedFlow(),
+    steps: [
+      {
+        id: 's001',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: {
+          role: 'combobox',
+          name: 'IP地址池',
+        },
+        context: { eventId: 'ctx-address-pool-trigger', capturedAt: 1000, before: { form: { label: 'IP地址池' }, target: { role: 'combobox', framework: 'procomponents', controlType: 'select' } } },
+        sourceCode: `await page.locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector").first().click();`,
+        assertions: [],
+      },
+      {
+        id: 's002',
+        order: 2,
+        kind: 'recorded',
+        action: 'click',
+        target: { text: optionText, displayName: optionText },
+        context: {
+          eventId: 'ctx-address-pool-option',
+          capturedAt: 1100,
+          before: {
+            form: { label: 'IP地址池' },
+            dialog: { type: 'dropdown', title: 'IP地址池', visible: true },
+            target: {
+              tag: 'div',
+              role: 'option',
+              title: '[object Object]',
+              text: optionText,
+              normalizedText: optionText,
+              selectedOption: optionText,
+              framework: 'procomponents',
+              controlType: 'select-option',
+            },
+          },
+        },
+        rawAction: { action: { name: 'click', selector: `internal:text="${compactOptionText}"i` } },
+        sourceCode: `await page.getByText('${compactOptionText}').click();`,
+        assertions: [],
+      },
+    ],
+  };
+}
+
+function assertParserSafeIpOptionCompactToken(optionStep: string, expectedToken: string) {
+  assert(optionStep.includes(`hasText: ${JSON.stringify(expectedToken)}`), `parser-safe replay should keep compact option token ${expectedToken}`);
+  if (expectedToken !== 'test11.1.1.1--2.2.2.2共享')
+    assert(!optionStep.includes('hasText: "test11.1.1.1--2.2.2.2共享"'), 'parser-safe replay must not reorder marker-before-range labels into a marker-after-range token');
+  if (expectedToken !== 'test1共享1.1.1.1--2.2.2.2')
+    assert(!optionStep.includes('hasText: "test1共享1.1.1.1--2.2.2.2"'), 'parser-safe replay must not reorder marker-after-range labels into a marker-before-range token');
+  assert(!optionStep.includes('internal:has-text="test1"i >> internal:has-text="1.1.1.1--2.2.2.2"i >> internal:has-text="共享"i'), 'parser-safe replay must not split runtime bridge IP option matching into chained text tokens');
 }
 
 function flowMergeSummary(flow: BusinessFlow) {
