@@ -5,6 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
+import { extractTargetFromRecorderAction } from '../capture/targetFromRecorderSelector';
 import { compactSemanticDiagnostic, createSemanticDiagnosticsBuffer } from '../uiSemantics/diagnostics';
 import { composeInputTransactionsFromJournal } from '../interactions/inputTransactions';
 import { composeSelectTransactionsFromJournal } from '../interactions/selectTransactions';
@@ -20,6 +21,7 @@ import { buildRecipeForStep } from '../replay/recipeBuilder';
 import { createAdaptiveTargetSnapshot, withAdaptiveTargetSnapshot } from './adaptiveTargetSnapshot';
 import { redactAdaptiveTargetSnapshot } from './adaptiveTargetRedactor';
 import { rankAdaptiveLocatorCandidates } from './locatorCandidates';
+import { mergeRecorderActionsIntoFlow } from './recorderActionMerge';
 import {
   countBusinessFlowPlaybackActions as countBusinessFlowPlaybackActionsFromReplay,
   generateBusinessFlowPlaybackCode as generateBusinessFlowPlaybackCodeFromReplay,
@@ -150,6 +152,37 @@ const tests: TestCase[] = [
       assertEqual(stats.pageContextEventCount, 0);
       assertEqual(recorder.eventJournal.eventOrder.length, 2);
       assertEqual(recorder.eventJournal.eventOrder.map(id => recorder.eventJournal?.eventsById[id]?.source), ['playwright-recorder', 'playwright-recorder']);
+    },
+  },
+  {
+    name: 'flowBuilder facade delegates recorder action merge without changing stable projection',
+    run: () => {
+      const actions = [clickAction('新建'), fillAction('地址池名称', 'pool-a'), clickAction('保存')];
+      const sources = recordedSource([
+        'await page.getByRole("button", { name: "新建" }).click();',
+        'await page.getByLabel("地址池名称").fill("pool-a");',
+        'await page.getByRole("button", { name: "保存" }).click();',
+      ]);
+      const options = { recordingSessionId: 'session-pr13-facade' };
+
+      const viaFacade = mergeActionsIntoFlow(createNamedFlow(), actions, sources, options);
+      const viaInternal = mergeRecorderActionsIntoFlow(createNamedFlow(), actions, sources, options);
+
+      assertEqual(flowMergeSummary(viaFacade), flowMergeSummary(viaInternal));
+    },
+  },
+  {
+    name: 'raw selector target extraction preserves test id ordinal hints after module split',
+    run: () => {
+      const target = extractTargetFromRecorderAction({
+        name: 'click',
+        selector: 'internal:testid=[data-testid="wan-edit-action"i] >> nth=2',
+      });
+
+      assertEqual(target?.testId, 'wan-edit-action');
+      assertEqual(target?.locatorHint?.strategy, 'global-testid');
+      assertEqual(target?.locatorHint?.pageIndex, 2);
+      assertEqual(target?.locatorHint?.pageCount, 3);
     },
   },
   {
@@ -9751,6 +9784,52 @@ function stepCodeBlock(code: string, stepId: string) {
 
 function runnableLineCount(code: string) {
   return code.split(/\r?\n/).filter(line => /^(await|const|let|var)\s/.test(line.trim())).length;
+}
+
+function flowMergeSummary(flow: BusinessFlow) {
+  return {
+    steps: flow.steps.map(step => ({
+      id: step.id,
+      order: step.order,
+      action: step.action,
+      target: stableTargetSummary(step.target),
+      value: step.value,
+      url: step.url,
+      sourceActionIds: step.sourceActionIds,
+      sourceCode: step.sourceCode,
+      assertions: step.assertions.map(assertion => ({
+        id: assertion.id,
+        type: assertion.type,
+        subject: assertion.subject,
+        target: stableTargetSummary(assertion.target),
+        expected: assertion.expected,
+        enabled: assertion.enabled,
+      })),
+    })),
+    actionLog: flow.artifacts?.recorder?.actionLog.map(entry => ({
+      id: entry.id,
+      sessionId: entry.sessionId,
+      sessionIndex: entry.sessionIndex,
+      recorderIndex: entry.recorderIndex,
+      signature: entry.signature,
+      sourceCode: entry.sourceCode,
+      wallTime: entry.wallTime,
+      endWallTime: entry.endWallTime,
+    })),
+    sessions: flow.artifacts?.recorder?.sessions.map(session => ({
+      id: session.id,
+      mode: session.mode,
+      baseActionCount: session.baseActionCount,
+      insertAfterStepId: session.insertAfterStepId,
+    })),
+  };
+}
+
+function stableTargetSummary(target: FlowStep['target']) {
+  if (!target)
+    return undefined;
+  const { raw, ...stableTarget } = target;
+  return stableTarget;
 }
 
 function semanticUi(options: {
