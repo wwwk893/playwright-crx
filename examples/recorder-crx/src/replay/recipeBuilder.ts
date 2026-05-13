@@ -57,13 +57,14 @@ function selectRecipe(step: FlowStep): UiActionRecipe | undefined {
   if (!displayText)
     return undefined;
   const path = optionPathForStep(step);
+  const searchText = selectSearchTextForStep(step);
   return makeRecipe({
     library,
     component,
     operation: 'selectOption',
     kind: 'select-option',
     target: targetForStep(step, { label: step.target?.label || step.context?.before.form?.label }),
-    option: optionFromText(displayText, path),
+    option: optionFromText(displayText, path, searchText),
     fieldLabel: step.target?.label || step.context?.before.form?.label || step.uiRecipe?.fieldLabel,
     fieldName: step.context?.before.form?.name || step.uiRecipe?.fieldName,
     fieldKind: step.context?.before.ui?.form?.fieldKind || step.uiRecipe?.fieldKind,
@@ -75,6 +76,9 @@ function selectRecipe(step: FlowStep): UiActionRecipe | undefined {
 }
 
 function clickRecipe(step: FlowStep): UiActionRecipe {
+  const optionRecipe = selectOptionClickRecipe(step);
+  if (optionRecipe)
+    return optionRecipe;
   if (isPopconfirmStep(step)) {
     return makeRecipe({
       library: libraryForStep(step, 'antd'),
@@ -109,6 +113,33 @@ function clickRecipe(step: FlowStep): UiActionRecipe {
     kind: 'click-button',
     target: targetForStep(step),
     targetText: step.target?.name || step.target?.text || step.context?.before.target?.text,
+  });
+}
+
+function selectOptionClickRecipe(step: FlowStep): UiActionRecipe | undefined {
+  if (!isSelectOptionClickStep(step))
+    return undefined;
+  const displayText = optionDisplayTextForStep(step);
+  if (!displayText)
+    return undefined;
+  const library = libraryForStep(step);
+  const component = selectComponentForStep(step);
+  const path = optionPathForStep(step);
+  const searchText = selectSearchTextForStep(step);
+  return makeRecipe({
+    library,
+    component,
+    operation: 'selectOption',
+    kind: 'select-option',
+    target: targetForStep(step, { label: step.target?.label || step.context?.before.form?.label }),
+    option: optionFromText(displayText, path, searchText),
+    fieldLabel: step.target?.label || step.context?.before.form?.label || step.uiRecipe?.fieldLabel,
+    fieldName: step.context?.before.form?.name || step.uiRecipe?.fieldName,
+    fieldKind: step.context?.before.ui?.form?.fieldKind || step.uiRecipe?.fieldKind,
+    formKind: step.context?.before.ui?.form?.formKind || step.uiRecipe?.formKind,
+    optionText: displayText,
+    overlayTitle: step.context?.before.dialog?.title || step.uiRecipe?.overlayTitle,
+    targetText: step.target?.text || step.target?.displayName,
   });
 }
 
@@ -190,24 +221,31 @@ function frameworkFromLibrary(library?: UiLibrary): UiActionFramework {
 
 function replayFor(input: { operation: UiActionOperation; framework: UiActionFramework; component: UiActionRecipeComponent }): UiActionReplayContract {
   if (input.operation === 'selectOption') {
-    if (input.framework === 'antd' || input.framework === 'procomponents')
-      return { exportedStrategy: 'active-popup-option', parserSafeStrategy: 'active-popup-option', runtimeFallback: 'runtime-bridge' };
-    return { exportedStrategy: 'select-option', parserSafeStrategy: 'select-option' };
+    if (input.framework === 'antd' || input.framework === 'procomponents') {
+      if (input.component === 'TreeSelect')
+        return { exportedStrategy: 'antd-tree-option-dispatch', parserSafeStrategy: 'active-popup-option', runtimeFallback: 'active-antd-popup-option' };
+      if (input.component === 'Cascader')
+        return { exportedStrategy: 'antd-cascader-path-dispatch', parserSafeStrategy: 'active-popup-option', runtimeFallback: 'active-antd-popup-option' };
+      return { exportedStrategy: 'antd-owned-option-dispatch', parserSafeStrategy: 'field-trigger-search-option', runtimeFallback: 'active-antd-popup-option' };
+    }
+    return { exportedStrategy: 'native-select-option', parserSafeStrategy: 'native-select-option' };
   }
   if (input.operation === 'rowAction')
-    return { exportedStrategy: 'table-row-action', parserSafeStrategy: 'table-row-action' };
+    return { exportedStrategy: 'table-row-action', parserSafeStrategy: 'table-row-scoped-action' };
   if (input.operation === 'confirm')
-    return { exportedStrategy: 'visible-popconfirm', parserSafeStrategy: 'visible-popconfirm' };
+    return { exportedStrategy: 'popover-confirm', parserSafeStrategy: 'dialog-scoped-action', runtimeFallback: 'active-popconfirm-confirm' };
   if (input.operation === 'fill')
-    return { exportedStrategy: 'field-locator-fill', parserSafeStrategy: 'field-locator-fill' };
+    return { exportedStrategy: 'locator-fill', parserSafeStrategy: 'simple-locator-action' };
   if (input.operation === 'toggle')
-    return { exportedStrategy: 'control-toggle', parserSafeStrategy: 'control-toggle' };
-  return { exportedStrategy: 'semantic-click', parserSafeStrategy: 'semantic-click' };
+    return { exportedStrategy: 'control-toggle', parserSafeStrategy: 'simple-locator-action' };
+  return { exportedStrategy: 'locator-click', parserSafeStrategy: 'simple-locator-action' };
 }
 
-function optionFromText(displayText: string, path?: string[]): UiActionRecipeOption {
+function optionFromText(displayText: string, path?: string[], searchText?: string): UiActionRecipeOption {
   return {
+    text: displayText,
     displayText,
+    searchText,
     exactTokens: exactTokens(displayText),
     ...(path?.length ? { path } : {}),
   };
@@ -241,6 +279,11 @@ function libraryForStep(step: FlowStep, fallback: UiLibrary = 'unknown'): UiLibr
 
 function selectComponentForStep(step: FlowStep): UiActionRecipeComponent {
   const component = step.context?.before.ui?.component || step.uiRecipe?.component;
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (controlType === 'tree-select' || controlType === 'tree-select-option')
+    return 'TreeSelect';
+  if (controlType === 'cascader' || controlType === 'cascader-option')
+    return 'Cascader';
   if (component === 'tree-select' || component === 'TreeSelect')
     return 'TreeSelect';
   if (component === 'cascader' || component === 'Cascader')
@@ -249,13 +292,19 @@ function selectComponentForStep(step: FlowStep): UiActionRecipeComponent {
 }
 
 function optionDisplayTextForStep(step: FlowStep) {
-  const value = step.value || step.uiRecipe?.optionText || step.context?.before.ui?.option?.text || step.context?.before.target?.selectedOption || step.target?.text;
+  const value = step.value || step.uiRecipe?.option?.displayText || step.uiRecipe?.option?.text || step.uiRecipe?.optionText || step.context?.before.ui?.option?.text || step.context?.before.target?.selectedOption || step.context?.before.target?.text || step.target?.text;
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function optionPathForStep(step: FlowStep) {
   const path = step.context?.before.ui?.option?.path || step.uiRecipe?.option?.path;
   return Array.isArray(path) ? path.filter(entry => typeof entry === 'string' && entry && entry !== '[object Object]') : undefined;
+}
+
+function selectSearchTextForStep(step: FlowStep) {
+  const action = rawAction(step.rawAction);
+  const searchText = action.searchText || step.uiRecipe?.option?.searchText;
+  return typeof searchText === 'string' && searchText.trim() ? searchText.trim() : undefined;
 }
 
 function operationFromLegacyKind(kind: LegacyUiActionRecipeKind): UiActionOperation {
@@ -280,7 +329,26 @@ function isTableRowStep(step: FlowStep) {
   return !!(step.context?.before.table?.rowKey || step.target?.scope?.table?.rowKey || step.uiRecipe?.kind === 'table-row-action');
 }
 
+function isSelectOptionClickStep(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  if (step.uiRecipe?.kind === 'select-option')
+    return true;
+  const target = step.context?.before.target;
+  const framework = target?.framework;
+  const controlType = target?.controlType;
+  return (framework === 'antd' || framework === 'procomponents') && /^(select-option|tree-select-option|cascader-option)$/.test(controlType || '');
+}
+
 function isToggleStep(step: FlowStep) {
   const component = step.context?.before.ui?.component;
   return component === 'switch' || component === 'checkbox' || step.target?.role === 'switch' || step.target?.role === 'checkbox';
+}
+
+function rawAction(value: unknown) {
+  const record = value && typeof value === 'object' ? value as { action?: Record<string, unknown> } & Record<string, unknown> : {};
+  const action = record.action && typeof record.action === 'object' ? record.action : record;
+  return action as {
+    searchText?: string;
+  };
 }

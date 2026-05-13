@@ -546,7 +546,9 @@ const tests: TestCase[] = [
       assertEqual(selectRecipe?.component, 'Select');
       assertEqual(selectRecipe?.operation, 'selectOption');
       assertEqual(selectRecipe?.option?.displayText, 'WAN1');
-      assertEqual(selectRecipe?.replay?.parserSafeStrategy, 'active-popup-option');
+      assertEqual(selectRecipe?.replay?.exportedStrategy, 'antd-owned-option-dispatch');
+      assertEqual(selectRecipe?.replay?.parserSafeStrategy, 'field-trigger-search-option');
+      assertEqual(selectRecipe?.replay?.runtimeFallback, 'active-antd-popup-option');
       const replayRecipe: ReplayUiActionRecipe = selectRecipe!;
       assertEqual(replayRecipe.operation, 'selectOption');
     },
@@ -573,6 +575,8 @@ const tests: TestCase[] = [
       assertEqual(rowRecipe?.version, 1);
       assertEqual(rowRecipe?.operation, 'rowAction');
       assertEqual(rowRecipe?.component, 'TableRowAction');
+      assertEqual(rowRecipe?.replay?.exportedStrategy, 'table-row-action');
+      assertEqual(rowRecipe?.replay?.parserSafeStrategy, 'table-row-scoped-action');
       assertEqual((rowRecipe?.target?.table as any)?.title, '用户管理');
       assertEqual((rowRecipe?.target?.row as any)?.key, 'user-42');
 
@@ -595,6 +599,9 @@ const tests: TestCase[] = [
       assertEqual(confirmRecipe?.version, 1);
       assertEqual(confirmRecipe?.operation, 'confirm');
       assertEqual(confirmRecipe?.component, 'PopconfirmButton');
+      assertEqual(confirmRecipe?.replay?.exportedStrategy, 'popover-confirm');
+      assertEqual(confirmRecipe?.replay?.parserSafeStrategy, 'dialog-scoped-action');
+      assertEqual(confirmRecipe?.replay?.runtimeFallback, 'active-popconfirm-confirm');
       assertEqual((confirmRecipe?.target?.dialog as any)?.title, '确定删除？');
     },
   },
@@ -613,9 +620,111 @@ const tests: TestCase[] = [
       assertEqual(recipe?.framework, 'generic');
       assertEqual(recipe?.operation, 'selectOption');
       assertEqual(recipe?.option?.displayText, 'US');
-      assertEqual(recipe?.replay?.exportedStrategy, 'select-option');
-      assertEqual(recipe?.replay?.parserSafeStrategy, 'select-option');
+      assertEqual(recipe?.replay?.exportedStrategy, 'native-select-option');
+      assertEqual(recipe?.replay?.parserSafeStrategy, 'native-select-option');
       assertEqual(recipe?.replay?.runtimeFallback, undefined);
+    },
+  },
+  {
+    name: 'recipeBuilder emits AntD Select recipe with field option search text and runtime fallback',
+    run: () => {
+      const recipe = buildRecipeForStep({
+        id: 's-antd-select',
+        order: 1,
+        kind: 'recorded',
+        action: 'select',
+        target: { label: 'IP地址池' },
+        value: 'test1共享1.1.1.1--2.2.2.2',
+        context: {
+          eventId: 'ctx-antd-select',
+          capturedAt: 1000,
+          before: {
+            form: { label: 'IP地址池' },
+            target: { framework: 'procomponents', controlType: 'select-option', selectedOption: 'test1共享1.1.1.1--2.2.2.2' },
+            ui: { library: 'pro-components', component: 'select', form: { label: 'IP地址池' } },
+          } as any,
+        },
+        rawAction: { action: { name: 'select', searchText: 'test1', selectedText: 'test1共享1.1.1.1--2.2.2.2' } },
+        assertions: [],
+      });
+
+      assertEqual(recipe?.version, 1);
+      assertEqual(recipe?.framework, 'procomponents');
+      assertEqual(recipe?.component, 'Select');
+      assertEqual(recipe?.operation, 'selectOption');
+      assertEqual(recipe?.target?.label, 'IP地址池');
+      assertEqual(recipe?.option?.displayText, 'test1共享1.1.1.1--2.2.2.2');
+      assertEqual(recipe?.option?.searchText, 'test1');
+      assertEqual(recipe?.replay?.exportedStrategy, 'antd-owned-option-dispatch');
+      assertEqual(recipe?.replay?.parserSafeStrategy, 'field-trigger-search-option');
+      assertEqual(recipe?.replay?.runtimeFallback, 'active-antd-popup-option');
+    },
+  },
+  {
+    name: 'recipeBuilder keeps TreeSelect option recipes out of owned Select renderer strategy',
+    run: () => {
+      const recipe = buildRecipeForStep({
+        id: 's-tree-option',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: { text: '华东生产区', displayName: '华东生产区' },
+        context: {
+          eventId: 'ctx-tree-option',
+          capturedAt: 1000,
+          before: {
+            form: { label: '范围' },
+            dialog: { type: 'dropdown', visible: true },
+            target: { tag: 'div', role: 'treeitem', framework: 'procomponents', controlType: 'tree-select-option', text: '华东生产区' },
+            ui: { library: 'pro-components', component: 'tree-select', form: { label: '范围' } },
+          } as any,
+        },
+        assertions: [],
+      });
+
+      assertEqual(recipe?.version, 1);
+      assertEqual(recipe?.framework, 'procomponents');
+      assertEqual(recipe?.component, 'TreeSelect');
+      assertEqual(recipe?.operation, 'selectOption');
+      assertEqual(recipe?.replay?.exportedStrategy, 'antd-tree-option-dispatch');
+      assertEqual(recipe?.replay?.parserSafeStrategy, 'active-popup-option');
+      assertEqual(recipe?.replay?.runtimeFallback, 'active-antd-popup-option');
+    },
+  },
+  {
+    name: 'recipeBuilder fail-closes generic options and plain delete buttons without runtime fallback',
+    run: () => {
+      const genericOptionRecipe = buildRecipeForStep({
+        id: 's-generic-option',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: { role: 'option', text: 'US East' },
+        context: {
+          eventId: 'ctx-generic-option',
+          capturedAt: 1000,
+          before: { target: { tag: 'div', role: 'option', text: 'US East' } } as any,
+        },
+        assertions: [],
+      });
+      assertEqual(genericOptionRecipe?.operation, 'click');
+      assert(genericOptionRecipe?.replay?.runtimeFallback !== 'active-antd-popup-option', 'generic ARIA option must not get AntD runtime fallback');
+
+      const plainDeleteRecipe = buildRecipeForStep({
+        id: 's-plain-delete',
+        order: 2,
+        kind: 'recorded',
+        action: 'click',
+        target: { testId: 'delete-row', role: 'button', name: '删除' },
+        context: {
+          eventId: 'ctx-plain-delete',
+          capturedAt: 1100,
+          before: { target: { tag: 'button', role: 'button', text: '删除', testId: 'delete-row' } } as any,
+        },
+        assertions: [],
+      });
+      assertEqual(plainDeleteRecipe?.operation, 'click');
+      assert(plainDeleteRecipe?.replay?.runtimeFallback !== 'active-popconfirm-confirm', 'plain delete without popover evidence must not become a Popconfirm recipe');
     },
   },
   {
@@ -724,6 +833,40 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'exported AntD select recipe prefers exact option before prefix fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', label: '集群', name: '集群' },
+            value: 'NAT集群A',
+            context: {
+              eventId: 'ctx-prefix-select',
+              capturedAt: 1000,
+              before: {
+                form: { label: '集群' },
+                target: { role: 'option', framework: 'antd', controlType: 'select-option', selectedOption: 'NAT集群A' },
+                ui: { library: 'antd', component: 'select', form: { label: '集群' } },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: 'NAT集群A' } },
+            assertions: [],
+          },
+        ],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('const optionMatches = options.map(element =>'), 'owned select replay should classify option candidates before dispatch');
+      assert(code.includes('optionMatches.find(match => match.exact)?.element || optionMatches.find(match => match.partial)?.element'), 'owned select replay should prefer exact option text before prefix fallback');
+    },
+  },
+  {
     name: 'exported replay omits selected value display click immediately after projected AntD select',
     run: () => {
       const flow: BusinessFlow = {
@@ -769,7 +912,19 @@ const tests: TestCase[] = [
             order: 2,
             kind: 'recorded',
             action: 'click',
-            target: { text: 'edge-lab:WAN1', displayName: 'edge-lab:WAN1' },
+            target: {
+              text: 'edge-lab:WAN1',
+              displayName: 'edge-lab:WAN1',
+              scope: { form: { label: 'WAN口' } },
+            },
+            context: {
+              eventId: 'ctx-wan-selected-echo',
+              capturedAt: 1100,
+              before: {
+                form: { label: 'WAN口' },
+                target: { tag: 'span', text: 'edge-lab:WAN1', normalizedText: 'edge-lab:WAN1' },
+              },
+            },
             rawAction: { action: { name: 'click', selector: 'internal:text="edge-lab:WAN1"i' } },
             sourceCode: `await page.getByText("edge-lab:WAN1").click();`,
             assertions: [{
@@ -813,9 +968,130 @@ const tests: TestCase[] = [
         ...flow,
         steps: flow.steps.map(step => step.id === 's002' ? { ...step, assertions: [] } : step),
       };
+      const exportedWithoutAssertion = generateBusinessFlowPlaywrightCode(flowWithoutSelectedValueAssertion);
       const parserSafeWithoutAssertion = generateBusinessFlowPlaybackCode(flowWithoutSelectedValueAssertion);
+      assert(!exportedWithoutAssertion.includes('page.getByText("edge-lab:WAN1").click()'), 'exported replay should dedupe an exact selected-value echo even without a terminal selected-value assertion');
       assert(!parserSafeWithoutAssertion.includes('page.getByText("edge-lab:WAN1").click()'), 'parser-safe replay should dedupe an exact selected-value echo even without a terminal selected-value assertion');
       assertEqual(countBusinessFlowPlaybackActions(flowWithoutSelectedValueAssertion), runnableLineCount(parserSafeWithoutAssertion));
+
+      const flowWithPreviousSelectedValueAssertion: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 'vrf-select',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', label: '关联VRF', name: '关联VRF' },
+            value: '生产VRF',
+            context: {
+              eventId: 'ctx-vrf-select',
+              capturedAt: 1000,
+              before: {
+                form: { label: '关联VRF' },
+                target: {
+                  role: 'option',
+                  framework: 'antd',
+                  controlType: 'select-option',
+                  selectedOption: '生产VRF',
+                },
+                ui: { library: 'antd', component: 'select', form: { label: '关联VRF' } },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: '生产VRF' } },
+            assertions: [{
+              id: 'vrf-selected',
+              type: 'selected-value-visible',
+              subject: 'element',
+              target: { role: 'combobox', label: '关联VRF', name: '关联VRF' },
+              expected: '生产VRF',
+              enabled: true,
+            }],
+          },
+          {
+            id: 'vrf-selected-echo',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: '生产VRF', displayName: '生产VRF' },
+            sourceCode: `await page.getByText("生产VRF").click();`,
+            context: {
+              eventId: 'ctx-vrf-selected-echo',
+              capturedAt: 1100,
+              before: {
+                target: { tag: 'span', text: '生产VRF', normalizedText: '生产VRF' },
+              } as any,
+            },
+            rawAction: { action: { name: 'click', selector: 'internal:text="生产VRF"i', text: '生产VRF' } },
+            assertions: [],
+          },
+        ],
+      };
+      const exportedWithPreviousAssertion = generateBusinessFlowPlaywrightCode(flowWithPreviousSelectedValueAssertion);
+      const parserSafeWithPreviousAssertion = generateBusinessFlowPlaybackCode(flowWithPreviousSelectedValueAssertion);
+      assert(!exportedWithPreviousAssertion.includes('page.getByText("生产VRF").click()'), 'exported replay should dedupe a selected-value echo tied by the previous select assertion');
+      assert(!parserSafeWithPreviousAssertion.includes('page.getByText("生产VRF").click()'), 'parser-safe replay should dedupe a selected-value echo tied by the previous select assertion');
+      assert(exportedWithPreviousAssertion.includes('生产VRF'), 'exported replay should keep the selected-value assertion text');
+      assertEqual(countBusinessFlowPlaybackActions(flowWithPreviousSelectedValueAssertion), runnableLineCount(parserSafeWithPreviousAssertion));
+    },
+  },
+  {
+    name: 'selected-value echo dedupe does not drop same-text follow-up click outside the select field',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', label: '集群', name: '集群' },
+            value: 'NAT集群A',
+            context: {
+              eventId: 'ctx-select-cluster',
+              capturedAt: 1000,
+              before: {
+                form: { label: '集群' },
+                target: {
+                  role: 'option',
+                  framework: 'antd',
+                  controlType: 'select-option',
+                  selectedOption: 'NAT集群A',
+                },
+                ui: { library: 'antd', component: 'select', form: { label: '集群' } },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: 'NAT集群A' } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: 'NAT集群A', displayName: 'NAT集群A' },
+            sourceCode: `await page.getByText("NAT集群A").click();`,
+            context: {
+              eventId: 'ctx-click-cluster-card',
+              capturedAt: 1100,
+              before: {
+                target: { tag: 'div', text: 'NAT集群A', normalizedText: 'NAT集群A' },
+              } as any,
+            },
+            rawAction: { action: { name: 'click', text: 'NAT集群A' } },
+            assertions: [],
+          },
+        ],
+      };
+
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+      const hasSameTextClick = (code: string) => code.includes('page.getByText("NAT集群A").click()') || code.includes("page.getByText('NAT集群A').click()");
+
+      assert(hasSameTextClick(exported), 'exported replay must keep a same-text click that is not scoped to the previous select field');
+      assert(hasSameTextClick(parserSafe), 'parser-safe replay must keep a same-text click that is not scoped to the previous select field');
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(parserSafe));
     },
   },
   {
@@ -9030,6 +9306,45 @@ test('demo', async ({ page }) => {
 
       assert(selectableTypes.includes('selected-value-visible'), 'generic controlType=select context should infer selected-value-visible even without WAN/transport words');
       assert(!nonSelectableTypes.includes('selected-value-visible'), 'domain words such as WAN must not infer selected-value-visible without generic select evidence');
+    },
+  },
+  {
+    name: 'terminal-state selected value inference does not leak from select controls into later fills',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'select',
+            target: { testId: 'stability-wan-select', displayName: '共享WAN' },
+            value: 'WAN1',
+            context: {
+              eventId: 'ctx-stability-wan',
+              capturedAt: 1000,
+              before: {
+                target: { testId: 'stability-wan-select', controlType: 'select', selectedOption: 'WAN1' },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { role: 'textbox', label: '使用备注' },
+            value: '循环后继续补步骤',
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const generated = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!enriched.steps[1].assertions.some(assertion => assertion.type === 'selected-value-visible'), 'later fill steps must not inherit selected-value assertions from a previous select control');
+      assert(!generated.includes('await expect(page.getByTestId("stability-wan-select")).toContainText("使用备注"'), 'replay must not assert a select control contains the following fill label/value');
     },
   },
   {

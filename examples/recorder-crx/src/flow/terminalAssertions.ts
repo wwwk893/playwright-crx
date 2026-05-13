@@ -63,7 +63,7 @@ export function suggestTerminalStateAssertions(step: FlowStep, stepIndex = 0, pr
       suggestions.push(inferredClosed);
   }
 
-  if (step.action !== 'select' && selectedOption && targetTestId && isMeaningfulSelectedValue(selectedOption, step)) {
+  if (isSelectedValueAssertionStep(step) && selectedOption && targetTestId && isMeaningfulSelectedValue(selectedOption, step)) {
     suggestions.push(createTerminalStateAssertion('selected-value-visible', terminalAssertionId(step.id, suggestions.length, stepIndex), {
       targetTestId,
       expected: selectedOption,
@@ -239,6 +239,8 @@ function normalizeTerminalText(value: unknown) {
 }
 
 function inferSelectedValueAssertion(step: FlowStep, previousStep: FlowStep | undefined, stepIndex: number, offset: number): FlowAssertion | undefined {
+  if (!isSelectedValueAssertionStep(step))
+    return undefined;
   const targetTestId = previousStep?.target?.testId;
   if (!targetTestId || step.target?.testId)
     return undefined;
@@ -273,6 +275,10 @@ function inferSelectedValueAssertion(step: FlowStep, previousStep: FlowStep | un
     targetTestId,
     expected: optionText,
   }, previousStep.target);
+}
+
+function isSelectedValueAssertionStep(step: FlowStep) {
+  return step.action === 'click';
 }
 
 function sameTerminalDialogScope(left?: { type?: string; title?: string; testId?: string }, right?: { type?: string; title?: string; testId?: string }) {

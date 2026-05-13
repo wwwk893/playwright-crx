@@ -761,7 +761,7 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   const options = dropdown.locator('.ant-select-item-option').filter({ hasText: exactText });
   const option = options.first();
   await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.click({ timeout: 5_000, force: true }).catch(async () => {
+  await humanClick(option).catch(async () => {
     await dispatchAntDOptionClick(page, options, text);
   });
   if (await option.isVisible().catch(() => false))
