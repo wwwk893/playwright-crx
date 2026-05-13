@@ -1985,14 +1985,16 @@ function antdSelectOptionParserSafeSource(step: FlowStep, options: EmitStepOptio
   const lines = [
     `await ${parserSafeLocator(parserSafeOptionLocator)}.click();`,
   ];
-  if (shouldParserSafeSearchAntdSelectOption(optionName) && !previousStepTargetsField)
+  if (shouldParserSafeSearchAntdSelectOption(step, optionName) && !previousStepTargetsField)
     lines.unshift(`await ${input}.fill(${value});`);
   if (!previousStepTargetsField)
     lines.unshift(`await ${trigger}.click();`);
   return lines.join('\n');
 }
 
-function shouldParserSafeSearchAntdSelectOption(optionName: string) {
+function shouldParserSafeSearchAntdSelectOption(step: FlowStep, optionName: string) {
+  if (projectedSelectSearchText(step))
+    return true;
   // AntD/ProComponents ReactNode labels (for example, an IPv4 pool label with a custom
   // `searchText` prop) can render correctly in the open dropdown while typing the primary
   // token filters the list to "No data". In those compound-label cases the token-filtered

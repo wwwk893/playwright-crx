@@ -16,6 +16,9 @@ import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult } from './syntheticReconciler';
 import { buildRecipeForStep } from '../replay/recipeBuilder';
+import { createAdaptiveTargetSnapshot, withAdaptiveTargetSnapshot } from './adaptiveTargetSnapshot';
+import { redactAdaptiveTargetSnapshot } from './adaptiveTargetRedactor';
+import { rankAdaptiveLocatorCandidates } from './locatorCandidates';
 import {
   countBusinessFlowPlaybackActions as countBusinessFlowPlaybackActionsFromReplay,
   generateBusinessFlowPlaybackCode as generateBusinessFlowPlaybackCodeFromReplay,
@@ -5587,6 +5590,75 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'parser-safe projected ReactNode select keeps explicit search text before compact IP option',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001', 'a002', 'a003'],
+          action: 'select',
+          target: {
+            role: 'combobox',
+            label: 'IP地址池',
+            name: '* IP地址池 question-circle',
+            scope: {
+              form: { label: 'IP地址池' },
+              dialog: { title: '新建IP端口地址池', type: 'modal', visible: true },
+            },
+          },
+          value: 'test11.1.1.1--2.2.2.2共享',
+          context: {
+            eventId: 'ctx-projected-react-node-select',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'IP地址池' },
+              dialog: { title: '选择一个IP地址池', type: 'dropdown', visible: true },
+              target: {
+                tag: 'div',
+                role: 'option',
+                text: 'test11.1.1.1--2.2.2.2共享',
+                selectedOption: 'test11.1.1.1--2.2.2.2共享',
+                normalizedText: 'test11.1.1.1--2.2.2.2共享',
+                framework: 'procomponents',
+                controlType: 'select-option',
+              },
+            },
+          },
+          uiRecipe: {
+            kind: 'select-option',
+            library: 'antd',
+            component: 'Select',
+            fieldKind: 'select',
+            fieldLabel: 'IP地址池',
+            optionText: 'test11.1.1.1--2.2.2.2共享',
+          },
+          rawAction: {
+            name: 'select',
+            transactionId: 'select-ip-pool',
+            searchText: 'test1',
+            selectedText: 'test11.1.1.1--2.2.2.2共享',
+          },
+          sourceCode: [
+            `await page.locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();`,
+            `await page.locator(".ant-form-item").filter({ hasText: "IP地址池" }).locator("input:visible").first().fill("test1");`,
+            `await page.locator(".ant-select-dropdown:visible").last().locator(".ant-select-item-option").filter({ hasText: "test1" }).first().click();`,
+          ].join('\n'),
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaybackCode(flow);
+      const optionStep = stepCodeBlock(code, 's001');
+
+      assert(optionStep.includes('.locator("input:visible").fill("test1");'), 'parser-safe projected select should preserve the explicit search text before choosing the compact IP option');
+      assert(optionStep.includes('.ant-select-item-option') && optionStep.includes('hasText: "test1"'), 'parser-safe projected select should still click the active dropdown option by the primary token');
+      assert(optionStep.includes('filter({ hasText: "1.1.1.1--2.2.2.2" })'), 'parser-safe projected select should keep the IP range token for uniqueness');
+      assertEqual(countBusinessFlowPlaybackActions(flow), 3);
+    },
+  },
+  {
     name: 'ReactNode AntD select option dedupe keeps shared and dedicated option semantics',
     run: () => {
       const optionStep = (id: string, order: number, optionText: string): FlowStep => ({
@@ -8991,6 +9063,157 @@ test('demo', async ({ page }) => {
       assert(yaml.includes('table: ip-port-pool') || yaml.includes('table: "ip-port-pool"'), 'compact yaml should preserve business table id');
       assert(yaml.includes('column: option') || yaml.includes('column: "option"'), 'compact yaml should preserve business column key fallback');
       assert(!aiJson.includes('token='), 'business AI input URL should strip query');
+    },
+  },
+  {
+    name: 'adaptive target snapshot stores testId role label and table row safely',
+    run: () => {
+      const step: FlowStep = {
+        id: 's001',
+        order: 1,
+        action: 'click',
+        target: {
+          testId: 'user-row-save',
+          role: 'button',
+          name: '保存',
+          label: '操作',
+          text: '保存',
+          selector: '.ant-table-row .ant-btn-primary',
+          scope: {
+            table: {
+              title: '用户管理',
+              testId: 'user-table',
+              rowKey: 'user-42',
+              rowText: 'user-42 李四 owner@example.com 编辑 删除',
+              rowIdentity: { source: 'data-row-key', value: 'user-42', confidence: 0.98, stable: true },
+              columnName: '操作',
+            },
+          },
+        },
+        context: {
+          eventId: 'ctx-adaptive-save',
+          capturedAt: 1000,
+          before: {
+            url: 'https://example.test/users?token=abc#debug',
+            title: '用户管理',
+            form: { label: '操作', name: 'actions' },
+            target: { tag: 'button', role: 'button', testId: 'user-row-save', text: '保存', controlType: 'button' },
+            table: {
+              title: '用户管理',
+              testId: 'user-table',
+              rowKey: 'user-42',
+              rowText: 'user-42 李四 owner@example.com 编辑 删除',
+              rowIdentity: { source: 'data-row-key', value: 'user-42', confidence: 0.98, stable: true },
+              columnName: '操作',
+            },
+          },
+        },
+        assertions: [],
+      };
+
+      const snapshot = createAdaptiveTargetSnapshot(step, { now: () => new Date('2026-01-01T00:00:00.000Z') });
+      assert(snapshot, 'snapshot should be created for a structured target');
+      assertEqual(snapshot?.target.testId, 'user-row-save');
+      assertEqual(snapshot?.target.role, 'button');
+      assertEqual(snapshot?.target.label, '操作');
+      assertEqual(snapshot?.tableRow?.tableTestId, 'user-table');
+      assertEqual(snapshot?.tableRow?.rowKey, 'user-42');
+      assertEqual(snapshot?.context?.url, 'https://example.test/users');
+      assert(!JSON.stringify(snapshot).includes('owner@example.com'), 'snapshot should be redacted before storage');
+
+      const flow = withAdaptiveTargetSnapshot({ ...createNamedFlow(), steps: [step] }, 's001', { now: () => new Date('2026-01-01T00:00:00.000Z') });
+      const stored = flow.artifacts?.recorder?.adaptiveTargets?.s001;
+      assert(stored, 'snapshot should be stored under recorder internals');
+      assertEqual(stored?.capturedAt, '2026-01-01T00:00:00.000Z');
+      assert(!(flow.artifacts as any)?.adaptiveTargets, 'snapshot should not be stored as a top-level artifact');
+    },
+  },
+  {
+    name: 'adaptive target redaction removes token password email and phone values',
+    run: () => {
+      const redacted = redactAdaptiveTargetSnapshot({
+        version: 1,
+        stepId: 's001',
+        action: 'click',
+        capturedAt: '2026-01-01T00:00:00.000Z',
+        target: {
+          text: 'owner@example.com 13800138000 token=abc123 password=hunter2',
+          selector: '[data-token="secret-value"] .danger',
+        },
+        candidates: [{
+          kind: 'css',
+          value: '[data-secret="super-secret"] owner@example.com',
+          score: 0.3,
+          reason: 'fallback contains token=abc123',
+        }],
+      });
+      const json = JSON.stringify(redacted);
+
+      assert(!json.includes('owner@example.com'), 'adaptive target should redact email-like values');
+      assert(!json.includes('13800138000'), 'adaptive target should redact phone-like values');
+      assert(!json.includes('abc123'), 'adaptive target should redact token assignment values');
+      assert(!json.includes('hunter2'), 'adaptive target should redact password assignment values');
+      assert(!json.includes('secret-value') && !json.includes('super-secret'), 'adaptive target should redact sensitive data attributes');
+    },
+  },
+  {
+    name: 'adaptive target export sanitizer strips snapshots and compact yaml omits candidates',
+    run: () => {
+      const step: FlowStep = {
+        id: 's001',
+        order: 1,
+        action: 'click',
+        target: { testId: 'save-user', role: 'button', name: '保存', text: '保存', selector: '[data-token="abc123"]' },
+        assertions: [],
+      };
+      const flow = withAdaptiveTargetSnapshot({ ...createNamedFlow(), steps: [step] }, 's001');
+      const exportFlow = prepareBusinessFlowForExport({
+        ...flow,
+        artifacts: {
+          ...flow.artifacts,
+          adaptiveTargets: { legacy: true },
+          locatorCandidates: { legacy: true },
+        } as any,
+      }, 'await page.getByTestId("save-user").click();');
+      const exportedJson = JSON.stringify(exportFlow);
+      const yaml = toCompactFlow(flow);
+
+      assert(!exportedJson.includes('adaptiveTargets'), 'exported JSON should strip adaptive target snapshots');
+      assert(!exportedJson.includes('locatorCandidates'), 'exported JSON should strip locator candidate internals');
+      assert(!exportedJson.includes('"candidates"'), 'exported JSON should not include adaptive locator candidates');
+      assert(!yaml.includes('adaptiveTargets'), 'compact YAML should not include adaptive target snapshots');
+      assert(!yaml.includes('candidates'), 'compact YAML should not include adaptive locator candidates');
+      assert(!yaml.includes('data-token'), 'compact YAML should not include fallback selector internals from snapshots');
+    },
+  },
+  {
+    name: 'adaptive locator candidates rank testId table row role label text before css',
+    run: () => {
+      const candidates = rankAdaptiveLocatorCandidates({
+        id: 's001',
+        order: 1,
+        action: 'click',
+        target: {
+          testId: 'row-save',
+          role: 'button',
+          name: '保存',
+          label: '操作',
+          text: '保存',
+          selector: '.ant-btn-primary',
+          scope: {
+            table: {
+              testId: 'user-table',
+              rowKey: 'user-42',
+              rowIdentity: { source: 'data-row-key', value: 'user-42', confidence: 0.98, stable: true },
+            },
+          },
+        },
+        assertions: [],
+      });
+
+      assertEqual(candidates.map(candidate => candidate.kind).join(','), 'testid,table-row,role,label,text,css');
+      assertEqual(candidates[0].value, 'row-save');
+      assert(candidates[1].value.includes('user-42'), 'table row candidate should preserve the row identity');
     },
   },
   {

@@ -15,6 +15,7 @@
  */
 import type { RecorderEventJournal } from '../capture/eventEnvelope';
 import type { UiActionRecipe } from '../uiSemantics/types';
+import type { AdaptiveTargetSnapshot } from './adaptiveTargetTypes';
 import type {
   DialogContext,
   FormContext,
@@ -252,6 +253,7 @@ export interface FlowRecorderState {
   version: 3;
   actionLog: RecordedActionEntry[];
   eventJournal?: RecorderEventJournal;
+  adaptiveTargets?: Record<string, AdaptiveTargetSnapshot>;
   nextActionSeq: number;
   nextStepSeq: number;
   sessions: RecordingSession[];
