@@ -492,6 +492,15 @@ function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: Flo
     return false;
   const rawTitle = rawSelectOptionTitle(step);
   const recordedOptionText = recordedActiveDropdownOptionTextFromSource(step.sourceCode || '');
+  const hasDropdownOptionEvidence = isRecordedActiveDropdownSource ||
+    !!rawTitle ||
+    /^(option|select-option)$/.test(controlType) ||
+    step.target?.role === 'option' ||
+    step.context?.before.target?.role === 'option' ||
+    step.context?.before.dialog?.type === 'dropdown' ||
+    step.target?.scope?.dialog?.type === 'dropdown';
+  if (selectStep.action === 'select' && !hasDropdownOptionEvidence)
+    return false;
   const optionText = rawTitle || recordedOptionText || step.target?.text || step.target?.name || step.target?.displayName;
   if (!optionText)
     return false;
@@ -768,20 +777,39 @@ function isRedundantSelectedValueDisplayClick(step: FlowStep, previousStep?: Flo
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
   if (!/getByText|internal:text=|text=/.test(source))
     return false;
-  if (isExactOrCompactMatch && isWeakSelectedValueTextEcho(step))
-    return true;
-  if (!sameFieldIdentityIgnoringDialog(step, previousStep) && !hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText))
+  const fieldScoped = sameSelectedValueDisplayFieldIdentity(step, previousStep);
+  const assertionTied = hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText);
+  if (!fieldScoped && !assertionTied)
     return false;
   return true;
 }
 
-function isWeakSelectedValueTextEcho(step: FlowStep) {
-  const role = step.target?.role || step.context?.before.target?.role || '';
-  return !step.target?.testId &&
-    !step.context?.before.target?.testId &&
-    !step.target?.scope?.table &&
-    !step.context?.before.table &&
-    !/^(button|link|checkbox|radio|switch|tab|menuitem)$/i.test(role || '');
+function sameSelectedValueDisplayFieldIdentity(step: FlowStep, previousStep: FlowStep) {
+  const clickedFieldTokens = selectedValueDisplayClickFieldTokens(step);
+  const previousFieldTokens = selectedValuePreviousFieldTokens(previousStep);
+  return clickedFieldTokens.some(leftToken => previousFieldTokens.some(rightToken => fieldsMatch(leftToken, rightToken)));
+}
+
+function selectedValueDisplayClickFieldTokens(step: FlowStep) {
+  return uniqueValues([
+    step.target?.label,
+    step.target?.scope?.form?.label,
+    step.context?.before.form?.label,
+    step.target?.placeholder,
+    step.context?.before.target?.placeholder,
+  ].map(normalizeFieldIdentityToken).filter(Boolean) as string[]);
+}
+
+function selectedValuePreviousFieldTokens(step: FlowStep) {
+  return uniqueValues([
+    step.target?.label,
+    step.target?.scope?.form?.label,
+    step.context?.before.form?.label,
+    step.target?.placeholder,
+    step.context?.before.target?.placeholder,
+    step.target?.name,
+    comboboxNameFromSource(step.sourceCode || ''),
+  ].map(normalizeFieldIdentityToken).filter(Boolean) as string[]);
 }
 
 export function isTruncatedSelectedValueDisplayEchoClick(step: FlowStep, previousStep?: FlowStep) {
@@ -816,10 +844,12 @@ function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep:
     previousStep.target?.scope?.form?.testId,
     previousStep.context?.before.target?.testId,
   ].filter(Boolean) as string[]);
-  if (!previousTestIds.length)
+  const previousFieldTokens = selectedValuePreviousFieldTokens(previousStep);
+  if (!previousTestIds.length && !previousFieldTokens.length)
     return false;
   const normalizedSelectedText = normalizeGeneratedText(selectedText);
-  return step.assertions.some(assertion => {
+  const assertions = [...step.assertions, ...previousStep.assertions];
+  return assertions.some(assertion => {
     if (assertion.type !== 'selected-value-visible' || !assertion.enabled)
       return false;
     const expected = normalizeGeneratedText(stringParam(assertion.expected || assertion.params?.expected) || '');
@@ -829,7 +859,17 @@ function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep:
     if (!expected || (!matchesSelectedText && !matchesTruncatedClickedText))
       return false;
     const assertionTargetTestId = stringParam(assertion.params?.targetTestId || assertion.target?.testId);
-    return !!assertionTargetTestId && previousTestIds.includes(assertionTargetTestId);
+    if (assertionTargetTestId && previousTestIds.includes(assertionTargetTestId))
+      return true;
+    const assertionFieldTokens = uniqueValues([
+      assertion.target?.label,
+      assertion.target?.scope?.form?.label,
+      assertion.target?.name,
+      assertion.target?.displayName,
+      stringParam(assertion.params?.fieldLabel),
+      stringParam(assertion.params?.label),
+    ].map(normalizeFieldIdentityToken).filter(Boolean) as string[]);
+    return assertionFieldTokens.some(leftToken => previousFieldTokens.some(rightToken => fieldsMatch(leftToken, rightToken)));
   });
 }
 

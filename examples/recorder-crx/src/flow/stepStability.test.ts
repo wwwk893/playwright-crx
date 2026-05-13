@@ -912,7 +912,19 @@ const tests: TestCase[] = [
             order: 2,
             kind: 'recorded',
             action: 'click',
-            target: { text: 'edge-lab:WAN1', displayName: 'edge-lab:WAN1' },
+            target: {
+              text: 'edge-lab:WAN1',
+              displayName: 'edge-lab:WAN1',
+              scope: { form: { label: 'WAN口' } },
+            },
+            context: {
+              eventId: 'ctx-wan-selected-echo',
+              capturedAt: 1100,
+              before: {
+                form: { label: 'WAN口' },
+                target: { tag: 'span', text: 'edge-lab:WAN1', normalizedText: 'edge-lab:WAN1' },
+              },
+            },
             rawAction: { action: { name: 'click', selector: 'internal:text="edge-lab:WAN1"i' } },
             sourceCode: `await page.getByText("edge-lab:WAN1").click();`,
             assertions: [{
@@ -961,6 +973,125 @@ const tests: TestCase[] = [
       assert(!exportedWithoutAssertion.includes('page.getByText("edge-lab:WAN1").click()'), 'exported replay should dedupe an exact selected-value echo even without a terminal selected-value assertion');
       assert(!parserSafeWithoutAssertion.includes('page.getByText("edge-lab:WAN1").click()'), 'parser-safe replay should dedupe an exact selected-value echo even without a terminal selected-value assertion');
       assertEqual(countBusinessFlowPlaybackActions(flowWithoutSelectedValueAssertion), runnableLineCount(parserSafeWithoutAssertion));
+
+      const flowWithPreviousSelectedValueAssertion: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 'vrf-select',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', label: '关联VRF', name: '关联VRF' },
+            value: '生产VRF',
+            context: {
+              eventId: 'ctx-vrf-select',
+              capturedAt: 1000,
+              before: {
+                form: { label: '关联VRF' },
+                target: {
+                  role: 'option',
+                  framework: 'antd',
+                  controlType: 'select-option',
+                  selectedOption: '生产VRF',
+                },
+                ui: { library: 'antd', component: 'select', form: { label: '关联VRF' } },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: '生产VRF' } },
+            assertions: [{
+              id: 'vrf-selected',
+              type: 'selected-value-visible',
+              subject: 'element',
+              target: { role: 'combobox', label: '关联VRF', name: '关联VRF' },
+              expected: '生产VRF',
+              enabled: true,
+            }],
+          },
+          {
+            id: 'vrf-selected-echo',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: '生产VRF', displayName: '生产VRF' },
+            sourceCode: `await page.getByText("生产VRF").click();`,
+            context: {
+              eventId: 'ctx-vrf-selected-echo',
+              capturedAt: 1100,
+              before: {
+                target: { tag: 'span', text: '生产VRF', normalizedText: '生产VRF' },
+              } as any,
+            },
+            rawAction: { action: { name: 'click', selector: 'internal:text="生产VRF"i', text: '生产VRF' } },
+            assertions: [],
+          },
+        ],
+      };
+      const exportedWithPreviousAssertion = generateBusinessFlowPlaywrightCode(flowWithPreviousSelectedValueAssertion);
+      const parserSafeWithPreviousAssertion = generateBusinessFlowPlaybackCode(flowWithPreviousSelectedValueAssertion);
+      assert(!exportedWithPreviousAssertion.includes('page.getByText("生产VRF").click()'), 'exported replay should dedupe a selected-value echo tied by the previous select assertion');
+      assert(!parserSafeWithPreviousAssertion.includes('page.getByText("生产VRF").click()'), 'parser-safe replay should dedupe a selected-value echo tied by the previous select assertion');
+      assert(exportedWithPreviousAssertion.includes('生产VRF'), 'exported replay should keep the selected-value assertion text');
+      assertEqual(countBusinessFlowPlaybackActions(flowWithPreviousSelectedValueAssertion), runnableLineCount(parserSafeWithPreviousAssertion));
+    },
+  },
+  {
+    name: 'selected-value echo dedupe does not drop same-text follow-up click outside the select field',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', label: '集群', name: '集群' },
+            value: 'NAT集群A',
+            context: {
+              eventId: 'ctx-select-cluster',
+              capturedAt: 1000,
+              before: {
+                form: { label: '集群' },
+                target: {
+                  role: 'option',
+                  framework: 'antd',
+                  controlType: 'select-option',
+                  selectedOption: 'NAT集群A',
+                },
+                ui: { library: 'antd', component: 'select', form: { label: '集群' } },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: 'NAT集群A' } },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: 'NAT集群A', displayName: 'NAT集群A' },
+            sourceCode: `await page.getByText("NAT集群A").click();`,
+            context: {
+              eventId: 'ctx-click-cluster-card',
+              capturedAt: 1100,
+              before: {
+                target: { tag: 'div', text: 'NAT集群A', normalizedText: 'NAT集群A' },
+              } as any,
+            },
+            rawAction: { action: { name: 'click', text: 'NAT集群A' } },
+            assertions: [],
+          },
+        ],
+      };
+
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+      const hasSameTextClick = (code: string) => code.includes('page.getByText("NAT集群A").click()') || code.includes("page.getByText('NAT集群A').click()");
+
+      assert(hasSameTextClick(exported), 'exported replay must keep a same-text click that is not scoped to the previous select field');
+      assert(hasSameTextClick(parserSafe), 'parser-safe replay must keep a same-text click that is not scoped to the previous select field');
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(parserSafe));
     },
   },
   {
