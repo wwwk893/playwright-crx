@@ -68,7 +68,7 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       lastDropdownOptionCompact = '';
     }
 
-    emitStep(lines, step, '  ', undefined, undefined, { previousStep: previousEmittedStep, nextStep: effectiveFlow.steps[index + 1] });
+    emitStep(lines, step, '  ', undefined, undefined, { safetyGuard: true, previousStep: previousEmittedStep, nextStep: effectiveFlow.steps[index + 1] });
     previousEmittedStep = step;
   }
 

@@ -18,6 +18,7 @@ import { actionLabel, summarizeStepSubject } from '../flow/display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import { isRecipeBackedAntdSelectOption, recipeOptionSearchText, recipeOptionText } from './antDRecipeRenderers';
 import { buildRecipeForStep } from './recipeBuilder';
+import { applySafetyPreflightToSource } from './safetyGuard';
 import { renderRepeatAssertionTemplate } from './terminalAssertions';
 
 export function createEffectiveReplayFlow(flow: BusinessFlow): BusinessFlow {
@@ -566,6 +567,7 @@ export type EmitStepOptions = {
   parserSafe?: boolean;
   previousStep?: FlowStep;
   nextStep?: FlowStep;
+  safetyGuard?: boolean;
 };
 
 export function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment, options: EmitStepOptions = {}) {
@@ -960,7 +962,7 @@ function uniqueValues(values: string[]) {
 
 export function emitStep(lines: string[], step: FlowStep, indent: string, segment?: FlowRepeatSegment, rowValues?: Record<string, string>, options: EmitStepOptions = {}) {
   lines.push(`${indent}// ${step.id} ${actionLabel[step.action]}: ${summarizeStepSubject(step)}`);
-  const sourceCode = sourceCodeForStep(step, options);
+  const sourceCode = sourceCodeWithSafetyPreflight(step, options);
   if (sourceCode) {
     const parameterizedSource = sourceCode
         .map(line => segment ? parameterizeLine(line, step, segment, rowValues) : line);
@@ -979,7 +981,7 @@ export function emitStep(lines: string[], step: FlowStep, indent: string, segmen
 }
 
 export function countStepActions(step: FlowStep, options: EmitStepOptions = {}) {
-  const sourceActionCount = sourceCodeForStep(step, options)
+  const sourceActionCount = sourceCodeWithSafetyPreflight(step, options)
       ?.filter(line => isRunnableLine(line))
       .length ?? 0;
   const assertionActionCount = stepAssertionsForEmission(step, options)
@@ -987,6 +989,14 @@ export function countStepActions(step: FlowStep, options: EmitStepOptions = {}) 
       .filter(line => isRunnableLine(line))
       .length;
   return sourceActionCount + assertionActionCount;
+}
+
+function sourceCodeWithSafetyPreflight(step: FlowStep, options: EmitStepOptions = {}) {
+  const sourceCode = sourceCodeForStep(step, options);
+  if (options.safetyGuard === false)
+    return sourceCode;
+  const safety = buildRecipeForStep(step)?.safetyPreflight;
+  return applySafetyPreflightToSource(sourceCode, safety, step, { parserSafe: options.parserSafe });
 }
 
 function stepAssertionsForEmission(step: FlowStep, options: EmitStepOptions = {}) {

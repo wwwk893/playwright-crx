@@ -1096,6 +1096,134 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'safety guard blocks table row actions without rowKey in exported and parser-safe replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-delete-action',
+            displayName: '删除',
+            scope: { table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 删除' } },
+          },
+          context: {
+            eventId: 'ctx-delete-without-row-key',
+            capturedAt: 1000,
+            before: {
+              target: { tag: 'a', testId: 'wan-transport-row-delete-action', text: '删除', framework: 'antd', controlType: 'link' },
+              table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 删除', columnName: '操作' },
+            } as any,
+          },
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.operation, 'rowAction');
+      assertEqual(recipe?.safetyPreflight?.status, 'blocked');
+      assertEqual(recipe?.safetyPreflight?.findings[0]?.code, 'row-action-without-row-key');
+      assert(exported.includes('BAGLC safety guard blocked s001: row-action-without-row-key'), 'exported replay should fail closed for row actions without rowKey');
+      assert(parserSafe.includes('BAGLC safety guard blocked s001: row-action-without-row-key'), 'parser-safe replay should fail closed for row actions without rowKey');
+      assert(!exported.includes('getByTestId("wan-transport-row-delete-action").click()'), 'blocked row action must not fall back to the reusable global test id');
+    },
+  },
+  {
+    name: 'safety guard blocks critical actions that would use text fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: { text: '删除', displayName: '删除' },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('critical-action-unsafe-locator-fallback'), 'critical delete/remove actions must not replay through text fallback');
+      assert(!code.includes('page.getByText("删除").click()'), 'unsafe critical fallback should not be emitted');
+    },
+  },
+  {
+    name: 'safety guard emits modal and popconfirm uniqueness preflight checks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: { role: 'button', name: '保存', scope: { dialog: { type: 'modal', title: '新建用户', visible: true } } },
+            context: {
+              eventId: 'ctx-modal-save',
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'modal', title: '新建用户', visible: true },
+                target: { tag: 'button', role: 'button', text: '保存' },
+              } as any,
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { role: 'tooltip', name: '确 定', scope: { dialog: { type: 'popover', title: '删除此行？', visible: true } } },
+            context: {
+              eventId: 'ctx-popconfirm-ok',
+              capturedAt: 1100,
+              before: {
+                dialog: { type: 'popover', title: '删除此行？', visible: true },
+                target: { tag: 'button', role: 'tooltip', text: '确 定' },
+              } as any,
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const modalPreflight = 'BAGLC safety guard requires exactly one visible modal/drawer root before a dialog action: s001';
+      const popconfirmPreflight = 'BAGLC safety guard requires exactly one visible Popconfirm before confirming: s002';
+
+      assert(code.includes(modalPreflight), 'modal actions should preflight one visible dialog root');
+      assert(code.includes('filter({ hasText: "新建用户" })'), 'modal preflight should keep dialog title scope');
+      assert(code.includes(popconfirmPreflight), 'Popconfirm confirms should preflight one visible Popconfirm root');
+      assert(code.indexOf(popconfirmPreflight) < code.indexOf('getByRole("button", { name: /^(确定|确 定)$/ })'), 'Popconfirm preflight should run before the confirm click');
+    },
+  },
+  {
+    name: 'safety guard does not block low-risk navigation',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'navigate',
+          url: '/settings',
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.goto("/settings")'), 'low-risk navigation should still emit normally');
+      assert(!code.includes('BAGLC safety guard'), 'low-risk navigation should not be blocked or preflighted');
+    },
+  },
+  {
     name: 'recipeBuilder does not force AntD replay strategy for generic select steps',
     run: () => {
       const recipe = buildRecipeForStep({

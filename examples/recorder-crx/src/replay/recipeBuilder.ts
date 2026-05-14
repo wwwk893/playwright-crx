@@ -6,6 +6,7 @@
 import type { UiLibrary } from '../uiSemantics/types';
 import type { FlowStep } from '../flow/types';
 import { buildLocatorContract } from './locatorCandidates';
+import { buildSafetyPreflight } from './safetyGuard';
 import {
   type LegacyUiActionRecipeKind,
   type UiActionFramework,
@@ -208,9 +209,13 @@ function makeRecipe(options: {
 }
 
 function withLocatorContract(recipe: UiActionRecipe, step: FlowStep): UiActionRecipe {
-  return {
+  const withLocator = {
     ...recipe,
     locatorContract: buildLocatorContract(recipe, step),
+  };
+  return {
+    ...withLocator,
+    safetyPreflight: buildSafetyPreflight(withLocator, step),
   };
 }
 
@@ -329,7 +334,8 @@ function isPopconfirmStep(step: FlowStep) {
 }
 
 function isTableRowStep(step: FlowStep) {
-  return !!(step.context?.before.table?.rowKey || step.target?.scope?.table?.rowKey || step.uiRecipe?.kind === 'table-row-action');
+  const table = step.context?.before.table || step.target?.scope?.table;
+  return !!(table?.rowKey || table?.rowText || step.uiRecipe?.kind === 'table-row-action');
 }
 
 function isSelectOptionClickStep(step: FlowStep) {
