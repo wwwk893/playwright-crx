@@ -135,6 +135,7 @@ function compactPageContextEvent(event: PageContextEvent) {
       form: event.before.form,
       target: event.before.target,
       ui: event.before.ui,
+      grounding: event.before.grounding,
     } : undefined,
     after: event.after ? {
       url: event.after.url,

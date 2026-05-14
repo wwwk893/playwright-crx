@@ -12,6 +12,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 import type { UiSemanticContext } from '../uiSemantics/types';
+import type { BusinessActionGroundingEvidence } from '../uiSemantics/anchorDiagnostics';
 
 export type IntentSource = 'rule' | 'ai' | 'user';
 
@@ -34,6 +35,7 @@ export interface PageContextSnapshot {
   form?: FormContext;
   target?: ElementContext;
   ui?: UiSemanticContext;
+  grounding?: BusinessActionGroundingEvidence;
   nearbyText?: string[];
 }
 

@@ -6,6 +6,8 @@
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
 import { extractTargetFromRecorderAction } from '../capture/targetFromRecorderSelector';
+import { equivalentAnchorCandidates, rankAnchorCandidates } from '../uiSemantics/anchorDiagnostics';
+import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from '../uiSemantics/anchorGrounding';
 import { compactSemanticDiagnostic, createSemanticDiagnosticsBuffer } from '../uiSemantics/diagnostics';
 import { composeInputTransactionsFromJournal } from '../interactions/inputTransactions';
 import { composeSelectTransactionsFromJournal } from '../interactions/selectTransactions';
@@ -238,6 +240,344 @@ const tests: TestCase[] = [
       assertEqual(eventJournalStats(recorder).pageContextEventCount, 1);
       assert(recorder.eventJournal.eventsById[`page-context:${event.id}`], 'ignored page context event should be recorded as a fact');
       assertEqual(merged.steps, flow.steps);
+    },
+  },
+  {
+    name: 'page context event journal preserves anchor grounding diagnostics without changing steps',
+    run: () => {
+      const flow = mergeActionsIntoFlow(createNamedFlow(), [clickActionWithWallTime('保存', 1000)], [], {});
+      const event = pageClickEvent('ctx-grounded-save', 1100, '保存');
+      event.before.grounding = anchorGroundingFixture();
+
+      const merged = mergePageContextIntoFlow(flow, [event]);
+      const envelope = merged.artifacts?.recorder?.eventJournal?.eventsById[`page-context:${event.id}`];
+
+      assert(envelope, 'grounded page context should be recorded');
+      assertEqual((envelope.payload as PageContextEvent).before.grounding?.chosenAnchor.testId, 'save-button');
+      assertEqual((envelope.payload as PageContextEvent).before.grounding?.equivalentAnchors.length, 2);
+      assertEqual(merged.steps.map(step => step.id), flow.steps.map(step => step.id));
+    },
+  },
+  {
+    name: 'anchor diagnostics rank checkbox wrapper above inner input',
+    run: () => {
+      const [wrapper, input] = rankAnchorCandidates([
+        {
+          id: 'target:0:input:checkbox',
+          tag: 'input',
+          role: 'checkbox',
+          classTokens: ['ant-checkbox-input'],
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+        },
+        {
+          id: 'ancestor:1:label:checkbox-wrapper',
+          tag: 'label',
+          role: 'checkbox',
+          text: '启用',
+          classTokens: ['ant-checkbox-wrapper'],
+          depthFromTarget: 1,
+          source: 'ancestor',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+        },
+      ]);
+
+      assertEqual(wrapper.id, 'ancestor:1:label:checkbox-wrapper');
+      assert(input.risks.includes('inner native input'), 'inner checkbox input should be marked as a weaker anchor');
+      assert(wrapper.ruleScore > input.ruleScore, 'wrapper should outrank inner input');
+    },
+  },
+  {
+    name: 'anchor diagnostics keep visually equivalent icon and button anchors together',
+    run: () => {
+      const candidates = rankAnchorCandidates([
+        {
+          id: 'target:0:svg:icon',
+          tag: 'svg',
+          classTokens: ['anticon'],
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 104, top: 104, right: 116, bottom: 116, width: 12, height: 12 },
+        },
+        {
+          id: 'ancestor:2:button:save',
+          tag: 'button',
+          role: 'button',
+          text: '保存',
+          testId: 'save-button',
+          classTokens: ['ant-btn'],
+          depthFromTarget: 2,
+          source: 'ancestor',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 100, top: 100, right: 140, bottom: 124, width: 40, height: 24 },
+        },
+      ]);
+      const chosen = candidates[0];
+      const equivalents = equivalentAnchorCandidates(chosen, candidates);
+
+      assertEqual(chosen.id, 'ancestor:2:button:save');
+      assert(equivalents.some(candidate => candidate.id === 'target:0:svg:icon'), 'icon inside button should remain in the visual equivalent anchor group');
+    },
+  },
+  {
+    name: 'anchor diagnostics do not mark a table row as equivalent to its action button',
+    run: () => {
+      const candidates = rankAnchorCandidates([
+        {
+          id: 'target:0:button:edit-action',
+          tag: 'button',
+          role: 'button',
+          text: '编辑',
+          classTokens: ['ant-btn'],
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 220, top: 108, right: 252, bottom: 132, width: 32, height: 24 },
+        },
+        {
+          id: 'tableScope:1:tr:user-42',
+          tag: 'tr',
+          text: 'user-42 编辑 删除',
+          depthFromTarget: 1,
+          source: 'tableScope',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 40, top: 96, right: 560, bottom: 144, width: 520, height: 48 },
+          context: { tableTestId: 'users-table', rowKey: 'user-42' },
+        },
+      ]);
+      const button = candidates.find(candidate => candidate.id === 'target:0:button:edit-action');
+      const row = candidates.find(candidate => candidate.id === 'tableScope:1:tr:user-42');
+
+      assert(button && row, 'button and row candidates should exist');
+      assert(!equivalentAnchorCandidates(button, candidates).some(candidate => candidate.id === row.id), 'table row containers must not be equivalent to row action buttons');
+    },
+  },
+  {
+    name: 'anchor diagnostics do not mark a form item as equivalent to its inner input',
+    run: () => {
+      const candidates = rankAnchorCandidates([
+        {
+          id: 'target:0:input:name',
+          tag: 'input',
+          role: 'textbox',
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 180, top: 120, right: 360, bottom: 152, width: 180, height: 32 },
+        },
+        {
+          id: 'ancestor:1:div:form-item',
+          tag: 'div',
+          text: '资源名称',
+          classTokens: ['ant-form-item'],
+          depthFromTarget: 1,
+          source: 'ancestor',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 80, top: 96, right: 420, bottom: 176, width: 340, height: 80 },
+          context: { formLabel: '资源名称', fieldName: 'name' },
+        },
+      ]);
+      const input = candidates.find(candidate => candidate.id === 'target:0:input:name');
+      const formItem = candidates.find(candidate => candidate.id === 'ancestor:1:div:form-item');
+
+      assert(input && formItem, 'input and form item candidates should exist');
+      assert(!equivalentAnchorCandidates(input, candidates).some(candidate => candidate.id === formItem.id), 'form item containers must not be equivalent to inner inputs');
+    },
+  },
+  {
+    name: 'anchor diagnostics score ProTable row actions with table and row key evidence',
+    run: () => {
+      const [rowAction, globalText] = rankAnchorCandidates([
+        {
+          id: 'ancestor:1:button:edit-action',
+          tag: 'button',
+          role: 'button',
+          text: '编辑',
+          dataE2eAction: 'edit',
+          depthFromTarget: 1,
+          source: 'ancestor',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          context: { tableTestId: 'user-table', rowKey: 'user-42', columnKey: '操作', proComponent: 'pro-table' },
+        },
+        {
+          id: 'target:0:span:edit-text',
+          tag: 'span',
+          text: '编辑',
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+        },
+      ]);
+
+      assertEqual(rowAction.id, 'ancestor:1:button:edit-action');
+      assert(rowAction.reasons.includes('row key context'), 'row action should explain row key evidence');
+      assert(rowAction.reasons.includes('table scope context'), 'row action should explain table scope evidence');
+      assert(rowAction.ruleScore > globalText.ruleScore, 'row-scoped action should outrank unscoped text');
+    },
+  },
+  {
+    name: 'anchor diagnostics identify select triggers and portal options',
+    run: () => {
+      const [trigger] = rankAnchorCandidates([
+        {
+          id: 'ancestor:1:div:wan-select',
+          tag: 'div',
+          role: 'combobox',
+          text: 'WAN口',
+          classTokens: ['ant-select-selector'],
+          depthFromTarget: 1,
+          source: 'ancestor',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          context: { formLabel: 'WAN口', fieldName: 'wan' },
+        },
+        {
+          id: 'target:0:span:wan-text',
+          tag: 'span',
+          text: 'WAN口',
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+        },
+      ]);
+      const [portalOption] = rankAnchorCandidates([
+        {
+          id: 'portal:1:div:wan-option',
+          tag: 'div',
+          role: 'option',
+          text: 'xtest16:WAN1',
+          classTokens: ['ant-select-item-option'],
+          depthFromTarget: 1,
+          source: 'portal',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          context: { formLabel: 'WAN口', fieldName: 'wan' },
+        },
+      ]);
+
+      assertEqual(trigger.id, 'ancestor:1:div:wan-select');
+      assert(trigger.reasons.includes('select trigger semantic'), 'select trigger should explain combobox/select-selector evidence');
+      assert(trigger.reasons.includes('form field context'), 'select trigger should keep field context');
+      assertEqual(portalOption.id, 'portal:1:div:wan-option');
+      assert(portalOption.reasons.includes('option semantic'), 'portal option should explain option evidence');
+    },
+  },
+  {
+    name: 'anchor diagnostics do not mark dropdown roots as equivalent to selected options',
+    run: () => {
+      const candidates = rankAnchorCandidates([
+        {
+          id: 'target:0:div:wan-option',
+          tag: 'div',
+          role: 'option',
+          text: 'edge-lab:WAN-extra-18',
+          classTokens: ['ant-select-item-option'],
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 120, top: 220, right: 420, bottom: 252, width: 300, height: 32 },
+        },
+        {
+          id: 'portal:1:div:dropdown-root',
+          tag: 'div',
+          classTokens: ['ant-select-dropdown'],
+          depthFromTarget: 1,
+          source: 'portal',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+          bbox: { left: 100, top: 200, right: 460, bottom: 420, width: 360, height: 220 },
+        },
+      ]);
+      const option = candidates.find(candidate => candidate.id === 'target:0:div:wan-option');
+      const dropdown = candidates.find(candidate => candidate.id === 'portal:1:div:dropdown-root');
+
+      assert(option && dropdown, 'option and dropdown candidates should exist');
+      assert(!equivalentAnchorCandidates(option, candidates).some(candidate => candidate.id === dropdown.id), 'dropdown roots must not be equivalent to selected option rows');
+    },
+  },
+  {
+    name: 'anchor diagnostics ranking is idempotent',
+    run: () => {
+      const once = rankAnchorCandidates([
+        {
+          id: 'target:0:span:save-text',
+          tag: 'span',
+          text: '保存',
+          depthFromTarget: 0,
+          source: 'target',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+        },
+        {
+          id: 'ancestor:1:button:save',
+          tag: 'button',
+          role: 'button',
+          text: '保存',
+          testId: 'save-button',
+          depthFromTarget: 1,
+          source: 'ancestor',
+          ruleScore: 0,
+          reasons: [],
+          risks: [],
+        },
+      ]);
+      const twice = rankAnchorCandidates(once);
+
+      assertEqual(twice.map(candidate => [candidate.id, candidate.ruleScore]), once.map(candidate => [candidate.id, candidate.ruleScore]));
+    },
+  },
+  {
+    name: 'anchor grounding scores raw target consistently with candidates',
+    run: () => {
+      const target = fakeAnchorElement('button', { 'data-testid': 'save-button' }, '保存', { left: 100, top: 100, right: 148, bottom: 124, width: 48, height: 24 });
+      const grounding = collectAnchorGroundingEvidence(target as unknown as Element, {
+        maxDepth: 0,
+        textForElement: element => (element as unknown as FakeAnchorElement).mockText,
+        testIdForElement: element => element.getAttribute('data-testid') || undefined,
+      });
+      const rawFromCandidates = grounding.candidates.find(candidate => candidate.id === grounding.rawTarget.id);
+
+      assert(grounding.rawTarget.ruleScore > 0, 'raw target should be scored');
+      assert(rawFromCandidates, 'raw target should appear in scored candidates');
+      assertEqual(grounding.rawTarget.ruleScore, rawFromCandidates.ruleScore);
+      assert(grounding.rawTarget.reasons.includes('business action test id'), 'raw target should keep scored reasons');
+    },
+  },
+  {
+    name: 'anchor grounding diagnostics gate is independent from semantic adapter diagnostics',
+    run: () => {
+      assertEqual(shouldCollectAnchorGroundingDiagnostics({ semanticAdapterDiagnosticsEnabled: true }), false);
+      assertEqual(shouldCollectAnchorGroundingDiagnostics({ anchorGroundingDiagnosticsEnabled: true }), true);
     },
   },
   {
@@ -10195,6 +10535,75 @@ function pageClickEventWithTarget(id: string, wallTime: number, target: ElementC
       target,
     },
   };
+}
+
+function anchorGroundingFixture() {
+  const buttonAnchor = {
+    id: 'ancestor:2:button:save-button',
+    tag: 'button',
+    role: 'button',
+    text: '保存',
+    testId: 'save-button',
+    depthFromTarget: 2,
+    source: 'ancestor' as const,
+    ruleScore: 1498,
+    reasons: ['business action test id', 'button semantic'],
+    risks: [],
+    bbox: { left: 100, top: 100, right: 140, bottom: 124, width: 40, height: 24 },
+  };
+  const iconAnchor = {
+    id: 'target:0:svg:icon',
+    tag: 'svg',
+    depthFromTarget: 0,
+    source: 'target' as const,
+    ruleScore: -300,
+    reasons: [],
+    risks: ['icon node'],
+    bbox: { left: 104, top: 104, right: 116, bottom: 116, width: 12, height: 12 },
+  };
+  return {
+    rawTarget: iconAnchor,
+    chosenAnchor: buttonAnchor,
+    equivalentAnchors: [buttonAnchor, iconAnchor],
+    candidates: [buttonAnchor, iconAnchor],
+    confidence: 0.92,
+    reasons: ['business action test id', 'button semantic', 'visual equivalent anchor group'],
+  };
+}
+
+class FakeAnchorElement {
+  readonly tagName: string;
+  readonly ownerDocument = { elementFromPoint: () => undefined };
+  readonly parentElement = null;
+
+  constructor(
+    tagName: string,
+    private readonly attributes: Record<string, string>,
+    readonly mockText: string | undefined,
+    private readonly rect: { left: number; top: number; right: number; bottom: number; width: number; height: number },
+  ) {
+    this.tagName = tagName.toUpperCase();
+  }
+
+  getAttribute(name: string) {
+    return this.attributes[name] ?? null;
+  }
+
+  hasAttribute(name: string) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, name);
+  }
+
+  matches() {
+    return false;
+  }
+
+  getBoundingClientRect() {
+    return this.rect;
+  }
+}
+
+function fakeAnchorElement(tagName: string, attributes: Record<string, string>, text: string | undefined, rect: { left: number; top: number; right: number; bottom: number; width: number; height: number }) {
+  return new FakeAnchorElement(tagName, attributes, text, rect);
 }
 
 function pageSelectTriggerEvent(id: string, wallTime: number, label: string, controlType: 'select' | 'tree-select' | 'cascader' = 'select'): PageContextEvent {
