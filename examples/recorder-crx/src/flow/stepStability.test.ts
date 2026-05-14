@@ -20,7 +20,9 @@ import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageCont
 import { buildRecipeForStep } from '../replay/recipeBuilder';
 import { createAdaptiveTargetSnapshot, withAdaptiveTargetSnapshot } from './adaptiveTargetSnapshot';
 import { redactAdaptiveTargetSnapshot } from './adaptiveTargetRedactor';
+import { createReplayFailureDiagnostic } from './adaptiveFailureReport';
 import { rankAdaptiveLocatorCandidates } from './locatorCandidates';
+import { createReplayFailureDiagnosticsArtifact } from './replayDiagnostics';
 import { mergeRecorderActionsIntoFlow } from './recorderActionMerge';
 import {
   countBusinessFlowPlaybackActions as countBusinessFlowPlaybackActionsFromReplay,
@@ -9693,6 +9695,184 @@ test('demo', async ({ page }) => {
       assertEqual(candidates.map(candidate => candidate.kind).join(','), 'testid,table-row,role,label,text,css');
       assertEqual(candidates[0].value, 'row-save');
       assert(candidates[1].value.includes('user-42'), 'table row candidate should preserve the row identity');
+    },
+  },
+  {
+    name: 'adaptive replay failure diagnostic includes redacted target and candidates',
+    run: () => {
+      const step: FlowStep = {
+        id: 's001',
+        order: 1,
+        action: 'click',
+        intent: '保存用户行',
+        target: {
+          testId: 'row-save',
+          role: 'button',
+          name: '保存',
+          text: '保存 owner@example.com 13800138000 token=abc123',
+          selector: '[data-token="super-secret"] .ant-btn-primary',
+          scope: {
+            table: {
+              testId: 'user-table',
+              rowKey: 'user-42',
+              rowText: 'user-42 李四 owner@example.com 编辑 删除',
+              rowIdentity: { source: 'data-row-key', value: 'user-42', confidence: 0.98, stable: true },
+            },
+          },
+        },
+        context: {
+          eventId: 'ctx-diagnostic-save',
+          capturedAt: 1000,
+          before: {
+            url: 'https://example.test/users?token=abc123#debug',
+            title: '用户管理',
+            target: {
+              tag: 'button',
+              role: 'button',
+              testId: 'row-save',
+              text: '保存 owner@example.com 13800138000 token=abc123',
+            },
+            table: {
+              title: '用户管理',
+              testId: 'user-table',
+              rowKey: 'user-42',
+              rowText: 'user-42 李四 owner@example.com 编辑 删除',
+              rowIdentity: { source: 'data-row-key', value: 'user-42', confidence: 0.98, stable: true },
+            },
+          },
+        },
+        assertions: [],
+      };
+      const diagnostic = createReplayFailureDiagnostic({ ...createNamedFlow(), steps: [step] }, 's001', {
+        kind: 'timeout',
+        message: 'Timed out at https://example.test/users?token=abc123#debug for owner@example.com 13800138000 <div data-token="super-secret">raw</div>',
+      }, { now: () => new Date('2026-01-01T00:00:00.000Z') });
+      const json = JSON.stringify(diagnostic);
+
+      assert(diagnostic, 'diagnostic should be created for the failed step');
+      assertEqual(diagnostic?.stepId, 's001');
+      assertEqual(diagnostic?.intent, '保存用户行');
+      assertEqual(diagnostic?.target?.testId, 'row-save');
+      assertEqual(diagnostic?.tableRow?.rowKey, 'user-42');
+      assertEqual(diagnostic?.context?.url, 'https://example.test/users');
+      assert(diagnostic?.candidates.some(candidate => candidate.kind === 'testid' && candidate.value === 'row-save'), 'diagnostic should keep stable test id candidate');
+      assert(diagnostic?.candidates.some(candidate => candidate.kind === 'css' && candidate.value === '[css selector omitted]'), 'diagnostic should mention css fallback without leaking the selector');
+      assertEqual(diagnostic?.fallback.autoFallback, false);
+      assert(!json.includes('owner@example.com'), 'diagnostic should redact email-like values');
+      assert(!json.includes('13800138000'), 'diagnostic should redact phone-like values');
+      assert(!json.includes('abc123') && !json.includes('super-secret'), 'diagnostic should redact token-like values');
+      assert(!json.includes('?token=') && !json.includes('#debug'), 'diagnostic should strip URL query and hash values');
+      assert(!json.includes('[data-token'), 'diagnostic should not leak full selector values');
+      assert(!json.includes('李四 owner'), 'diagnostic should not leak full row text');
+      assert(!json.includes('<div'), 'diagnostic should not leak raw DOM snippets');
+    },
+  },
+  {
+    name: 'adaptive replay failure diagnostic includes recipe replay strategy',
+    run: () => {
+      const step: FlowStep = {
+        id: 's001',
+        order: 1,
+        action: 'select',
+        intent: '选择地址池',
+        target: { role: 'combobox', label: '地址池', name: '地址池' },
+        value: 'pool-a',
+        context: {
+          eventId: 'ctx-select-pool',
+          capturedAt: 1000,
+          before: {
+            url: 'https://example.test/pools?token=abc123',
+            form: { label: '地址池', name: 'poolId' },
+            target: {
+              role: 'option',
+              framework: 'antd',
+              controlType: 'select-option',
+              selectedOption: 'pool-a',
+            },
+            ui: {
+              library: 'antd',
+              component: 'select',
+              targetRole: 'option',
+              form: { label: '地址池', name: 'poolId', fieldKind: 'select' },
+              option: { text: 'pool-a' },
+              locatorHints: [],
+              confidence: 0.95,
+              reasons: [],
+            },
+          },
+        },
+        assertions: [],
+      };
+      const diagnostic = createReplayFailureDiagnostic({ ...createNamedFlow(), steps: [step] }, 's001', {
+        kind: 'runtime-bridge-miss',
+        message: 'active popup option was not found',
+      });
+
+      assertEqual(diagnostic?.replay?.recipeComponent, 'Select');
+      assertEqual(diagnostic?.replay?.recipeOperation, 'selectOption');
+      assertEqual(diagnostic?.replay?.exportedStrategy, 'antd-owned-option-dispatch');
+      assertEqual(diagnostic?.replay?.parserSafeStrategy, 'field-trigger-search-option');
+      assertEqual(diagnostic?.replay?.runtimeFallback, 'active-antd-popup-option');
+      assert(diagnostic?.fallback.reason.includes('diagnostics never auto-retry'), 'diagnostic should explain why runtime fallback is not auto-applied');
+    },
+  },
+  {
+    name: 'adaptive replay failure diagnostic is not included in exported JSON or compact YAML',
+    run: () => {
+      const step: FlowStep = {
+        id: 's001',
+        order: 1,
+        action: 'click',
+        target: { testId: 'save-user', role: 'button', name: '保存', selector: '[data-secret="hidden"]' },
+        assertions: [],
+      };
+      const flow = { ...createNamedFlow(), steps: [step] };
+      const diagnostic = createReplayFailureDiagnostic(flow, 's001', { kind: 'unknown', message: 'failed' });
+      const exportFlow = prepareBusinessFlowForExport({
+        ...flow,
+        artifacts: {
+          replayFailureDiagnostics: [diagnostic],
+        } as any,
+      }, 'await page.getByTestId("save-user").click();');
+      const exportedJson = JSON.stringify(exportFlow);
+      const yaml = toCompactFlow({ ...flow, artifacts: { replayFailureDiagnostics: [diagnostic] } as any });
+
+      assert(!exportedJson.includes('replayFailureDiagnostics'), 'exported JSON should strip replay failure diagnostics');
+      assert(!exportedJson.includes('adaptive replay'), 'exported JSON should not include diagnostic fallback copy');
+      assert(!yaml.includes('replayFailureDiagnostics'), 'compact YAML should not include replay failure diagnostics');
+      assert(!yaml.includes('[data-secret'), 'compact YAML should not include diagnostic selector internals');
+    },
+  },
+  {
+    name: 'adaptive replay failure diagnostics infer step from generated source lines',
+    run: () => {
+      const step: FlowStep = {
+        id: 's001',
+        order: 1,
+        action: 'click',
+        target: { testId: 'save-user', role: 'button', name: '保存' },
+        assertions: [],
+      };
+      const source = [
+        `import { test, expect } from '@playwright/test';`,
+        `test('generated', async ({ page }) => {`,
+        `  // s001 点击: 保存`,
+        `  await page.getByTestId('save-user').click();`,
+        `});`,
+      ].join('\n');
+      const artifact = createReplayFailureDiagnosticsArtifact({ ...createNamedFlow(), steps: [step] }, {
+        message: '/tmp/generated-replay.spec.ts:4:3 Timeout 13800138000 owner@example.com',
+      }, {
+        generatedSource: source,
+        output: '/tmp/generated-replay.spec.ts:4:3 Timeout 13800138000 owner@example.com',
+        now: () => new Date('2026-01-01T00:00:00.000Z'),
+      });
+      const json = JSON.stringify(artifact);
+
+      assertEqual(artifact?.inferredStepIds.join(','), 's001');
+      assertEqual(artifact?.diagnostics[0]?.stepId, 's001');
+      assert(!json.includes('owner@example.com'), 'diagnostics artifact should redact email values');
+      assert(!json.includes('13800138000'), 'diagnostics artifact should redact phone values');
     },
   },
   {
