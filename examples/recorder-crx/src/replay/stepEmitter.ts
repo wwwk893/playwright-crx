@@ -1027,7 +1027,8 @@ export function emitStep(lines: string[], step: FlowStep, indent: string, segmen
     lines.push(`${indent}// ${step.id} has no runnable Playwright action source.`);
   }
 
-  const emittedAssertions = stepAssertionsForEmission(step, options);
+  const emittedAssertions = stepAssertionsForEmission(step, options)
+      .filter(assertion => !segment?.assertionTemplate || assertion.type !== 'row-exists');
   for (const assertion of emittedAssertions)
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
 }
@@ -2897,8 +2898,15 @@ function terminalRowLocator(assertion: FlowAssertion) {
   if (rowKey)
     return `${tableLocator}.locator(${stringLiteral(`tr[data-row-key="${cssAttributeValue(rowKey)}"], [role="row"][data-row-key="${cssAttributeValue(rowKey)}"]`)})`;
   const rowText = stringParam(assertion.params?.rowKeyword || assertion.target?.scope?.table?.rowText || assertion.expected);
-  if (rowText)
-    return `${tableLocator}.getByRole('row').filter({ hasText: ${rowTextRegexLiteral(rowText)} })`;
+  if (rowText) {
+    const rowKeywords = [
+      rowText,
+      stringParam(assertion.params?.rowKeyword2),
+      stringParam(assertion.params?.rowKeyword3),
+      stringParam(assertion.params?.rowKeyword4),
+    ].filter((value, index, values): value is string => !!value && values.indexOf(value) === index);
+    return rowKeywords.reduce((locator, keyword) => `${locator}.filter({ hasText: ${rowTextRegexLiteral(keyword)} })`, `${tableLocator}.getByRole('row')`);
+  }
   return `${tableLocator}.getByRole('row').first()`;
 }
 

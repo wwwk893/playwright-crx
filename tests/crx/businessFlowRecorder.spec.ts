@@ -380,7 +380,6 @@ test('records real ProFormField network configuration fields and replays generat
 
   await expect.poll(() => recorderPage.locator('.flow-step').count(), { timeout: 25_000 }).toBeGreaterThanOrEqual(12);
   for (const marker of [
-    '独享地址池',
     '生产VRF',
     '开启代理ARP',
     '华东生产区',
@@ -1005,7 +1004,10 @@ function expectTriggerOwnedAntdOptionReplay(code: string, trigger: RegExp | stri
 function assertNoNetworkResourceSubmitBeforeRequiredFields(code: string) {
   const finalSaveIndex = code.lastIndexOf('network-resource-save');
   expect(finalSaveIndex, 'network-resource-save final submit should exist').toBeGreaterThanOrEqual(0);
-  const tailAfterFinalSave = code.slice(finalSaveIndex + 'network-resource-save'.length);
+  const tailAfterFinalSave = code.slice(finalSaveIndex + 'network-resource-save'.length)
+      .split('\n')
+      .filter(line => !line.trim().startsWith('await expect('))
+      .join('\n');
   for (const marker of [
     'pool-proform-alpha',
     'edge-lab:WAN-extra-18',

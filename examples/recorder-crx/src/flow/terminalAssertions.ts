@@ -4,6 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import type { BusinessFlow, FlowAssertion, FlowAssertionParams, FlowAssertionType, FlowStep } from './types';
+import { effectHintsForRecipe } from '../replay/effectHints';
+import { buildRecipeForStep } from '../replay/recipeBuilder';
+import type { EffectHint } from '../replay/types';
 
 export type TerminalStateAssertionType = Extract<FlowAssertionType,
   | 'row-exists'
@@ -31,8 +34,9 @@ export function createTerminalStateAssertion(type: TerminalStateAssertionType, i
 export function appendTerminalStateAssertions(flow: BusinessFlow): BusinessFlow {
   let changed = false;
   const steps = flow.steps.map((step, index) => {
-    const suggestions = suggestTerminalStateAssertions(step, index, flow.steps[index - 1]);
-    const assertions = removeStaleSelectedValueAssertions(step.assertions, suggestions, step);
+    const suggestions = uniqueTerminalSuggestions(suggestTerminalStateAssertions(step, index, flow.steps[index - 1], flow.steps.slice(0, index)));
+    const selectedCleaned = removeStaleSelectedValueAssertions(step.assertions, suggestions, step);
+    const assertions = removeStaleGeneratedEffectAssertions(selectedCleaned, suggestions);
     const missing = suggestions.filter(suggestion => !hasEquivalentAssertion(assertions, suggestion));
     if (!missing.length && assertions === step.assertions)
       return step;
@@ -42,8 +46,11 @@ export function appendTerminalStateAssertions(flow: BusinessFlow): BusinessFlow 
   return changed ? { ...flow, steps, updatedAt: new Date().toISOString() } : flow;
 }
 
-export function suggestTerminalStateAssertions(step: FlowStep, stepIndex = 0, previousStep?: FlowStep): FlowAssertion[] {
+export function suggestTerminalStateAssertions(step: FlowStep, stepIndex = 0, previousStep?: FlowStep, previousSteps: FlowStep[] = previousStep ? [previousStep] : []): FlowAssertion[] {
   const suggestions: FlowAssertion[] = [];
+  for (const hint of effectHintsForRecipe(buildRecipeForStep(step), step, { previousStep, previousSteps }))
+    suggestions.push(assertionFromEffectHint(hint, step, stepIndex, suggestions.length));
+
   const beforeDialog = step.context?.before.dialog;
   const afterDialog = step.context?.after?.dialog;
   const selectedOption = step.context?.before.target?.selectedOption;
@@ -86,6 +93,10 @@ export function suggestTerminalStateAssertions(step: FlowStep, stepIndex = 0, pr
   return suggestions;
 }
 
+function assertionFromEffectHint(hint: EffectHint, step: FlowStep, stepIndex: number, offset: number): FlowAssertion {
+  return createTerminalStateAssertion(hint.assertionType, terminalAssertionId(step.id, offset, stepIndex), hint.params, hint.target);
+}
+
 export function sanitizeTerminalAssertionParams(params?: FlowAssertionParams): FlowAssertionParams | undefined {
   if (!params)
     return undefined;
@@ -95,6 +106,9 @@ export function sanitizeTerminalAssertionParams(params?: FlowAssertionParams): F
     'tableArea',
     'rowKey',
     'rowKeyword',
+    'rowKeyword2',
+    'rowKeyword3',
+    'rowKeyword4',
     'columnName',
     'columnValue',
     'columnText',
@@ -321,6 +335,15 @@ function hasEquivalentAssertion(assertions: FlowAssertion[], suggestion: FlowAss
   return assertions.some(assertion => assertion.type === suggestion.type && JSON.stringify(assertion.params || {}) === JSON.stringify(suggestion.params || {}));
 }
 
+function uniqueTerminalSuggestions(suggestions: FlowAssertion[]) {
+  const unique: FlowAssertion[] = [];
+  for (const suggestion of suggestions) {
+    if (!hasEquivalentAssertion(unique, suggestion))
+      unique.push(suggestion);
+  }
+  return unique;
+}
+
 function removeStaleSelectedValueAssertions(assertions: FlowAssertion[], suggestions: FlowAssertion[], step: FlowStep) {
   const selectedSuggestions = suggestions.filter(suggestion => suggestion.type === 'selected-value-visible');
   const filtered = assertions.filter(assertion => {
@@ -341,7 +364,29 @@ function removeStaleSelectedValueAssertions(assertions: FlowAssertion[], suggest
   return filtered.length === assertions.length ? assertions : filtered;
 }
 
+function removeStaleGeneratedEffectAssertions(assertions: FlowAssertion[], suggestions: FlowAssertion[]) {
+  const filtered = assertions.filter(assertion => {
+    if (!isRefreshableGeneratedEffectAssertion(assertion))
+      return true;
+    return hasEquivalentAssertion(suggestions, assertion);
+  });
+  return filtered.length === assertions.length ? assertions : filtered;
+}
+
+function isRefreshableGeneratedEffectAssertion(assertion: FlowAssertion) {
+  if (!isGeneratedTerminalAssertion(assertion))
+    return false;
+  return assertion.type === 'row-exists' ||
+    assertion.type === 'modal-closed' ||
+    assertion.type === 'drawer-closed' ||
+    assertion.type === 'popover-closed';
+}
+
 function isGeneratedSelectedValueAssertion(assertion: FlowAssertion) {
+  return isGeneratedTerminalAssertion(assertion);
+}
+
+function isGeneratedTerminalAssertion(assertion: FlowAssertion) {
   return assertion.id.includes('-terminal-');
 }
 

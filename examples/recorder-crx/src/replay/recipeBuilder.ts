@@ -5,6 +5,7 @@
  */
 import type { UiLibrary } from '../uiSemantics/types';
 import type { FlowStep } from '../flow/types';
+import { effectHintsForRecipe } from './effectHints';
 import { buildLocatorContract } from './locatorCandidates';
 import { buildSafetyPreflight } from './safetyGuard';
 import {
@@ -215,6 +216,7 @@ function withLocatorContract(recipe: UiActionRecipe, step: FlowStep): UiActionRe
   };
   return {
     ...withLocator,
+    effectHints: effectHintsForRecipe(withLocator, step),
     safetyPreflight: buildSafetyPreflight(withLocator, step),
   };
 }
