@@ -2,14 +2,28 @@
 
 - ...
 
-## PR Phase
+## Change Type
 
-- [ ] PR-13 flowBuilder facade cleanup
-- [ ] PR-14 replay compiler physical split
-- [ ] PR-15 recipe-first replay contract
-- [ ] PR-16 adaptive diagnostics surfacing
-- [ ] PR-17 L1/L2/L3 testing explicit split
-- [ ] Other:
+- [ ] Bug fix
+- [ ] Architecture cleanup
+- [ ] Harness / test infrastructure
+- [ ] Runtime bridge
+- [ ] Documentation
+- [ ] Future MVP feature
+
+## Affected Layer
+
+- [ ] capture
+- [ ] flow / projection
+- [ ] interactions / transactions
+- [ ] uiSemantics / recipes
+- [ ] replay / exported renderer
+- [ ] replay / parser-safe renderer
+- [ ] runtime bridge
+- [ ] L1 tests
+- [ ] L2 tests
+- [ ] L3 tests
+- [ ] docs / governance
 
 ## Architecture Movement
 
@@ -33,6 +47,7 @@ Explicit non-goals:
 - [ ] No mocked replacement for real AntD/ProComponents fixture coverage.
 - [ ] No weakened terminal-state assertions.
 - [ ] Exported Playwright and parser-safe playback still share the same semantic source.
+- [ ] User-authored edits/assertions/repeat rows/manual steps are preserved.
 
 ## Changed Files
 
@@ -104,6 +119,16 @@ Result:
 
 ```text
 ...
+```
+
+## Known Flaky / Issue Link
+
+```text
+Known flaky:
+Issue link:
+Command:
+Observed result:
+Why it does or does not block this PR:
 ```
 
 ## Review Checklist

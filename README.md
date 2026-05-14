@@ -34,6 +34,20 @@ In terms of chrome extension functionality, it provides:
 - a player that will run the recorded instructions, in any supported language*
    - it actually doesn't run Java, Python or C#, but it uses an internal JSONL format to know which instructions it needs to run and how to map them into the current selected code. This way, it can highlight the lines being executed.
 
+## Business Flow Recorder Example
+
+This fork also contains an internal business-flow recorder / replay harness for
+recording durable business assets and validating generated Playwright replay.
+
+Start here:
+
+```text
+examples/recorder-crx/README.md
+docs/architecture/RECORDER_REPLAY_ARCHITECTURE.md
+tests/crx/TEST_LAYERING.md
+docs/harness/README.md
+```
+
 ## API
 
 It's possible to use `playwright-crx` as a library to create new chrome extensions.

@@ -28,6 +28,34 @@ AI 辅助生成/修复
 
 ---
 
+## 1.1 Current architecture status
+
+MVP 0.1x recorder/replay architecture migration PR-01 through PR-17 is
+complete.
+
+Current baseline:
+
+- Event Journal v3, session finalizer, input/select transactions, business
+  projection, UiActionRecipe, replay renderer split, runtime bridge contract,
+  terminal-state assertions, adaptive replay diagnostics, and explicit L1/L2/L3
+  regression layers are in place.
+- Remaining work is post-migration hardening and must be tracked as GitHub
+  issues.
+- Do not reintroduce broad logic into `flowBuilder.ts`, `codePreview.ts`, or
+  `src/server/*`.
+
+Before changing architecture, check:
+
+```text
+docs/architecture/RECORDER_REPLAY_ARCHITECTURE.md
+docs/mvp-0.1x-architecture-migration/ARCHITECTURE_CONTRACT.md
+tests/crx/TEST_LAYERING.md
+docs/harness/README.md
+docs/checklists/REVIEW_CHECKLIST.md
+```
+
+---
+
 ## 2. 当前版本边界
 
 严格按版本推进：
@@ -55,6 +83,10 @@ docs/tasks/MVP-0.2.md
 docs/tasks/MVP-0.3.md
 docs/tasks/MVP-0.4.md
 docs/schemas/business-flow.schema.md
+docs/architecture/RECORDER_REPLAY_ARCHITECTURE.md
+tests/crx/TEST_LAYERING.md
+docs/harness/README.md
+docs/checklists/REVIEW_CHECKLIST.md
 ```
 
 当前正在做哪个版本，就额外重点阅读对应任务文件。
@@ -141,6 +173,26 @@ npm run build
 ```
 
 如果仓库已有更具体的 example build/test 命令，优先使用仓库现有命令。
+
+---
+
+## 5.1 Issue hygiene
+
+Do not leave known regressions, flaky behavior, architecture drift, or
+non-blocking review findings only in PR bodies.
+
+Every follow-up issue must include:
+
+```text
+problem statement
+affected layer
+minimal repro or evidence artifact
+acceptance criteria
+required L1/L2/L3 validation
+```
+
+If a PR accepts known flaky behavior, the PR body must link the tracking issue
+and explain why the flaky path does not block the changed scope.
 
 ---
 

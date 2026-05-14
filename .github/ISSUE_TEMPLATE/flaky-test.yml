@@ -1,0 +1,60 @@
+name: Flaky test
+description: Track a flaky regression signal with command and artifact evidence.
+title: "[flaky] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: first-command
+    attributes:
+      label: First failing command
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: repeat-command
+    attributes:
+      label: Repeat command
+      render: bash
+    validations:
+      required: true
+  - type: input
+    id: ratio
+    attributes:
+      label: Pass/fail ratio
+      placeholder: "Example: 3/10 failed locally, 1/4 failed in CI"
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - CI
+        - local
+        - both
+    validations:
+      required: true
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Artifact links or paths
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Current hypothesis
+    validations:
+      required: true
+  - type: checkboxes
+    id: disallowed
+    attributes:
+      label: Not allowed fixes
+      options:
+        - label: No blind sleeps.
+          required: true
+        - label: No assertion deletion.
+          required: true
+        - label: No mock replacement for real AntD/ProComponents fixture coverage.
+          required: true

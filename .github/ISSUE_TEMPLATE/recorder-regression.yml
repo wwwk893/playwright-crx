@@ -1,0 +1,63 @@
+name: Recorder regression
+description: Report a business-flow recorder or generated replay regression.
+title: "[recorder regression] "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - L1 flow/unit/codegen/recipe
+        - L2 deterministic CRX generated replay
+        - L3 human-like smoke
+        - runtime bridge
+        - legacy
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Paste the exact command that reproduces or validates the issue.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected terminal business state
+      description: Describe the business state that should be proven.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Artifacts
+      description: Include raw replay output, diagnostics, trace/report paths, or redacted snippets.
+      value: |
+        raw-replay-output.txt:
+        replay-failure-diagnostics.json:
+        trace/report path:
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy check
+      description: Confirm that artifacts are redacted and contain no secrets/private raw data.
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Suspected layer / hypothesis
+    validations:
+      required: false

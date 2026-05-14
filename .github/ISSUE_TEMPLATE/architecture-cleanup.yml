@@ -1,0 +1,38 @@
+name: Architecture cleanup
+description: Track a bounded post-migration architecture cleanup.
+title: "[architecture cleanup] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+    validations:
+      required: true
+  - type: textarea
+    id: affected
+    attributes:
+      label: Affected layer / files
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Boundary / non-goals
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation
+      render: bash
+    validations:
+      required: true

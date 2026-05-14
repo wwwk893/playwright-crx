@@ -103,6 +103,23 @@ Use this for full local parity with existing CI behavior and for existing
 targeted `-g` workflows. Use the explicit L1/L2/L3 scripts when a PR body or CI
 step needs to state which layer was exercised.
 
+## Flaky Policy
+
+Flaky behavior must be tracked, not hidden. The canonical policy lives in:
+
+```text
+docs/harness/FLAKY_POLICY.md
+```
+
+Summary:
+
+```text
+L1 must be zero flaky.
+L2 terminal-state generated replay failures are blockers unless proven infrastructure-only.
+L3 flakiness requires an issue link, artifacts, and targeted rerun evidence.
+Legacy flaky behavior can be tracked separately only when unrelated to the changed scope.
+```
+
 ## Failure Triage
 
 Use the failing layer to choose the next action:

@@ -4,6 +4,22 @@ This file is the **non-negotiable target file tree contract** for the architectu
 
 The migration roadmap describes PR order. This file describes the expected final module layout. Hermes must treat this as the acceptance target for the whole migration.
 
+## Post-PR17 note
+
+The PR-01..PR-17 migration has completed. This file remains the historical
+target tree and boundary contract. The realized tree is close to this target,
+with two important post-migration notes:
+
+- `examples/recorder-crx/src/replay/stepEmitter.ts` is the current shared replay
+  emitter and still owns several replay-time composition helpers. Splitting it
+  further is tracked separately by #45 and is not part of the completed
+  migration baseline.
+- `examples/recorder-crx/src/flow/syntheticReconciler.ts` still has multiple
+  responsibilities. Splitting it is tracked by #27.
+
+New work should update `docs/architecture/RECORDER_REPLAY_ARCHITECTURE.md`
+when the realized ownership changes.
+
 ## Final target tree
 
 ```text
