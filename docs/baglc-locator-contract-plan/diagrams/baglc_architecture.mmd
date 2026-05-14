@@ -1,0 +1,27 @@
+flowchart TD
+  A[DOM Event / PageContextEvent] --> B[Anchor Candidate Generator]
+  B --> C[Feature Extractor]
+  C --> D[VON-like Equivalent Anchor Group]
+  D --> E[Business Action Grounding Evidence]
+
+  F[FlowStep] --> G[UiActionRecipe]
+  G --> H[Locator Candidate Generator]
+  E --> H
+  H --> I[Locator Robustness Scorer]
+  I --> J[LocatorContract]
+
+  J --> K[Safety Guard]
+  K -->|safe| L[Renderer: exported / parser-safe]
+  K -->|unsafe| M[Fail-closed Diagnostics]
+
+  J --> N[Effect Hints]
+  N --> O[Terminal Assertions]
+
+  A --> P[OverlayPrediction Shadow]
+  P --> Q[MutationObserver]
+  Q --> R[resolved / expired / ambiguous]
+  R --> S[Event Journal Diagnostics]
+
+  J --> T[Diagnostics Dataset]
+  K --> T
+  O --> T

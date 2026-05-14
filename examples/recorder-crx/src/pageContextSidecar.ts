@@ -12,6 +12,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 import { collectUiSemanticContext } from './uiSemantics';
+import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from './uiSemantics/anchorGrounding';
 import { compactSemanticDiagnostic, compactSemanticDisabledDiagnostic, recordSemanticDiagnostic, semanticDiagnostics } from './uiSemantics/diagnostics';
 import type { UiSemanticContext } from './uiSemantics/types';
 
@@ -20,6 +21,7 @@ type ContextEventKind = 'click' | 'input' | 'change' | 'keydown';
 type SidecarSemanticOptions = {
   semanticAdapterEnabled?: boolean;
   semanticAdapterDiagnosticsEnabled?: boolean;
+  anchorGroundingDiagnosticsEnabled?: boolean;
 };
 
 const installKey = '__playwrightCrxBusinessFlowPageContextSidecar';
@@ -221,7 +223,7 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
 
   const contextTarget = eventPointTarget(event, target);
   const time = performance.now();
-  const before = collectPageContext(contextTarget);
+  const before = collectPageContext(contextTarget, event);
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const baseEvent = {
     id,
@@ -261,7 +263,7 @@ function eventPointTarget(event: Event, fallback: Element) {
   return fallback;
 }
 
-function collectPageContext(target: Element) {
+function collectPageContext(target: Element, event?: Event) {
   const anchor = actionAnchorForElement(target);
   const semanticOptions = readSidecarSemanticOptions();
   const baseUi = semanticOptions.semanticAdapterEnabled !== false ? collectUiSemanticContext(anchor, document) : undefined;
@@ -286,6 +288,9 @@ function collectPageContext(target: Element) {
   }
   const dropdownField = isDropdownOptionTarget(target, anchor) ? activeDropdownContextFor(target) : undefined;
   const ui = enrichUiWithDropdownContext(baseUi, dropdownField);
+  const grounding = shouldCollectAnchorGroundingDiagnostics(semanticOptions)
+    ? collectSafeAnchorGroundingEvidence(target, anchor, event)
+    : undefined;
   return compactObject({
     url: safeText(location.href, 180),
     title: safeText(document.title || headingText(document.body), maxTextLength),
@@ -297,8 +302,44 @@ function collectPageContext(target: Element) {
     form: form?.label ? form : formFromDropdownContext(dropdownField),
     target: collectElement(target, anchor),
     ui,
+    grounding,
     nearbyText: collectNearbyText(target),
   });
+}
+
+function anchorGroundingContext(element: Element) {
+  const table = collectTable(element, element);
+  const form = collectForm(element, element);
+  const dialog = collectDialog(element, element);
+  const framework = frameworkForElement(element);
+  return compactObject({
+    formLabel: form?.label,
+    fieldName: form?.name,
+    dialogTitle: dialog?.title,
+    dialogTestId: dialog?.testId,
+    tableTestId: table?.testId,
+    rowKey: table?.rowKey,
+    columnKey: table?.columnName,
+    proComponent: framework === 'procomponents' ? controlTypeForElement(element) : undefined,
+  });
+}
+
+function collectSafeAnchorGroundingEvidence(target: Element, anchor: Element, event?: Event) {
+  try {
+    return collectAnchorGroundingEvidence(target, {
+      event,
+      document,
+      chosenAnchor: anchor,
+      maxDepth: maxAncestorDepth,
+      textForElement: elementText,
+      testIdForElement: testIdOf,
+      controlTypeForElement,
+      roleForElement: (element, controlType) => element.getAttribute('role') || inferredRole(element, controlType),
+      contextForElement: anchorGroundingContext,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>) {
