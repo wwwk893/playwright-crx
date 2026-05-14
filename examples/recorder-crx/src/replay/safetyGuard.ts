@@ -4,7 +4,8 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import type { FlowStep } from '../flow/types';
-import type { LocatorCandidate, LocatorRiskSeverity } from './locatorTypes';
+import type { LocatorRiskSeverity } from './locatorTypes';
+import { locatorBlacklistRisks } from './locatorBlacklist';
 import type { UiActionRecipe } from './types';
 
 export type SafetyGuardImpact = 'normal' | 'critical';
@@ -59,16 +60,18 @@ export function buildSafetyPreflight(recipe: UiActionRecipe, step: FlowStep): Sa
 }
 
 export function applySafetyPreflightToSource(source: string[] | undefined, safety: SafetyPreflight | undefined, step: FlowStep, options: { parserSafe?: boolean } = {}) {
-  if (!safety || safety.status === 'pass')
+  const sourceFindings = emittedSourceSafetyFindings(source, safety?.impact);
+  const mergedSafety = mergeSafetyFindings(safety, sourceFindings);
+  if (!mergedSafety || mergedSafety.status === 'pass')
     return source;
-  if (safety.status === 'blocked')
-    return [blockedSafetySource(safety, step, options)];
+  if (mergedSafety.status === 'blocked')
+    return [blockedSafetySource(mergedSafety, step, options)];
   if (options.parserSafe)
     return source;
   if (!source?.length)
     return source;
-  const before = renderSafetyChecks(safety, 'before-action', step);
-  const after = renderSafetyChecks(safety, 'after-action', step);
+  const before = renderSafetyChecks(mergedSafety, 'before-action', step);
+  const after = renderSafetyChecks(mergedSafety, 'after-action', step);
   if (!after.length)
     return [...before, ...source];
   const firstActionIndex = source.findIndex(line => /\.click\(|\.press\(|\.check\(|\.uncheck\(|\.fill\(|\.selectOption\(/.test(line));
@@ -85,8 +88,8 @@ export function applySafetyPreflightToSource(source: string[] | undefined, safet
 function criticalActionImpact(recipe: UiActionRecipe, step: FlowStep): SafetyGuardImpact {
   if (recipe.operation === 'confirm' || recipe.component === 'PopconfirmButton')
     return 'critical';
-  const text = criticalActionText(recipe, step);
-  return /(^|[-_\s])(delete|remove|confirm|ok)([-_\s]|$)|删除|移除|确定|确认/i.test(text) ? 'critical' : 'normal';
+  const text = normalizedCriticalText(criticalActionText(recipe, step));
+  return /\b(delete|remove|confirm|ok|destroy|trash)\b/i.test(text) || /删除|移除|确\s*定|确认/.test(text) ? 'critical' : 'normal';
 }
 
 function rowActionFindings(recipe: UiActionRecipe, step: FlowStep): SafetyGuardFinding[] {
@@ -115,23 +118,98 @@ function criticalFallbackFindings(recipe: UiActionRecipe, step: FlowStep, impact
       evidence: criticalActionText(recipe, step),
     }];
   }
-  if (primary.risk === 'critical' || fallbackCandidate(primary) || inferredRoleCandidateWithoutRoleEvidence(primary, step)) {
-    return [{
-      severity: 'critical',
-      code: 'critical-action-unsafe-locator-fallback',
-      reason: 'BAGLC safety guard blocked critical action from using a brittle fallback locator',
-      evidence: primary.value,
-    }];
-  }
   return [];
 }
 
-function fallbackCandidate(candidate: LocatorCandidate) {
-  return candidate.risk === 'high' || candidate.kind === 'text' || candidate.kind === 'css' || candidate.kind === 'xpath' || candidate.kind === 'ordinal' || candidate.kind === 'raw-selector';
+function emittedSourceSafetyFindings(source: string[] | undefined, impact: SafetyGuardImpact | undefined): SafetyGuardFinding[] {
+  if (impact !== 'critical' || !source?.length)
+    return [];
+  const emitted = source
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('//'))
+      .join('\n');
+  if (!emitted)
+    return [];
+  const findings: SafetyGuardFinding[] = [];
+  if (/(^|[.\s])getByText\s*\(|internal:text=|\btext=/.test(emitted)) {
+    findings.push({
+      severity: 'critical',
+      code: 'critical-action-emitted-text-fallback',
+      reason: 'BAGLC safety guard blocked critical action from using emitted text fallback source',
+      evidence: sourceEvidenceSnippet(emitted, /(^|[.\s])getByText\s*\(|internal:text=|\btext=/),
+    });
+  }
+  for (const risk of locatorBlacklistRisks(emitted)) {
+    if (risk.severity !== 'critical' && risk.severity !== 'high')
+      continue;
+    if ((risk.code === 'ordinal-locator' || risk.code === 'long-css-locator') && isScopedOrdinalEvidenceSource(emitted))
+      continue;
+    findings.push({
+      severity: 'critical',
+      code: `critical-action-emitted-${risk.code}`,
+      reason: `BAGLC safety guard blocked critical action from emitted brittle locator source: ${risk.reason}`,
+      evidence: risk.evidence,
+    });
+  }
+  return uniqueFindings(findings);
 }
 
-function inferredRoleCandidateWithoutRoleEvidence(candidate: LocatorCandidate, step: FlowStep) {
-  return candidate.kind === 'role' && !(step.target?.role || step.context?.before.target?.role);
+function isScopedOrdinalEvidenceSource(source: string) {
+  return isScopedOverlayConfirmSource(source) || isScopedRowKeyActionSource(source) || isScopedRowTextActionSource(source);
+}
+
+function isScopedOverlayConfirmSource(source: string) {
+  const confirmButton = /\.last\(\)\.getByRole\(["']button["']/.test(source) && /确定|确 定|确认|OK|Ok|ok|Yes|yes/.test(source);
+  if (!confirmButton)
+    return false;
+  return /\.ant-popover/.test(source) && /:has\(\.ant-popconfirm-buttons\)/.test(source) ||
+    /\.ant-modal:not|\.ant-drawer:not|\[role=\\"dialog\\"\]:visible|\[role="dialog"\]:visible/.test(source);
+}
+
+function isScopedRowKeyActionSource(source: string) {
+  return /data-row-key=/.test(source) && /\.first\(\)\.(?:getByTestId|getByRole|locator)\(/.test(source);
+}
+
+function isScopedRowTextActionSource(source: string) {
+  const hasRowContainer = /tr, \[role=\\?"row\\?"\], \.ant-table-row/.test(source) || /(?:^|[,\s])tr(?:[,\s]|$)/.test(source) && /\.ant-table-row/.test(source);
+  const hasRowTextScope = /\.filter\(\{\s*hasText\s*:\s*\//.test(source);
+  const hasStrongActionAnchor = /\.getByTestId\(/.test(source) ||
+    /\.getByRole\(["']button["']/.test(source) ||
+    /\.locator\([^)]*(?:data-testid|data-e2e-action|data-e2e-role)/.test(source);
+  const hasScopedOrdinalClick = /\.(?:first|nth)\s*\([^)]*\)\.click\s*\(/.test(source);
+  return hasRowContainer && hasRowTextScope && hasStrongActionAnchor && hasScopedOrdinalClick;
+}
+
+function mergeSafetyFindings(safety: SafetyPreflight | undefined, findings: SafetyGuardFinding[]) {
+  if (!findings.length)
+    return safety;
+  const merged: SafetyPreflight = safety || {
+    version: 1,
+    impact: 'critical',
+    status: 'pass',
+    findings: [],
+    checks: [],
+  };
+  const allFindings = uniqueFindings([...merged.findings, ...findings]);
+  const blockingFinding = allFindings.find(finding => finding.severity === 'critical');
+  return {
+    ...merged,
+    impact: 'critical' as const,
+    findings: allFindings,
+    status: blockingFinding ? 'blocked' as const : merged.checks.length ? 'preflight' as const : 'pass' as const,
+    blockedReason: blockingFinding?.reason || merged.blockedReason,
+  };
+}
+
+function uniqueFindings(findings: SafetyGuardFinding[]) {
+  const seen = new Set<string>();
+  return findings.filter(finding => {
+    const key = `${finding.code}\n${finding.evidence || ''}`;
+    if (seen.has(key))
+      return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function modalRootChecks(recipe: UiActionRecipe, step: FlowStep): SafetyPreflightCheck[] {
@@ -200,6 +278,20 @@ function criticalActionText(recipe: UiActionRecipe, step: FlowStep) {
     step.context?.before.target?.testId,
     step.context?.before.target?.text,
   ].filter(Boolean).join(' ');
+}
+
+function normalizedCriticalText(value: string) {
+  return value
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[-_:/]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+}
+
+function sourceEvidenceSnippet(value: string, pattern: RegExp) {
+  const match = value.match(pattern);
+  const text = match?.[0] || value;
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
 function dialogRootLocator(dialog?: { title?: string; type?: string; testId?: string }) {
