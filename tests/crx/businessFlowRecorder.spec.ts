@@ -55,8 +55,11 @@ test('generated replay terminal verification fails when a created row is missing
   const code = generatedReplayCode('false green missing created row', [
     `await page.goto('/antd-users-real.html');`,
   ]);
+  const startedAt = Date.now();
+  const testInfo = test.info();
+  const diagnosticFlow = generatedReplayDiagnosticFlow(code);
 
-  await expect(replayGeneratedPlaywrightCode(context, code, test.info(), {
+  await expect(replayGeneratedPlaywrightCode(context, code, testInfo, {
     verify: async replayPage => {
       const usersTable = replayPage.getByTestId('users-table');
       await expect(usersTable.getByRole('row').filter({ hasText: /charlie\.qa[\s\S]*审计员/ })).toBeVisible({ timeout: 1000 });
@@ -65,7 +68,28 @@ test('generated replay terminal verification fails when a created row is missing
       `const usersTable = page.getByTestId("users-table");`,
       `await expect(usersTable.getByRole('row').filter({ hasText: /charlie\\.qa[\\s\\S]*审计员/ })).toBeVisible({ timeout: 1000 });`,
     ],
+    diagnostics: {
+      flow: diagnosticFlow,
+      stepIds: ['s001'],
+      source: 'terminal-assertion',
+    },
   })).rejects.toThrow(/charlie|toBeVisible|Timed out|Timeout/i);
+
+  const outputPath = latestRawReplayArtifact(testInfo, 'raw-replay-output.txt', startedAt);
+  const reportPath = latestRawReplayArtifact(testInfo, 'replay-failure-diagnostics.json', startedAt);
+  expect(outputPath, 'standalone replay failure should retain raw output').toBeTruthy();
+  expect(reportPath, 'standalone replay failure should retain adaptive diagnostics').toBeTruthy();
+  const reportText = fs.readFileSync(String(reportPath), 'utf8');
+  const report = JSON.parse(reportText);
+  expect(report.source).toBe('terminal-assertion');
+  expect(report.diagnostics?.[0]?.stepId).toBe('s001');
+  expect(report.diagnostics?.[0]?.candidates?.length).toBeGreaterThan(0);
+  expect(report.diagnostics?.[0]?.target?.testId).toBe('users-table');
+  expect(reportText).not.toContain('owner@example.com');
+  expect(reportText).not.toContain('13800138000');
+  expect(reportText).not.toContain('abc123');
+  expect(reportText).not.toContain('<div');
+  expect(reportText).not.toContain('[data-token');
 });
 
 test('generated replay terminal verification catches save before required fields', async ({ context }) => {
@@ -1012,6 +1036,98 @@ function generatedReplayCode(name: string, lines: string[]) {
     `});`,
     ``,
   ].join('\n');
+}
+
+function generatedReplayDiagnosticFlow(code: string) {
+  return {
+    schema: 'business-flow/v1',
+    flow: {
+      id: 'diagnostic-missing-row',
+      name: 'Generated replay missing row diagnostic',
+    },
+    env: {
+      url: 'https://example.test/users?token=abc123#debug',
+    },
+    preconditions: [],
+    testData: [],
+    steps: [{
+      id: 's001',
+      order: 1,
+      action: 'click',
+      intent: '验证创建后的用户行存在',
+      target: {
+        testId: 'users-table',
+        role: 'table',
+        name: '用户表格',
+        text: 'charlie.qa owner@example.com 13800138000 token=abc123',
+        selector: '[data-token="abc123"] .ant-table-row',
+        scope: {
+          table: {
+            testId: 'users-table',
+            title: '用户管理',
+            rowKey: 'charlie.qa',
+            rowText: 'charlie.qa owner@example.com 13800138000 审计员',
+            rowIdentity: { source: 'data-row-key', value: 'charlie.qa', confidence: 0.98, stable: true },
+          },
+        },
+      },
+      context: {
+        eventId: 'ctx-diagnostic-missing-row',
+        capturedAt: 1000,
+        before: {
+          url: 'https://example.test/users?token=abc123#debug',
+          title: '用户管理',
+          target: {
+            tag: 'table',
+            role: 'table',
+            testId: 'users-table',
+            text: 'charlie.qa owner@example.com 13800138000 token=abc123',
+          },
+          table: {
+            testId: 'users-table',
+            title: '用户管理',
+            rowKey: 'charlie.qa',
+            rowText: 'charlie.qa owner@example.com 13800138000 审计员',
+            rowIdentity: { source: 'data-row-key', value: 'charlie.qa', confidence: 0.98, stable: true },
+          },
+        },
+      },
+      assertions: [{
+        id: 'a001',
+        type: 'row-exists',
+        subject: 'table',
+        params: {
+          tableTestId: 'users-table',
+          rowKeyword: 'charlie.qa',
+          columnValue: '审计员',
+        },
+        enabled: true,
+      }],
+    }],
+    network: [],
+    artifacts: {
+      playwrightCode: code,
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  } as any;
+}
+
+function latestRawReplayArtifact(testInfo: TestInfo, fileName: string, startedAt: number) {
+  const rawReplayRoot = path.join(__dirname, '..', '.raw-generated-replay');
+  if (!fs.existsSync(rawReplayRoot))
+    return undefined;
+  return fs.readdirSync(rawReplayRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name.startsWith(`${testInfo.workerIndex}-`))
+      .map(entry => {
+        const filePath = path.join(rawReplayRoot, entry.name, fileName);
+        if (!fs.existsSync(filePath))
+          return undefined;
+        const stat = fs.statSync(filePath);
+        return stat.mtimeMs >= startedAt - 1000 ? { filePath, mtimeMs: stat.mtimeMs } : undefined;
+      })
+      .filter((entry): entry is { filePath: string; mtimeMs: number } => Boolean(entry))
+      .sort((left, right) => right.mtimeMs - left.mtimeMs)[0]?.filePath;
 }
 
 function antDUsersFixture() {

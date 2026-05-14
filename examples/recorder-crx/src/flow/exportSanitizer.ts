@@ -18,6 +18,7 @@ export function prepareBusinessFlowForExport(flow: BusinessFlow, code?: string):
   delete artifacts.stepMergedActionIndexes;
   delete (artifacts as Record<string, unknown>).adaptiveTargets;
   delete (artifacts as Record<string, unknown>).locatorCandidates;
+  delete (artifacts as Record<string, unknown>).replayFailureDiagnostics;
   delete artifacts.recorder;
   return {
     ...flow,

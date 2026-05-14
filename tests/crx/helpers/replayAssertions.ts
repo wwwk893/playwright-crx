@@ -9,10 +9,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { expect, type TestInfo } from '@playwright/test';
 import type { BrowserContext, Page } from 'playwright-core';
+import { createReplayFailureDiagnosticsArtifact } from '../../../examples/recorder-crx/src/flow/replayDiagnostics';
+import type { BusinessFlow } from '../../../examples/recorder-crx/src/flow/types';
+import type { ReplayFailureDiagnosticSource } from '../../../examples/recorder-crx/src/flow/adaptiveFailureReport';
 
 export type GeneratedReplayVerification = {
   verify: (page: Page) => Promise<void>;
   standalone: string[];
+  diagnostics?: {
+    flow?: BusinessFlow;
+    stepIds?: string[];
+    source?: ReplayFailureDiagnosticSource;
+  };
 };
 
 export async function replayGeneratedPlaywrightCode(
@@ -33,10 +41,20 @@ export async function replayGeneratedPlaywrightCode(
     const replay = new Function('page', 'expect', `return (async () => {\n${body}\n})();`);
     await replay(replayPage, expect);
     await verification.verify(replayPage);
+  } catch (error) {
+    writeReplayFailureDiagnostics(path.join(rawReplayDir, 'replay-failure-diagnostics.json'), code, errorMessage(error), verification.diagnostics);
+    if (verification.diagnostics?.flow) {
+      try {
+        runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, verification.standalone, verification.diagnostics);
+      } catch {
+        // Keep the inline failure as the primary E2E signal; the standalone run has written its raw output artifact.
+      }
+    }
+    throw error;
   } finally {
     await replayPage.close();
   }
-  runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, verification.standalone);
+  runGeneratedPlaywrightSourceAsStandaloneSpec(code, testInfo, verification.standalone, verification.diagnostics);
 }
 
 export function appendReplayVerification(code: string, verificationLines: string[]) {
@@ -55,7 +73,12 @@ function assertReplayVerification(verification: GeneratedReplayVerification) {
     throw new Error('Generated replay E2E must provide standalone terminal-state verification lines.');
 }
 
-function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: TestInfo, verificationLines: string[]) {
+function runGeneratedPlaywrightSourceAsStandaloneSpec(
+  code: string,
+  testInfo: TestInfo,
+  verificationLines: string[],
+  diagnostics?: GeneratedReplayVerification['diagnostics'],
+) {
   const rawReplayRoot = path.join(__dirname, '..', '..', '.raw-generated-replay');
   const repoRoot = path.join(__dirname, '..', '..', '..');
   fs.mkdirSync(rawReplayRoot, { recursive: true });
@@ -87,8 +110,36 @@ function runGeneratedPlaywrightSourceAsStandaloneSpec(code: string, testInfo: Te
   });
   const output = `${result.stdout || ''}${result.stderr || ''}${result.error ? `\n${result.error.stack || result.error.message}` : ''}`;
   fs.writeFileSync(outputPath, output);
-  if (result.status !== 0 || result.error)
+  if (result.status !== 0 || result.error) {
+    writeReplayFailureDiagnostics(path.join(rawReplayDir, 'replay-failure-diagnostics.json'), specSource, output, diagnostics);
     throw new Error(`Generated Playwright source failed as a standalone spec (exit ${result.status}). See ${outputPath}\n${output}`);
+  }
+}
+
+function writeReplayFailureDiagnostics(
+  outputPath: string,
+  generatedSource: string,
+  message: string,
+  diagnostics?: GeneratedReplayVerification['diagnostics'],
+) {
+  if (!diagnostics?.flow)
+    return;
+  const artifact = createReplayFailureDiagnosticsArtifact(diagnostics.flow, { message }, {
+    source: diagnostics.source || 'generated-playwright',
+    stepIds: diagnostics.stepIds,
+    generatedSource,
+    output: message,
+  });
+  if (!artifact)
+    return;
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`);
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error)
+    return `${error.message}\n${error.stack || ''}`;
+  return String(error);
 }
 
 function rawReplayBaseURL() {
