@@ -342,7 +342,7 @@ function removeStaleSelectedValueAssertions(assertions: FlowAssertion[], suggest
 }
 
 function isGeneratedSelectedValueAssertion(assertion: FlowAssertion) {
-  return assertion.enabled !== false;
+  return assertion.id.includes('-terminal-');
 }
 
 function selectedValueAssertionTargetKey(assertion: FlowAssertion) {
