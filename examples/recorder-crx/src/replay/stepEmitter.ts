@@ -33,14 +33,27 @@ function withDedupedAdjacentDropdownOptionClicks(flow: BusinessFlow): BusinessFl
     if (previous && areDuplicateDropdownOptionClicks(previous, step)) {
       const previousScore = dropdownOptionContextScore(previous);
       const currentScore = dropdownOptionContextScore(step);
-      if (currentScore > previousScore)
-        steps[steps.length - 1] = step;
+      if (!isAntdProjectedSelectStep(previous) && currentScore > previousScore)
+        steps[steps.length - 1] = mergeDuplicateDropdownStep(step, previous);
+      else
+        steps[steps.length - 1] = mergeDuplicateDropdownStep(previous, step);
       changed = true;
       continue;
     }
     steps.push(step);
   }
   return changed ? { ...flow, steps } : flow;
+}
+
+function mergeDuplicateDropdownStep(primary: FlowStep, duplicate: FlowStep) {
+  if (!duplicate.assertions.length)
+    return primary;
+  const seenAssertionIds = new Set(primary.assertions.map(assertion => assertion.id));
+  const mergedAssertions = [
+    ...primary.assertions,
+    ...duplicate.assertions.filter(assertion => !seenAssertionIds.has(assertion.id)),
+  ];
+  return mergedAssertions.length === primary.assertions.length ? primary : { ...primary, assertions: mergedAssertions };
 }
 
 function withDedupedRepeatedPopoverOpenerClicks(flow: BusinessFlow): BusinessFlow {
@@ -95,7 +108,7 @@ function repeatedPopoverOpenerIdentity(step: FlowStep) {
 }
 
 function areDuplicateDropdownOptionClicks(a: FlowStep, b: FlowStep) {
-  if (a.action !== 'click' || b.action !== 'click')
+  if (!isDropdownOptionDedupAction(a) || !isDropdownOptionDedupAction(b))
     return false;
   if (!looksLikeDropdownOptionStepForDedup(a) || !looksLikeDropdownOptionStepForDedup(b))
     return false;
@@ -112,6 +125,10 @@ function areDuplicateDropdownOptionClicks(a: FlowStep, b: FlowStep) {
   if (!tokensA.length || !tokensB.length)
     return false;
   return tokensA.every(token => tokensB.includes(token)) || tokensB.every(token => tokensA.includes(token));
+}
+
+function isDropdownOptionDedupAction(step: FlowStep) {
+  return step.action === 'click' || isAntdProjectedSelectStep(step);
 }
 
 function dropdownOptionFieldLabel(step: FlowStep) {
@@ -573,6 +590,7 @@ export type EmitStepOptions = {
   previousStep?: FlowStep;
   nextStep?: FlowStep;
   safetyGuard?: boolean;
+  suppressRowExistsAssertions?: boolean;
 };
 
 export function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment, options: EmitStepOptions = {}) {
@@ -593,7 +611,7 @@ export function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, s
           emitSkippedPlaceholderSelectOption(lines, step, '  ');
         continue;
       }
-      emitStep(lines, step, '  ', segment, row.values, { ...options, previousStep: previousEmittedStep, nextStep: segmentSteps[index + 1] });
+      emitStep(lines, step, '  ', segment, row.values, { ...options, previousStep: previousEmittedStep, nextStep: segmentSteps[index + 1], suppressRowExistsAssertions: !!segment.assertionTemplate });
       previousEmittedStep = step;
     }
     if (segment.assertionTemplate)
@@ -1027,8 +1045,7 @@ export function emitStep(lines: string[], step: FlowStep, indent: string, segmen
     lines.push(`${indent}// ${step.id} has no runnable Playwright action source.`);
   }
 
-  const emittedAssertions = stepAssertionsForEmission(step, options)
-      .filter(assertion => !segment?.assertionTemplate || assertion.type !== 'row-exists');
+  const emittedAssertions = stepAssertionsForEmission(step, { ...options, suppressRowExistsAssertions: options.suppressRowExistsAssertions || !!segment?.assertionTemplate });
   for (const assertion of emittedAssertions)
     lines.push(`${indent}${segment ? parameterizeLine(renderAssertion(assertion), step, segment, rowValues) : renderAssertion(assertion)}`);
 }
@@ -1055,7 +1072,10 @@ function sourceCodeWithSafetyPreflight(step: FlowStep, options: EmitStepOptions 
 function stepAssertionsForEmission(step: FlowStep, options: EmitStepOptions = {}) {
   if (isNonInteractiveContainerClick(step))
     return [];
-  return step.assertions.filter(assertion => assertion.enabled && (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion)) && !isNoisyDropdownOptionSelectedValueAssertion(step, assertion));
+  return step.assertions.filter(assertion => assertion.enabled &&
+    (!options.suppressRowExistsAssertions || assertion.type !== 'row-exists') &&
+    (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion)) &&
+    !isNoisyDropdownOptionSelectedValueAssertion(step, assertion));
 }
 
 function isNoisyDropdownOptionSelectedValueAssertion(step: FlowStep, assertion: FlowAssertion) {
@@ -1200,6 +1220,8 @@ function isNonInteractiveContainerClick(step: FlowStep) {
     return false;
   if (/^heading$/i.test(role || '') || /^h[1-6]$/i.test(contextTag))
     return true;
+  if (isStructuralLabelChoiceClick(step))
+    return false;
 
   const looksLikeStructuralContainer =
     (!!testId && looksLikeStructuralContainerTestId(testId)) ||
@@ -2725,7 +2747,7 @@ function choiceControlLocator(step: FlowStep) {
   if (step.action !== 'click' && step.action !== 'check' && step.action !== 'uncheck')
     return undefined;
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
-  if (!isChoiceControlKind(controlType, step.target?.role || step.context?.before.target?.role || ''))
+  if (!isChoiceControlKind(controlType, step.target?.role || step.context?.before.target?.role || '') && !isStructuralLabelChoiceClick(step))
     return undefined;
   const text = choiceControlText(step);
   if (!text)
@@ -2733,6 +2755,23 @@ function choiceControlLocator(step: FlowStep) {
   const dialog = selectTriggerDialog(step);
   const base = dialog?.title ? `page.getByRole('dialog', { name: ${stringLiteral(dialog.title)} })` : 'page';
   return `${base}.locator('label').filter({ hasText: ${stringLiteral(text)} })`;
+}
+
+function isStructuralLabelChoiceClick(step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const text = choiceControlText(step);
+  if (!text)
+    return false;
+  const testId = step.target?.testId || step.context?.before.target?.testId || '';
+  if (!testId || !looksLikeLabelChoiceContainerTestId(testId) || looksLikeActionTestId(testId))
+    return false;
+  const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
+  return /getByLabel\(["'`]/.test(source) || /internal:text=/.test(source) || /locator\(["']label["']\)\.filter\(\{\s*hasText\s*:/.test(source);
+}
+
+function looksLikeLabelChoiceContainerTestId(testId: string) {
+  return looksLikeStructuralContainerTestId(testId) || /(^|[-_])form([-_]|$)/i.test(testId);
 }
 
 function isChoiceControlKind(controlType?: string, role?: string) {

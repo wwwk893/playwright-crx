@@ -1832,7 +1832,8 @@ const tests: TestCase[] = [
 
       assert(!code.includes('page.getByText("edge-lab:WAN1").click()'), 'exported replay should omit the redundant selected-value display click');
       assert(!playback.includes('page.getByText("edge-lab:WAN1").click()'), 'parser-safe replay should omit the redundant selected-value display click');
-      assert(code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText("edge-lab:WAN1");'), 'exported replay should preserve the selected-value terminal assertion');
+      assert(code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText("edge-lab:WAN1");') ||
+        code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText(String(row.port));'), 'exported replay should preserve the selected-value terminal assertion');
       assert(code.includes('String(row.port)'), 'repeat rendering should still parameterize the real select option');
 
       const flowWithoutSelectedValueAssertion: BusinessFlow = {
@@ -4048,6 +4049,37 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'recorded ProForm radio label click on a structural form test id replays by visible label',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: {
+            testId: 'network-resource-form',
+            label: '独享地址池',
+          },
+          sourceCode: 'await page.getByLabel("独享地址池").click();',
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:testid=[data-testid="network-resource-form"]',
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes(`page.locator('label').filter({ hasText: "独享地址池" }).click();`), 'structural form radio replay should click the visible AntD label instead of the hidden radio input');
+      assert(!firstStep.includes('getByLabel("独享地址池").click()'), 'structural form radio replay must not use getByLabel for a hidden input click');
+    },
+  },
+  {
     name: 'choice control synthetic step is not overwritten by a later broad recorded click',
     run: () => {
       const wallTime = Date.now();
@@ -5428,6 +5460,9 @@ test('demo', async ({ page }) => {
 
       assert(loopBody.includes("getByRole('row').filter({ hasText: String(row.poolName) }).filter({ hasText: String(row.startIp) })"), 'repeat terminal row locator should chain dynamic row keywords');
       assert(!loopBody.includes("filter({ hasText: /test1/ })"), 'repeat step row-exists assertions should not emit stale static row keywords inside the loop');
+
+      const playback = generateBusinessFlowPlaybackCode(flow);
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
     },
   },
   {
@@ -10726,6 +10761,102 @@ test('demo', async ({ page }) => {
       assert(!types.includes('row-exists'), 'short numeric threshold values should not become row-exists terminal assertions');
       assert(types.includes('modal-closed'), 'modal close terminal assertion should still be inferred for the commit action');
       assert(!code.includes("filter({ hasText: /3/ })"), 'generated replay should not assert a created row by a short numeric field');
+    },
+  },
+  {
+    name: 'effect hints do not attach previous create opener to a later edit modal save',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'user-create-button', text: '新建用户' },
+            context: {
+              eventId: 'ctx-open-create',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'user-create-button', text: '新建用户' } },
+              after: { dialog: { type: 'modal', title: '新建用户', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { label: '用户名' },
+            value: 'alice.qa',
+            context: {
+              eventId: 'ctx-create-name',
+              capturedAt: 1100,
+              before: { dialog: { type: 'modal', title: '新建用户', visible: true }, form: { label: '用户名', name: 'username' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'modal-confirm', text: '确定' },
+            context: {
+              eventId: 'ctx-create-confirm',
+              capturedAt: 1200,
+              before: { dialog: { type: 'modal', title: '新建用户', visible: true }, target: { tag: 'button', testId: 'modal-confirm', text: '确定' } },
+              after: { dialog: { type: 'modal', title: '新建用户', visible: false } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
+            target: { testId: 'user-row-edit-action', text: '编辑' },
+            context: {
+              eventId: 'ctx-open-edit',
+              capturedAt: 1300,
+              before: { table: { testId: 'user-table', rowKey: 'alice.qa', rowText: 'alice.qa' }, target: { tag: 'button', testId: 'user-row-edit-action', text: '编辑' } },
+              after: { dialog: { type: 'modal', title: '编辑用户', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's005',
+            order: 5,
+            action: 'fill',
+            target: { label: '备注' },
+            value: 'edited',
+            context: {
+              eventId: 'ctx-edit-remark',
+              capturedAt: 1400,
+              before: { dialog: { type: 'modal', title: '编辑用户', visible: true }, form: { label: '备注', name: 'remark' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's006',
+            order: 6,
+            action: 'click',
+            target: { testId: 'modal-confirm', text: '确定' },
+            context: {
+              eventId: 'ctx-edit-confirm',
+              capturedAt: 1500,
+              before: { dialog: { type: 'modal', title: '编辑用户', visible: true }, target: { tag: 'button', testId: 'modal-confirm', text: '确定' } },
+              after: { dialog: { type: 'modal', title: '编辑用户', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const editAssertionTypes = enriched.steps[5].assertions.map(assertion => assertion.type);
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!editAssertionTypes.includes('row-exists'), 'later edit modal save must not reuse an earlier create opener for row-exists');
+      assert(editAssertionTypes.includes('modal-closed'), 'edit modal save should still keep modal-closed terminal evidence');
+      assert(!code.includes('page.getByTestId("user-table").getByRole(\'row\').filter({ hasText: /edited/ })'), 'edit-only values should not become create row assertions');
     },
   },
   {

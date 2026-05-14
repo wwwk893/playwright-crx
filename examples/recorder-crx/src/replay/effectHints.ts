@@ -102,7 +102,7 @@ function rowExistsEffectHint(recipe: UiActionRecipe, step: FlowStep, previousSte
   const dialog = step.context?.before.dialog || step.target?.scope?.dialog;
   if (sameOverlayRemainsVisible(step, dialog) && hasValidationFeedback(step))
     return undefined;
-  const createOpener = [...previousSteps].reverse().find(isCreateOpenerStep);
+  const createOpener = createOpenerForCurrentOverlay(previousSteps, dialog);
   if (!createOpener)
     return undefined;
   const tableTestId = inferredTableTestIdFromCreateOpener(createOpener) || tableScopeFromStep(createOpener).tableTestId;
@@ -227,6 +227,55 @@ function isCreateOpenerStep(step: FlowStep) {
     step.context?.before.target?.testId,
     step.context?.before.target?.text,
   ].filter(Boolean).join('|'));
+}
+
+function createOpenerForCurrentOverlay(previousSteps: FlowStep[], dialog?: { type?: string; title?: string; testId?: string }) {
+  if (!dialog)
+    return [...previousSteps].reverse().find(isCreateOpenerStep);
+
+  const explicitOpenIndex = lastIndexOf(previousSteps, step => stepOpensOverlay(step, dialog));
+  if (explicitOpenIndex >= 0)
+    return [...previousSteps.slice(explicitOpenIndex)].reverse().find(isCreateOpenerStep);
+
+  const overlayWindowStart = currentOverlayWindowStart(previousSteps, dialog);
+  if (overlayWindowStart > 0 && isCreateOpenerStep(previousSteps[overlayWindowStart - 1]))
+    return previousSteps[overlayWindowStart - 1];
+
+  return undefined;
+}
+
+function lastIndexOf<T>(values: T[], predicate: (value: T) => boolean) {
+  for (let index = values.length - 1; index >= 0; index--) {
+    if (predicate(values[index]))
+      return index;
+  }
+  return -1;
+}
+
+function stepOpensOverlay(step: FlowStep, dialog: { type?: string; title?: string; testId?: string }) {
+  const afterDialog = step.context?.after?.openedDialog || step.context?.after?.dialog;
+  return !!afterDialog?.visible && sameOverlayScope(afterDialog, dialog) && !sameOverlayScope(step.context?.before.dialog, dialog);
+}
+
+function currentOverlayWindowStart(previousSteps: FlowStep[], dialog: { type?: string; title?: string; testId?: string }) {
+  const lastOverlayIndex = lastIndexOf(previousSteps, step => stepHasOverlayScope(step, dialog));
+  if (lastOverlayIndex < 0)
+    return -1;
+
+  let start = lastOverlayIndex;
+  for (let index = lastOverlayIndex - 1; index >= 0; index--) {
+    if (!stepHasOverlayScope(previousSteps[index], dialog))
+      break;
+    start = index;
+  }
+  return start;
+}
+
+function stepHasOverlayScope(step: FlowStep, dialog: { type?: string; title?: string; testId?: string }) {
+  return sameOverlayScope(step.context?.before.dialog, dialog) ||
+    sameOverlayScope(step.context?.after?.dialog, dialog) ||
+    sameOverlayScope(step.context?.after?.openedDialog, dialog) ||
+    sameOverlayScope(step.target?.scope?.dialog, dialog);
 }
 
 function createdRowKeyword(previousSteps: FlowStep[]) {
