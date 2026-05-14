@@ -6,6 +6,7 @@
 
 import type { UiActionRecipe as SemanticUiActionRecipe } from '../uiSemantics/recipes';
 import type { LocatorContract } from './locatorTypes';
+import type { SafetyPreflight } from './safetyGuard';
 
 export type {
   LegacyUiActionRecipeKind,
@@ -22,9 +23,11 @@ export type {
 
 export type UiActionRecipe = SemanticUiActionRecipe & {
   locatorContract?: LocatorContract;
+  safetyPreflight?: SafetyPreflight;
 };
 
 export type { LocatorCandidate, LocatorCandidateKind, LocatorCandidatePayload, LocatorCandidateScope, LocatorContract, LocatorRisk, LocatorRiskSeverity } from './locatorTypes';
+export type { SafetyGuardFinding, SafetyGuardImpact, SafetyGuardStatus, SafetyPreflight, SafetyPreflightCheck, SafetyPreflightCheckKind, SafetyPreflightTiming } from './safetyGuard';
 
 export type RuntimeBridgeKind = 'runtime-bridge' | 'dom-dispatch' | 'native-event' | 'none';
 

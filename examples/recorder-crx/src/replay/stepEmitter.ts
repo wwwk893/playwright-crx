@@ -18,6 +18,7 @@ import { actionLabel, summarizeStepSubject } from '../flow/display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import { isRecipeBackedAntdSelectOption, recipeOptionSearchText, recipeOptionText } from './antDRecipeRenderers';
 import { buildRecipeForStep } from './recipeBuilder';
+import { applySafetyPreflightToSource } from './safetyGuard';
 import { renderRepeatAssertionTemplate } from './terminalAssertions';
 
 export function createEffectiveReplayFlow(flow: BusinessFlow): BusinessFlow {
@@ -479,6 +480,11 @@ function comboboxNameFromSource(source: string) {
   return match?.[1];
 }
 
+function formItemLabelFromSource(source: string) {
+  const matches = [...source.matchAll(/\.locator\(["'][^"']*ant-form-item[^"']*["']\)\.filter\(\{\s*hasText:\s*["']([^"']+)["']\s*\}\)/g)];
+  return matches.length ? matches[matches.length - 1]?.[1] : undefined;
+}
+
 function isContextlessOptionTextClickAfterSelect(step: FlowStep, selectStep: FlowStep, inheritedQuery = '') {
   if (step.action !== 'click')
     return false;
@@ -566,6 +572,7 @@ export type EmitStepOptions = {
   parserSafe?: boolean;
   previousStep?: FlowStep;
   nextStep?: FlowStep;
+  safetyGuard?: boolean;
 };
 
 export function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, segment: FlowRepeatSegment, options: EmitStepOptions = {}) {
@@ -778,10 +785,44 @@ function isRedundantSelectedValueDisplayClick(step: FlowStep, previousStep?: Flo
   if (!/getByText|internal:text=|text=/.test(source))
     return false;
   const fieldScoped = sameSelectedValueDisplayFieldIdentity(step, previousStep);
-  const assertionTied = hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText);
-  if (!fieldScoped && !assertionTied)
+  const selectedDisplayEcho = isSelectedValueDisplayEchoTarget(step);
+  const currentAssertionTied = hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText, 'current');
+  const assertionTied = selectedDisplayEcho && hasSelectedValueAssertionForPreviousField(step, previousStep, selectedText, clickedText);
+  const selectedDisplayTied = selectedDisplayEcho && hasSelectedValueAssertionForPreviousValue(previousStep, selectedText, clickedText);
+  const pollutedFieldIdentityTied = isWeakUnscopedSelectedTextClick(step) && previousFieldIdentityIsSelectedValue(previousStep, selectedText);
+  if (!fieldScoped && !currentAssertionTied && !assertionTied && !selectedDisplayTied && !pollutedFieldIdentityTied)
     return false;
   return true;
+}
+
+function isWeakUnscopedSelectedTextClick(step: FlowStep) {
+  const contextTarget = step.context?.before.target as Record<string, unknown> | undefined;
+  const role = String(step.target?.role || contextTarget?.role || '');
+  if (step.target?.testId || contextTarget?.testId || role === 'button' || role === 'link')
+    return false;
+  if (step.target?.scope?.table || step.context?.before.table)
+    return false;
+  const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
+  return /getByText|internal:text=|text=/.test(source);
+}
+
+function previousFieldIdentityIsSelectedValue(step: FlowStep, selectedText: string) {
+  const normalizedSelectedText = normalizeFieldIdentityToken(selectedText);
+  if (!normalizedSelectedText)
+    return false;
+  return selectedValuePreviousFieldTokens(step).some(token => token === normalizedSelectedText);
+}
+
+function isSelectedValueDisplayEchoTarget(step: FlowStep) {
+  const contextTarget = step.context?.before.target as Record<string, unknown> | undefined;
+  const rawTarget = step.target?.raw as Record<string, unknown> | undefined;
+  const role = String(step.target?.role || contextTarget?.role || '');
+  if (step.target?.testId || contextTarget?.testId || role === 'button' || role === 'link')
+    return false;
+  const tag = String(contextTarget?.tag || rawTarget?.tag || '');
+  const className = String(contextTarget?.className || contextTarget?.class || rawTarget?.className || rawTarget?.class || '');
+  const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}`;
+  return /^span$/i.test(tag) || /ant-select-selection-item|selection-item/.test(className) || /ant-select-selection-item|selection-item/.test(source);
 }
 
 function sameSelectedValueDisplayFieldIdentity(step: FlowStep, previousStep: FlowStep) {
@@ -808,7 +849,10 @@ function selectedValuePreviousFieldTokens(step: FlowStep) {
     step.target?.placeholder,
     step.context?.before.target?.placeholder,
     step.target?.name,
+    step.target?.displayName,
+    popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName),
     comboboxNameFromSource(step.sourceCode || ''),
+    formItemLabelFromSource(step.sourceCode || ''),
   ].map(normalizeFieldIdentityToken).filter(Boolean) as string[]);
 }
 
@@ -837,7 +881,7 @@ function selectedDisplayClickText(step: FlowStep) {
   );
 }
 
-function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep: FlowStep, selectedText: string, clickedText?: string) {
+function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep: FlowStep, selectedText: string, clickedText?: string, assertionSource: 'current' | 'any' = 'any') {
   const previousTestIds = uniqueValues([
     previousStep.target?.testId,
     previousStep.context?.before.form?.testId,
@@ -848,15 +892,9 @@ function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep:
   if (!previousTestIds.length && !previousFieldTokens.length)
     return false;
   const normalizedSelectedText = normalizeGeneratedText(selectedText);
-  const assertions = [...step.assertions, ...previousStep.assertions];
+  const assertions = assertionSource === 'current' ? step.assertions : [...step.assertions, ...previousStep.assertions];
   return assertions.some(assertion => {
-    if (assertion.type !== 'selected-value-visible' || !assertion.enabled)
-      return false;
-    const expected = normalizeGeneratedText(stringParam(assertion.expected || assertion.params?.expected) || '');
-    const normalizedClickedText = normalizeGeneratedText(clickedText || '') || '';
-    const matchesSelectedText = expected === normalizedSelectedText;
-    const matchesTruncatedClickedText = !!normalizedClickedText && expected === normalizedClickedText && normalizedSelectedText?.startsWith(normalizedClickedText) && normalizedClickedText.length >= 4;
-    if (!expected || (!matchesSelectedText && !matchesTruncatedClickedText))
+    if (!selectedValueAssertionMatchesText(assertion, normalizedSelectedText, clickedText))
       return false;
     const assertionTargetTestId = stringParam(assertion.params?.targetTestId || assertion.target?.testId);
     if (assertionTargetTestId && previousTestIds.includes(assertionTargetTestId))
@@ -871,6 +909,21 @@ function hasSelectedValueAssertionForPreviousField(step: FlowStep, previousStep:
     ].map(normalizeFieldIdentityToken).filter(Boolean) as string[]);
     return assertionFieldTokens.some(leftToken => previousFieldTokens.some(rightToken => fieldsMatch(leftToken, rightToken)));
   });
+}
+
+function hasSelectedValueAssertionForPreviousValue(previousStep: FlowStep, selectedText: string, clickedText?: string) {
+  const normalizedSelectedText = normalizeGeneratedText(selectedText);
+  return previousStep.assertions.some(assertion => selectedValueAssertionMatchesText(assertion, normalizedSelectedText, clickedText));
+}
+
+function selectedValueAssertionMatchesText(assertion: FlowAssertion, normalizedSelectedText?: string, clickedText?: string) {
+  if (assertion.type !== 'selected-value-visible' || !assertion.enabled)
+    return false;
+  const expected = normalizeGeneratedText(stringParam(assertion.expected || assertion.params?.expected) || '');
+  const normalizedClickedText = normalizeGeneratedText(clickedText || '') || '';
+  const matchesSelectedText = expected === normalizedSelectedText;
+  const matchesTruncatedClickedText = !!normalizedClickedText && expected === normalizedClickedText && normalizedSelectedText?.startsWith(normalizedClickedText) && normalizedClickedText.length >= 4;
+  return !!expected && (matchesSelectedText || matchesTruncatedClickedText);
 }
 
 function isAntdProjectedSelectStep(step: FlowStep) {
@@ -939,6 +992,7 @@ function fieldIdentityTokens(step: FlowStep) {
     step.target?.name,
     step.target?.displayName,
     popupFieldLabelFromName(step.target?.name || step.target?.text || step.target?.displayName),
+    formItemLabelFromSource(step.sourceCode || ''),
   ].map(normalizeFieldIdentityToken).filter(Boolean) as string[]);
 }
 
@@ -960,7 +1014,7 @@ function uniqueValues(values: string[]) {
 
 export function emitStep(lines: string[], step: FlowStep, indent: string, segment?: FlowRepeatSegment, rowValues?: Record<string, string>, options: EmitStepOptions = {}) {
   lines.push(`${indent}// ${step.id} ${actionLabel[step.action]}: ${summarizeStepSubject(step)}`);
-  const sourceCode = sourceCodeForStep(step, options);
+  const sourceCode = sourceCodeWithSafetyPreflight(step, options);
   if (sourceCode) {
     const parameterizedSource = sourceCode
         .map(line => segment ? parameterizeLine(line, step, segment, rowValues) : line);
@@ -979,7 +1033,7 @@ export function emitStep(lines: string[], step: FlowStep, indent: string, segmen
 }
 
 export function countStepActions(step: FlowStep, options: EmitStepOptions = {}) {
-  const sourceActionCount = sourceCodeForStep(step, options)
+  const sourceActionCount = sourceCodeWithSafetyPreflight(step, options)
       ?.filter(line => isRunnableLine(line))
       .length ?? 0;
   const assertionActionCount = stepAssertionsForEmission(step, options)
@@ -987,6 +1041,14 @@ export function countStepActions(step: FlowStep, options: EmitStepOptions = {}) 
       .filter(line => isRunnableLine(line))
       .length;
   return sourceActionCount + assertionActionCount;
+}
+
+function sourceCodeWithSafetyPreflight(step: FlowStep, options: EmitStepOptions = {}) {
+  const sourceCode = sourceCodeForStep(step, options);
+  if (options.safetyGuard === false)
+    return sourceCode;
+  const safety = buildRecipeForStep(step)?.safetyPreflight;
+  return applySafetyPreflightToSource(sourceCode, safety, step, { parserSafe: options.parserSafe });
 }
 
 function stepAssertionsForEmission(step: FlowStep, options: EmitStepOptions = {}) {

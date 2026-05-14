@@ -1096,6 +1096,307 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'safety guard blocks table row actions without rowKey in exported and parser-safe replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-delete-action',
+            displayName: '删除',
+            scope: { table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 删除' } },
+          },
+          context: {
+            eventId: 'ctx-delete-without-row-key',
+            capturedAt: 1000,
+            before: {
+              target: { tag: 'a', testId: 'wan-transport-row-delete-action', text: '删除', framework: 'antd', controlType: 'link' },
+              table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 删除', columnName: '操作' },
+            } as any,
+          },
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.operation, 'rowAction');
+      assertEqual(recipe?.safetyPreflight?.status, 'blocked');
+      assertEqual(recipe?.safetyPreflight?.findings[0]?.code, 'row-action-without-row-key');
+      assert(exported.includes('BAGLC safety guard blocked s001: row-action-without-row-key'), 'exported replay should fail closed for row actions without rowKey');
+      assert(parserSafe.includes('BAGLC safety guard blocked s001: row-action-without-row-key'), 'parser-safe replay should fail closed for row actions without rowKey');
+      assert(parserSafe.includes('data-baglc-reason=') && parserSafe.includes('row-action-without-row-key'), 'parser-safe blocked replay should expose the guard reason in the missing selector');
+      assert(parserSafe.includes('click({ timeout: 1 });'), 'parser-safe blocked replay should fail fast instead of waiting for the default action timeout');
+      assert(!exported.includes('getByTestId("wan-transport-row-delete-action").click()'), 'blocked row action must not fall back to the reusable global test id');
+    },
+  },
+  {
+    name: 'safety guard does not block non-critical row actions without rowKey',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-view-action',
+            displayName: '查看',
+            scope: { table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 查看' } },
+          },
+          context: {
+            eventId: 'ctx-view-without-row-key',
+            capturedAt: 1000,
+            before: {
+              target: { tag: 'a', testId: 'wan-transport-row-view-action', text: '查看', framework: 'antd', controlType: 'link' },
+              table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 查看', columnName: '操作' },
+            } as any,
+          },
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.operation, 'rowAction');
+      assertEqual(recipe?.safetyPreflight?.impact, 'normal');
+      assert(recipe?.safetyPreflight?.status !== 'blocked', 'non-critical row actions without rowKey should not fail closed');
+      assert(!exported.includes('row-action-without-row-key'), 'exported replay should not block non-critical row actions without rowKey');
+      assert(!parserSafe.includes('row-action-without-row-key'), 'parser-safe replay should not block non-critical row actions without rowKey');
+      assert(exported.includes('wan-transport-row-view-action'), 'non-critical row action should still emit a scoped action locator');
+    },
+  },
+  {
+    name: 'safety guard blocks critical actions that would use text fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: { text: '删除', displayName: '删除' },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('critical-action-emitted-text-fallback'), 'critical delete/remove actions must not replay through text fallback');
+      assert(!code.includes('page.getByText("删除").click()'), 'unsafe critical fallback should not be emitted');
+    },
+  },
+  {
+    name: 'safety guard blocks unsafe emitted source even when locator contract primary is stable',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: { testId: 'userDeleteButton', role: 'button', name: '删除', text: '删除' },
+            rawAction: { action: { name: 'legacyRecordedSource' } },
+            sourceCode: 'await page.getByText("删除").click();',
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { testId: 'removeUserButton', role: 'button', name: '移除用户' },
+            rawAction: { action: { name: 'legacyRecordedSource' } },
+            sourceCode: 'await page.getByTestId("removeUserButton").nth(1).click();',
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            kind: 'recorded',
+            action: 'click',
+            target: { testId: 'confirmDeleteButton', role: 'button', name: '确认删除' },
+            rawAction: { action: { name: 'legacyRecordedSource' } },
+            sourceCode: 'await page.locator("[aria-activedescendant=rc_select_14_list_0]").click();',
+            assertions: [],
+          },
+        ],
+      };
+      const firstRecipe = buildRecipeForStep(flow.steps[0]);
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assertEqual(firstRecipe?.locatorContract?.primaryDiagnostic?.kind, 'testid');
+      assert(code.includes('critical-action-emitted-text-fallback'), 'critical actions should inspect actual emitted source text fallbacks');
+      assert(code.includes('critical-action-emitted-ordinal-locator'), 'critical actions should inspect actual emitted source ordinal locators');
+      assert(code.includes('critical-action-emitted-dynamic-rc-select-id'), 'critical actions should inspect actual emitted source dynamic rc_select ids');
+      assert(!code.includes('page.getByText("删除").click()'), 'unsafe emitted text fallback should be blocked');
+      assert(!code.includes('page.getByTestId("removeUserButton").nth(1).click()'), 'unsafe emitted ordinal source should be blocked');
+      assert(!code.includes('aria-activedescendant=rc_select_14_list_0'), 'unsafe emitted rc_select source should be blocked');
+    },
+  },
+  {
+    name: 'safety guard treats row-text scoped ordinal as contextual evidence only',
+    run: () => {
+      const scopedRowTextSource = 'await page.locator("tr, [role=\\"row\\"], .ant-table-row, .ant-list-item, .ant-descriptions-row, .ant-space, .ant-card, .ant-table-cell").filter({ hasText: /Nova专线[\\s\\S]*default/ }).getByTestId("wan-transport-row-delete-action").first().click();';
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: { testId: 'deleteButton', role: 'button', name: '删除' },
+          rawAction: { action: { name: 'legacyRecordedSource' } },
+          sourceCode: scopedRowTextSource,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes(scopedRowTextSource), 'row-text scoped ordinal should not be treated like a page-global ordinal fallback');
+      assert(!code.includes('critical-action-emitted-ordinal-locator'), 'row-text scoped ordinal should not trigger the ordinary emitted ordinal block');
+      assert(!code.includes('BAGLC safety guard blocked s001'), 'row-text scoped ordinal evidence alone should not block when the recipe is not a rowAction without rowKey');
+    },
+  },
+  {
+    name: 'safety guard does not exempt bare locator row-text ordinals',
+    run: () => {
+      const bareLocatorSource = 'await page.locator("tr, [role=\\"row\\"], .ant-table-row").filter({ hasText: /Nova专线[\\s\\S]*default/ }).locator(".ant-btn").first().click();';
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: { testId: 'deleteButton', role: 'button', name: '删除' },
+          rawAction: { action: { name: 'legacyRecordedSource' } },
+          sourceCode: bareLocatorSource,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('critical-action-emitted-ordinal-locator'), 'bare locator row-text ordinal should remain blocked for critical actions');
+      assert(!code.includes(bareLocatorSource), 'bare locator row-text ordinal must not be emitted as an executable critical action');
+    },
+  },
+  {
+    name: 'safety guard detects camelCase and spaced critical action names',
+    run: () => {
+      const criticalTargets = [
+        { testId: 'deleteButton' },
+        { testId: 'removeUser' },
+        { testId: 'confirmDelete' },
+        { testId: 'okButton' },
+        { role: 'button', name: '确 定' },
+      ];
+
+      for (const [index, target] of criticalTargets.entries()) {
+        const recipe = buildRecipeForStep({
+          id: `s-critical-${index}`,
+          order: index + 1,
+          kind: 'recorded',
+          action: 'click',
+          target,
+          assertions: [],
+        });
+
+        assertEqual(recipe?.safetyPreflight?.impact, 'critical');
+      }
+
+      const saveRecipe = buildRecipeForStep({
+        id: 's-save',
+        order: 10,
+        kind: 'recorded',
+        action: 'click',
+        target: { role: 'button', name: '保存' },
+        assertions: [],
+      });
+
+      assertEqual(saveRecipe?.safetyPreflight?.impact, 'normal');
+    },
+  },
+  {
+    name: 'safety guard emits modal and popconfirm uniqueness preflight checks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: { role: 'button', name: '保存', scope: { dialog: { type: 'modal', title: '新建用户', visible: true } } },
+            context: {
+              eventId: 'ctx-modal-save',
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'modal', title: '新建用户', visible: true },
+                target: { tag: 'button', role: 'button', text: '保存' },
+              } as any,
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { role: 'tooltip', name: '确 定', scope: { dialog: { type: 'popover', title: '删除此行？', visible: true } } },
+            context: {
+              eventId: 'ctx-popconfirm-ok',
+              capturedAt: 1100,
+              before: {
+                dialog: { type: 'popover', title: '删除此行？', visible: true },
+                target: { tag: 'button', role: 'tooltip', text: '确 定' },
+              } as any,
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const modalPreflight = 'BAGLC safety guard requires exactly one visible modal/drawer root before a dialog action: s001';
+      const popconfirmPreflight = 'BAGLC safety guard requires exactly one visible Popconfirm before confirming: s002';
+
+      assert(code.includes(modalPreflight), 'modal actions should preflight one visible dialog root');
+      assert(code.includes('filter({ hasText: "新建用户" })'), 'modal preflight should keep dialog title scope');
+      assert(code.includes(popconfirmPreflight), 'Popconfirm confirms should preflight one visible Popconfirm root');
+      assert(code.indexOf(popconfirmPreflight) < code.indexOf('getByRole("button", { name: /^(确定|确 定)$/ })'), 'Popconfirm preflight should run before the confirm click');
+    },
+  },
+  {
+    name: 'safety guard does not block low-risk navigation',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'navigate',
+          url: '/settings',
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.goto("/settings")'), 'low-risk navigation should still emit normally');
+      assert(!code.includes('BAGLC safety guard'), 'low-risk navigation should not be blocked or preflighted');
+    },
+  },
+  {
     name: 'recipeBuilder does not force AntD replay strategy for generic select steps',
     run: () => {
       const recipe = buildRecipeForStep({
@@ -1523,6 +1824,141 @@ const tests: TestCase[] = [
       assert(!parserSafeWithPreviousAssertion.includes('page.getByText("生产VRF").click()'), 'parser-safe replay should dedupe a selected-value echo tied by the previous select assertion');
       assert(exportedWithPreviousAssertion.includes('生产VRF'), 'exported replay should keep the selected-value assertion text');
       assertEqual(countBusinessFlowPlaybackActions(flowWithPreviousSelectedValueAssertion), runnableLineCount(parserSafeWithPreviousAssertion));
+
+      const flowWithSourceScopedPreviousAssertion: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 'vrf-source-scoped-select',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', displayName: 'combobox 关联VRF' },
+            value: '生产VRF',
+            context: {
+              eventId: 'ctx-vrf-source-scoped-select',
+              capturedAt: 1000,
+              before: {
+                target: {
+                  framework: 'antd',
+                  controlType: 'select-option',
+                  selectedOption: '生产VRF',
+                },
+                ui: { library: 'antd', component: 'select' },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: '生产VRF' } },
+            sourceCode: 'await page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "新建网络资源" }).locator(".ant-form-item").filter({ hasText: "关联VRF" }).locator(".ant-select-selector, .ant-cascader-picker, .ant-select").first().click();',
+            assertions: [{
+              id: 'vrf-source-selected',
+              type: 'selected-value-visible',
+              subject: 'element',
+              target: { label: '关联VRF' },
+              expected: '生产VRF',
+              enabled: true,
+            }],
+          },
+          {
+            id: 'vrf-source-selected-echo',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: '生产VRF', displayName: '生产VRF' },
+            sourceCode: `await page.getByText("生产VRF").click();`,
+            context: {
+              eventId: 'ctx-vrf-source-selected-echo',
+              capturedAt: 1100,
+              before: {
+                target: { tag: 'span', text: '生产VRF', normalizedText: '生产VRF' },
+              } as any,
+            },
+            rawAction: { action: { name: 'click', selector: 'internal:text="生产VRF"i', text: '生产VRF' } },
+            assertions: [],
+          },
+        ],
+      };
+      const exportedWithSourceScopedAssertion = generateBusinessFlowPlaywrightCode(flowWithSourceScopedPreviousAssertion);
+      const parserSafeWithSourceScopedAssertion = generateBusinessFlowPlaybackCode(flowWithSourceScopedPreviousAssertion);
+      assert(!exportedWithSourceScopedAssertion.includes('page.getByText("生产VRF").click()'), 'exported replay should dedupe a selected-value echo tied by source-scoped form item identity');
+      assert(!parserSafeWithSourceScopedAssertion.includes('page.getByText("生产VRF").click()'), 'parser-safe replay should dedupe a selected-value echo tied by source-scoped form item identity');
+      assertEqual(countBusinessFlowPlaybackActions(flowWithSourceScopedPreviousAssertion), runnableLineCount(parserSafeWithSourceScopedAssertion));
+
+      const flowWithPollutedPreviousIdentity: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 'vrf-polluted-select',
+            order: 1,
+            kind: 'recorded',
+            action: 'select',
+            target: { role: 'combobox', displayName: 'combobox 生产VRF' },
+            value: '生产VRF',
+            context: {
+              eventId: 'ctx-vrf-polluted-select',
+              capturedAt: 1000,
+              before: {
+                target: {
+                  framework: 'antd',
+                  controlType: 'select-option',
+                  selectedOption: '生产VRF',
+                },
+                ui: { library: 'antd', component: 'select' },
+              } as any,
+            },
+            rawAction: { action: { name: 'select', selectedText: '生产VRF' } },
+            assertions: [],
+          },
+          {
+            id: 'vrf-polluted-selected-echo',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: '生产VRF', displayName: '生产VRF' },
+            sourceCode: `await page.getByText("生产VRF").click();`,
+            rawAction: { action: { name: 'click', selector: 'internal:text="生产VRF"i', text: '生产VRF' } },
+            assertions: [],
+          },
+        ],
+      };
+      const exportedWithPollutedIdentity = generateBusinessFlowPlaywrightCode(flowWithPollutedPreviousIdentity);
+      const parserSafeWithPollutedIdentity = generateBusinessFlowPlaybackCode(flowWithPollutedPreviousIdentity);
+      assert(!exportedWithPollutedIdentity.includes('page.getByText("生产VRF").click()'), 'exported replay should dedupe selected-value echoes when the previous select identity is polluted by the selected value');
+      assert(!parserSafeWithPollutedIdentity.includes('page.getByText("生产VRF").click()'), 'parser-safe replay should dedupe selected-value echoes when the previous select identity is polluted by the selected value');
+      assertEqual(countBusinessFlowPlaybackActions(flowWithPollutedPreviousIdentity), runnableLineCount(parserSafeWithPollutedIdentity));
+
+      const repeatFlowWithPollutedPreviousIdentity: BusinessFlow = {
+        ...flowWithPollutedPreviousIdentity,
+        steps: flowWithPollutedPreviousIdentity.steps.map(step => step.id === 'vrf-polluted-select' ? {
+          ...step,
+          assertions: [{
+            id: 'vrf-polluted-selected',
+            type: 'selected-value-visible',
+            subject: 'element',
+            target: { label: '关联VRF' },
+            expected: '生产VRF',
+            enabled: true,
+          }],
+        } : step),
+        repeatSegments: [{
+          id: 'repeat-network-resource',
+          name: '批量新建网络资源',
+          stepIds: ['vrf-polluted-select', 'vrf-polluted-selected-echo'],
+          parameters: [{
+            id: 'p-context',
+            label: '关联VRF',
+            sourceStepId: 'vrf-polluted-select',
+            currentValue: '生产VRF',
+            variableName: 'context',
+            enabled: true,
+          }],
+          rows: [{ id: 'row-1', values: { 'p-context': '生产VRF' } }],
+          createdAt: '2026-05-14T00:00:00.000Z',
+          updatedAt: '2026-05-14T00:00:00.000Z',
+        }],
+      };
+      const exportedRepeatWithPollutedIdentity = generateBusinessFlowPlaywrightCode(repeatFlowWithPollutedPreviousIdentity);
+      assert(!exportedRepeatWithPollutedIdentity.includes('page.getByText("生产VRF").click()'), 'repeat exported replay should dedupe selected-value echoes when the previous select identity is polluted by the selected value');
+      assert(exportedRepeatWithPollutedIdentity.includes('String(row.context)'), 'repeat replay should still parameterize the selected value');
     },
   },
   {
@@ -1582,6 +2018,25 @@ const tests: TestCase[] = [
       assert(hasSameTextClick(exported), 'exported replay must keep a same-text click that is not scoped to the previous select field');
       assert(hasSameTextClick(parserSafe), 'parser-safe replay must keep a same-text click that is not scoped to the previous select field');
       assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(parserSafe));
+
+      const flowWithPreviousAssertion: BusinessFlow = {
+        ...flow,
+        steps: flow.steps.map(step => step.id === 's001' ? {
+          ...step,
+          assertions: [{
+            id: 'cluster-selected',
+            type: 'selected-value-visible',
+            subject: 'element',
+            target: { label: '集群' },
+            expected: 'NAT集群A',
+            enabled: true,
+          }],
+        } : step),
+      };
+      const exportedWithPreviousAssertion = generateBusinessFlowPlaywrightCode(flowWithPreviousAssertion);
+      const parserSafeWithPreviousAssertion = generateBusinessFlowPlaybackCode(flowWithPreviousAssertion);
+      assert(hasSameTextClick(exportedWithPreviousAssertion), 'exported replay must keep a same-text div click even when the previous select has a selected-value assertion');
+      assert(hasSameTextClick(parserSafeWithPreviousAssertion), 'parser-safe replay must keep a same-text div click even when the previous select has a selected-value assertion');
     },
   },
   {
@@ -3486,6 +3941,33 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'text-labeled ProForm radio page click is not suppressed by a nearby weak recorder click',
+    run: () => {
+      const wallTime = Date.now();
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: {
+          name: 'click',
+          selector: 'internal:testid=[data-testid="network-resource-form"]',
+        },
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-proform-radio-synthetic', wallTime + 200, {
+        tag: 'label',
+        role: 'radio',
+        text: '独享地址池',
+        normalizedText: '独享地址池',
+        framework: 'procomponents',
+        controlType: 'radio',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [event]);
+
+      assertEqual(withSynthetic.steps.length, 2);
+      assertEqual(withSynthetic.steps[1].target?.text, '独享地址池');
+      assertEqual(withSynthetic.steps[1].sourceCode, 'await page.locator(\'label\').filter({ hasText: "独享地址池" }).click();');
+    },
+  },
+  {
     name: 'code preview prefers upgraded test id over weird raw click selector',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -4078,7 +4560,10 @@ test('demo', async ({ page }) => {
           context: {
             eventId: 'ctx-delete',
             capturedAt: 1000,
-            before: { target: { tag: 'a', testId: 'wan-transport-row-delete-action', framework: 'antd', controlType: 'link' } },
+            before: {
+              target: { tag: 'a', testId: 'wan-transport-row-delete-action', framework: 'antd', controlType: 'link' },
+              table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowKey: 'wan-nova-default', rowText: 'Nova专线 default' },
+            },
             after: { openedDialog: { type: 'popover', title: '删除此行？', visible: true } },
           },
           assertions: [],
@@ -4086,7 +4571,7 @@ test('demo', async ({ page }) => {
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
 
-      assert(code.includes('page.locator("tr, [role=\\"row\\"], .ant-table-row, .ant-list-item, .ant-descriptions-row, .ant-space, .ant-card, .ant-table-cell").filter({ hasText: /Nova专线[\\s\\S]*default/ }).getByTestId("wan-transport-row-delete-action").first().click();'), 'row delete with reusable test id should fall back to row text scope instead of global test id when rowKey is missing');
+      assert(code.includes('page.getByTestId("wan-transport-table").locator("tr[data-row-key=\\"wan-nova-default\\"], [data-row-key=\\"wan-nova-default\\"]").first().getByTestId("wan-transport-row-delete-action").click();'), 'row delete with reusable test id should use stable rowKey scope when available');
       assert(!code.includes('await page.getByTestId("wan-transport-row-delete-action").click();'), 'reusable row delete should not replay as an ambiguous global test id');
       assert(code.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").filter({ hasText: "删除此行？" }).getByRole("button", { name: /^(确定|确 定)$/ }).click();'), 'AntD row delete should use the captured opened popover to confirm');
     },
@@ -9126,6 +9611,11 @@ test('demo', async ({ page }) => {
         };
 
         const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
+        if (sample.testId === 'wan-transport-row-delete-action') {
+          assert(playbackCode.includes('BAGLC safety guard blocked s001: critical-action-emitted-ordinal-locator'), 'critical duplicate test id delete should fail closed instead of replaying through ordinal');
+          assert(!playbackCode.includes(`page.getByTestId("${sample.testId}").nth(${sample.nth}).click();`), 'critical duplicate test id delete must not keep ordinal replay');
+          continue;
+        }
         assert(playbackCode.includes(`page.getByTestId("${sample.testId}").nth(${sample.nth}).click();`), `${sample.role} duplicate test id should keep its captured test id ordinal`);
         assert(!playbackCode.includes(`getByRole("${sample.role}"`) && !playbackCode.includes(`getByRole('${sample.role}'`), `${sample.role} duplicate test id should not replay through role ordinal fallback`);
       }
@@ -9172,7 +9662,8 @@ test('demo', async ({ page }) => {
       };
 
       const playbackCode = stepCodeBlock(generateBusinessFlowPlaybackCode(flow), 's001');
-      assert(playbackCode.includes('page.getByTestId("wan-transport-row-delete-action").nth(0).click();'), 'link-like action test id should keep its captured test id ordinal');
+      assert(playbackCode.includes('BAGLC safety guard blocked s001: critical-action-emitted-ordinal-locator'), 'critical link-like delete test id should fail closed instead of replaying through ordinal');
+      assert(!playbackCode.includes('page.getByTestId("wan-transport-row-delete-action").nth(0).click();'), 'critical link-like delete test id must not keep ordinal replay');
       assert(!playbackCode.includes('getByRole("button"') && !playbackCode.includes("getByRole('button'"), 'link-like action test id should not infer button role fallback from its name');
     },
   },
