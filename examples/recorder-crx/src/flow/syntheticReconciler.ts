@@ -522,7 +522,7 @@ function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: Page
     return false;
   if (targetsLikelySame(target, event.before.target))
     return true;
-  if (isFormLabeledChoiceContext(event))
+  if (isChoiceControlContext(event))
     return false;
   if (diff < 800 && isWeakPageContextClickTarget(event.before.target))
     return true;
@@ -534,12 +534,13 @@ function isDropdownOptionContext(target?: ElementContext) {
     /^(option|treeitem|menuitem)$/.test(target?.role || '');
 }
 
-function isFormLabeledChoiceContext(event: PageContextEvent) {
+function isChoiceControlContext(event: PageContextEvent) {
   const target = event.before.target;
-  return !!event.before.form?.label && (
-    /^(checkbox|radio|switch)$/.test(target?.controlType || '') ||
-    /^(checkbox|radio|switch)$/.test(target?.role || '')
-  );
+  if (!target)
+    return false;
+  if (!/^(checkbox|radio|switch)$/.test(target?.controlType || '') && !/^(checkbox|radio|switch)$/.test(target?.role || ''))
+    return false;
+  return !!event.before.form?.label || !!stableElementText(target);
 }
 
 function isWeakPageContextClickTarget(target?: ElementContext) {
@@ -811,19 +812,20 @@ function mergeRecordedAndSyntheticTarget(recorded?: FlowTarget, synthetic?: Flow
 function syntheticClickCoveredByRecordedStep(syntheticStep: FlowStep, draft: StepDraft) {
   if (targetsLikelySame(syntheticStep.target, draft.step.target))
     return true;
-  if (isDropdownOptionContext(syntheticStep.context?.before.target) || isFormLabeledChoiceStep(syntheticStep))
+  if (isDropdownOptionContext(syntheticStep.context?.before.target) || isChoiceControlStep(syntheticStep))
     return false;
   const syntheticWallTime = Number(asRecord(syntheticStep.rawAction).syntheticContextEventWallTime ?? 0);
   const recordedWallTime = draft.entries.map(entry => entry.wallTime).find((value): value is number => typeof value === 'number');
   return !!syntheticWallTime && !!recordedWallTime && Math.abs(recordedWallTime - syntheticWallTime) < 1500;
 }
 
-function isFormLabeledChoiceStep(step: FlowStep) {
+function isChoiceControlStep(step: FlowStep) {
   const target = step.context?.before.target;
-  return !!step.context?.before.form?.label && (
-    /^(checkbox|radio|switch)$/.test(target?.controlType || '') ||
-    /^(checkbox|radio|switch)$/.test(target?.role || '')
-  );
+  if (!target)
+    return false;
+  if (!/^(checkbox|radio|switch)$/.test(target?.controlType || '') && !/^(checkbox|radio|switch)$/.test(target?.role || ''))
+    return false;
+  return !!step.context?.before.form?.label || !!stableElementText(target);
 }
 
 

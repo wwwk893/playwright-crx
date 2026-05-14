@@ -40,7 +40,7 @@ export interface SafetyPreflight {
 export function buildSafetyPreflight(recipe: UiActionRecipe, step: FlowStep): SafetyPreflight {
   const impact = criticalActionImpact(recipe, step);
   const findings = [
-    ...rowActionFindings(recipe, step),
+    ...rowActionFindings(recipe, step, impact),
     ...criticalFallbackFindings(recipe, step, impact),
   ];
   const checks = [
@@ -92,8 +92,10 @@ function criticalActionImpact(recipe: UiActionRecipe, step: FlowStep): SafetyGua
   return /\b(delete|remove|confirm|ok|destroy|trash)\b/i.test(text) || /删除|移除|确\s*定|确认/.test(text) ? 'critical' : 'normal';
 }
 
-function rowActionFindings(recipe: UiActionRecipe, step: FlowStep): SafetyGuardFinding[] {
+function rowActionFindings(recipe: UiActionRecipe, step: FlowStep, impact: SafetyGuardImpact): SafetyGuardFinding[] {
   if (recipe.operation !== 'rowAction')
+    return [];
+  if (impact !== 'critical')
     return [];
   const rowKey = recipe.locatorContract?.primaryDiagnostic?.payload?.rowKey || recipe.rowKey || step.target?.scope?.table?.rowKey || step.context?.before.table?.rowKey;
   if (rowKey)
@@ -101,7 +103,7 @@ function rowActionFindings(recipe: UiActionRecipe, step: FlowStep): SafetyGuardF
   return [{
     severity: 'critical',
     code: 'row-action-without-row-key',
-    reason: 'BAGLC safety guard blocked table row action without rowKey',
+    reason: 'BAGLC safety guard blocked critical table row action without rowKey',
     evidence: recipe.locatorContract?.primaryDiagnostic?.payload?.rowText || step.target?.scope?.table?.rowText || step.context?.before.table?.rowText || recipe.targetText || recipe.target?.testId,
   }];
 }
@@ -257,9 +259,12 @@ function renderSafetyChecks(safety: SafetyPreflight, timing: SafetyPreflightTimi
 
 function blockedSafetySource(safety: SafetyPreflight, step: FlowStep, options: { parserSafe?: boolean } = {}) {
   const finding = safety.findings.find(finding => finding.severity === 'critical') || safety.findings[0];
-  const message = `BAGLC safety guard blocked ${step.id}: ${finding?.code || 'unsafe-action'}${finding?.evidence ? ` (${finding.evidence})` : ''}`;
-  if (options.parserSafe)
-    return `await page.locator(${stringLiteral(`[data-baglc-safety-guard-blocked="${step.id}"]`)}).click(); // ${message}`;
+  const code = finding?.code || 'unsafe-action';
+  const message = `BAGLC safety guard blocked ${step.id}: ${code}${finding?.evidence ? ` (${finding.evidence})` : ''}`;
+  if (options.parserSafe) {
+    const selector = `[data-baglc-safety-guard-blocked="${step.id}"][data-baglc-reason="${code}"]`;
+    return `await page.locator(${stringLiteral(selector)}).click({ timeout: 1 }); // ${message}`;
+  }
   return `await expect(false, ${stringLiteral(message)}).toBeTruthy();`;
 }
 

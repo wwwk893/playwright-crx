@@ -1130,7 +1130,47 @@ const tests: TestCase[] = [
       assertEqual(recipe?.safetyPreflight?.findings[0]?.code, 'row-action-without-row-key');
       assert(exported.includes('BAGLC safety guard blocked s001: row-action-without-row-key'), 'exported replay should fail closed for row actions without rowKey');
       assert(parserSafe.includes('BAGLC safety guard blocked s001: row-action-without-row-key'), 'parser-safe replay should fail closed for row actions without rowKey');
+      assert(parserSafe.includes('data-baglc-reason=') && parserSafe.includes('row-action-without-row-key'), 'parser-safe blocked replay should expose the guard reason in the missing selector');
+      assert(parserSafe.includes('click({ timeout: 1 });'), 'parser-safe blocked replay should fail fast instead of waiting for the default action timeout');
       assert(!exported.includes('getByTestId("wan-transport-row-delete-action").click()'), 'blocked row action must not fall back to the reusable global test id');
+    },
+  },
+  {
+    name: 'safety guard does not block non-critical row actions without rowKey',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-view-action',
+            displayName: '查看',
+            scope: { table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 查看' } },
+          },
+          context: {
+            eventId: 'ctx-view-without-row-key',
+            capturedAt: 1000,
+            before: {
+              target: { tag: 'a', testId: 'wan-transport-row-view-action', text: '查看', framework: 'antd', controlType: 'link' },
+              table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowText: 'Nova专线 default 查看', columnName: '操作' },
+            } as any,
+          },
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.operation, 'rowAction');
+      assertEqual(recipe?.safetyPreflight?.impact, 'normal');
+      assert(recipe?.safetyPreflight?.status !== 'blocked', 'non-critical row actions without rowKey should not fail closed');
+      assert(!exported.includes('row-action-without-row-key'), 'exported replay should not block non-critical row actions without rowKey');
+      assert(!parserSafe.includes('row-action-without-row-key'), 'parser-safe replay should not block non-critical row actions without rowKey');
+      assert(exported.includes('wan-transport-row-view-action'), 'non-critical row action should still emit a scoped action locator');
     },
   },
   {
@@ -3898,6 +3938,33 @@ test('demo', async ({ page }) => {
       assertEqual(withSynthetic.steps.length, 2);
       assertEqual(withSynthetic.steps[1].target?.label, '开启代理ARP');
       assertEqual(withSynthetic.steps[1].sourceCode, 'await page.locator(\'label\').filter({ hasText: "开启代理ARP" }).click();');
+    },
+  },
+  {
+    name: 'text-labeled ProForm radio page click is not suppressed by a nearby weak recorder click',
+    run: () => {
+      const wallTime = Date.now();
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: {
+          name: 'click',
+          selector: 'internal:testid=[data-testid="network-resource-form"]',
+        },
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-proform-radio-synthetic', wallTime + 200, {
+        tag: 'label',
+        role: 'radio',
+        text: '独享地址池',
+        normalizedText: '独享地址池',
+        framework: 'procomponents',
+        controlType: 'radio',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [event]);
+
+      assertEqual(withSynthetic.steps.length, 2);
+      assertEqual(withSynthetic.steps[1].target?.text, '独享地址池');
+      assertEqual(withSynthetic.steps[1].sourceCode, 'await page.locator(\'label\').filter({ hasText: "独享地址池" }).click();');
     },
   },
   {
