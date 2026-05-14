@@ -759,6 +759,10 @@ test('case-driven human-like records network resource complex form repeat flow a
   await selectAntdOptionLikeUser(page, wanTrigger, 'edge-lab:WAN1', { searchText: 'edge-lab', ...strictHumanOptions });
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: 'WAN口' })).toContainText('edge-lab:WAN1');
 
+  const dedicatedPoolLabel = networkDialog.locator('label').filter({ hasText: '独享地址池' }).first();
+  await humanClickVisible(dedicatedPoolLabel, { delayMs: 80, ...strictHumanOptions });
+  await expect(networkDialog.locator('input[type="radio"][value="dedicated"]')).toBeChecked();
+
   const vrfTrigger = networkDialog.locator('.ant-form-item').filter({ hasText: '关联VRF' }).locator('.ant-select-selector').first();
   await selectAntdOptionLikeUser(page, vrfTrigger, '生产VRF', strictHumanOptions);
   await expect(networkDialog.locator('.ant-form-item').filter({ hasText: '关联VRF' })).toContainText('生产VRF');
@@ -821,6 +825,7 @@ test('case-driven human-like records network resource complex form repeat flow a
   await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('network-resource-add');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('res-web-01');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('edge-lab:WAN1');
+  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('独享地址池');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('生产VRF');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('https://probe.example/health');
   await expect.poll(() => visibleStepTexts(recorderPage)).toContain('华东生产区');
@@ -835,8 +840,8 @@ test('case-driven human-like records network resource complex form repeat flow a
     toStepText: 'network-resource-save',
     segmentName: '批量新建网络资源',
     minSteps: benchmarkCase.repeat_segment.selected_step_ids.length,
-    expectedDataText: /res-web-01|edge-lab:WAN1|生产VRF|https:\/\/probe\.example\/health|web|生产访问策略/,
-    requiredSelectedTexts: ['华东生产区', 'NAT集群A', 'https://probe.example/health', '生产访问策略'],
+    expectedDataText: /res-web-01|edge-lab:WAN1|独享地址池|生产VRF|https:\/\/probe\.example\/health|web|生产访问策略/,
+    requiredSelectedTexts: ['独享地址池', '华东生产区', 'NAT集群A', 'https://probe.example/health', '生产访问策略'],
   });
 
   const flow = await exportBusinessFlowJsonLikeUser(recorderPage);
@@ -847,6 +852,8 @@ test('case-driven human-like records network resource complex form repeat flow a
   expect(parameterNames).toEqual(expect.arrayContaining(['resourceName', 'port', 'context', 'scope', 'path', 'listenPort', 'remark']));
   expect(flow.artifacts.playwrightCode).toContain('for (const row of');
   expect(flow.artifacts.playwrightCode).toContain('edge-lab:WAN1');
+  expect(flow.artifacts.playwrightCode).toContain('独享地址池');
+  expect(flow.artifacts.playwrightCode).toMatch(/locator\(['"]label['"]\)\.filter\(\{ hasText: "独享地址池" \}\)\.click\(\)/);
   expect(flow.artifacts.playwrightCode).toContain('NAT集群A');
   expect(flow.artifacts.playwrightCode).toContain('https://probe.example/health');
   expect(flow.artifacts.playwrightCode).toContain('443');

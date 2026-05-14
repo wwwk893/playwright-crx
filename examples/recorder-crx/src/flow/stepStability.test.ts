@@ -983,12 +983,12 @@ const tests: TestCase[] = [
             target: { tag: 'button', testId: 'wan-transport-row-delete-action', text: '删除' },
             table: { testId: 'wan-transport-table', rowKey: 'nova_public', rowText: '公网 Nova 删除' },
           } as any,
+          after: { openedDialog: { type: 'popover', title: '删除此行？', visible: true } },
         },
         assertions: [],
       });
       const rowDisappears = deleteRecipe?.effectHints?.find(hint => hint.kind === 'row-disappears');
-      assertEqual(rowDisappears?.assertionType, 'row-not-exists');
-      assertEqual(rowDisappears?.params.rowKey, 'nova_public');
+      assert(!rowDisappears, 'delete opener that only opens Popconfirm must not assert row disappearance before confirm');
 
       const modalRecipe = buildRecipeForStep({
         id: 's-modal-save',
@@ -1013,7 +1013,7 @@ const tests: TestCase[] = [
         order: 4,
         kind: 'recorded',
         action: 'click',
-        target: { role: 'button', name: '确定' },
+        target: { role: 'button', name: '确定', scope: { table: { testId: 'wan-transport-table', rowKey: 'nova_public', rowText: '公网 Nova 删除' } } },
         context: {
           eventId: 'ctx-popconfirm-ok',
           capturedAt: 1300,
@@ -1025,6 +1025,9 @@ const tests: TestCase[] = [
         assertions: [],
       });
       assert(popconfirmRecipe?.effectHints?.some(hint => hint.kind === 'popconfirm-closed'), 'popconfirm confirm should advertise a popconfirm-closed effect hint');
+      const confirmedRowDisappears = popconfirmRecipe?.effectHints?.find(hint => hint.kind === 'row-disappears');
+      assertEqual(confirmedRowDisappears?.assertionType, 'row-not-exists');
+      assertEqual(confirmedRowDisappears?.params.rowKey, 'nova_public');
     },
   },
   {
@@ -10461,7 +10464,7 @@ test('demo', async ({ page }) => {
             id: 's001',
             order: 1,
             action: 'click',
-            target: { testId: 'network-resource-add', text: '新建网络资源' },
+            target: { testId: 'network-resource-add', text: '新建网络资源', scope: { table: { testId: 'network-resource-table' } } },
             context: {
               eventId: 'ctx-open-create',
               capturedAt: 1000,
@@ -10540,6 +10543,63 @@ test('demo', async ({ page }) => {
       assert(code.includes('page.getByTestId("network-resource-table").getByRole(\'row\').filter({ hasText: /pool-proform-alpha/ })'), 'row create effect hint should render a terminal row-exists assertion');
       assert(code.includes('page.getByTestId("network-resource-wan-select")') && code.includes('edge-lab:WAN-extra-18'), 'select effect hint should render selected-value-visible');
       assert(code.includes('.ant-modal') && code.includes('新建网络资源') && code.includes('state: "hidden"'), 'modal effect hint should render modal-closed');
+    },
+  },
+  {
+    name: 'effect hints do not infer hard row-exists table from create button naming alone',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'network-resource-create-button', text: '新建网络资源' },
+            context: {
+              eventId: 'ctx-open-create',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'network-resource-create-button', text: '新建网络资源' } },
+              after: { dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { testId: 'network-resource-name', label: '资源名称' },
+            value: 'pool-proform-alpha',
+            context: {
+              eventId: 'ctx-resource-name',
+              capturedAt: 1100,
+              before: { form: { label: '资源名称', name: 'name' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'network-resource-save', text: '保存' },
+            context: {
+              eventId: 'ctx-save-resource',
+              capturedAt: 1200,
+              before: { dialog: { type: 'modal', title: '新建网络资源', visible: true }, target: { tag: 'button', testId: 'network-resource-save', text: '保存' } },
+              after: { dialog: { type: 'modal', title: '新建网络资源', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const types = enriched.steps[2].assertions.map(assertion => assertion.type);
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!types.includes('row-exists'), 'create opener naming convention alone must not become an enabled terminal row-exists assertion');
+      assert(types.includes('modal-closed'), 'modal close terminal assertion should still be inferred for the commit action');
+      assert(!code.includes('page.getByTestId("network-resource-table")'), 'generated replay must not hard-code an inferred table id without observed table scope');
     },
   },
   {
@@ -10650,7 +10710,7 @@ test('demo', async ({ page }) => {
             id: 's004',
             order: 4,
             action: 'click',
-            target: { testId: 'site-ip-port-pool-create-button', text: '新建' },
+            target: { testId: 'site-ip-port-pool-create-button', text: '新建', scope: { table: { testId: 'site-ip-port-pool-table' } } },
             context: {
               eventId: 'ctx-open-port-pool',
               capturedAt: 1300,

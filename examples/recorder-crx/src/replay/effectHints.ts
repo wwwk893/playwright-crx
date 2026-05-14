@@ -76,6 +76,8 @@ function selectedValueEffectHint(recipe: UiActionRecipe, step: FlowStep, previou
 function rowDisappearsEffectHint(recipe: UiActionRecipe, step: FlowStep, previousStep?: FlowStep): EffectHint | undefined {
   if (recipe.operation !== 'rowAction' && recipe.operation !== 'confirm')
     return undefined;
+  if (recipe.operation === 'rowAction' && !rowActionHasDeleteCommitEvidence(step))
+    return undefined;
   const evidence = criticalText(recipe, step, previousStep);
   if (!/delete|remove|删除|移除/i.test(evidence))
     return undefined;
@@ -105,7 +107,7 @@ function rowExistsEffectHint(recipe: UiActionRecipe, step: FlowStep, previousSte
   const createOpener = createOpenerForCurrentOverlay(previousSteps, dialog);
   if (!createOpener)
     return undefined;
-  const tableTestId = inferredTableTestIdFromCreateOpener(createOpener) || tableScopeFromStep(createOpener).tableTestId;
+  const tableTestId = tableScopeFromStep(createOpener).tableTestId;
   if (!tableTestId)
     return undefined;
   const rowKeyword = createdRowKeyword(previousSteps);
@@ -216,6 +218,24 @@ function isCreateCommitStep(recipe: UiActionRecipe, step: FlowStep) {
   return /save|submit|confirm|ok|保存|提交|确 定|确定|确认|完成/i.test(criticalText(recipe, step));
 }
 
+function rowActionHasDeleteCommitEvidence(step: FlowStep) {
+  if (step.context?.after?.openedDialog?.visible)
+    return false;
+  const beforeDialog = step.context?.before.dialog || step.target?.scope?.dialog;
+  const afterDialog = step.context?.after?.dialog;
+  if (beforeDialog?.type === 'popover' && beforeDialog.visible && afterDialog?.type === 'popover' && afterDialog.visible === false)
+    return true;
+  const text = [
+    step.target?.testId,
+    step.target?.name,
+    step.target?.text,
+    step.target?.displayName,
+    step.context?.before.target?.testId,
+    step.context?.before.target?.text,
+  ].filter(Boolean).join('|');
+  return /(?:delete|remove).*?(?:confirm|ok)|(?:confirm|ok).*?(?:delete|remove)|删除.*?(?:确定|确认)|(?:确定|确认).*?删除/i.test(text);
+}
+
 function isCreateOpenerStep(step: FlowStep) {
   if (step.action !== 'click')
     return false;
@@ -300,17 +320,6 @@ function isMeaningfulRowKeyword(value: string) {
     !/^https?:\/\//i.test(value) &&
     !/^\d{1,3}(?:\.\d+)?$/.test(value) &&
     !/password|secret|token|cookie|authorization/i.test(value);
-}
-
-function inferredTableTestIdFromCreateOpener(step: FlowStep) {
-  const testId = step.target?.testId || step.context?.before.target?.testId;
-  if (!testId)
-    return undefined;
-  if (/-(create|add)-button$/i.test(testId))
-    return testId.replace(/-(create|add)-button$/i, '-table');
-  if (/-(create|add|new)$/i.test(testId))
-    return testId.replace(/-(create|add|new)$/i, '-table');
-  return undefined;
 }
 
 function tableScopeFrom(recipe: UiActionRecipe, step: FlowStep, previousStep?: FlowStep) {
