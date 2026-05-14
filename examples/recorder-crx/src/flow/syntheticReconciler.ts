@@ -67,7 +67,9 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       skippedEventIds.push(event.id);
       continue;
     }
-    if (hasSyntheticStepForEvent(steps, event) || hasRecordedClickForEvent(recorder, event)) {
+    const choiceControlEvent = isChoiceControlContext(event);
+    const hasExistingStep = choiceControlEvent ? hasExistingChoiceControlStepForEvent(steps, event) : hasSyntheticStepForEvent(steps, event);
+    if (hasExistingStep || !choiceControlEvent && hasRecordedClickForEvent(recorder, event)) {
       skippedEventIds.push(event.id);
       continue;
     }
@@ -508,6 +510,26 @@ function hasRecordedClickForEvent(recorder: FlowRecorderState, event: PageContex
   return recorder.actionLog.some(entry => recordedEntryCoversContextEvent(entry, event));
 }
 
+function hasExistingChoiceControlStepForEvent(steps: FlowStep[], event: PageContextEvent) {
+  const eventText = event.before.target ? normalizedComparableText(stableElementText(event.before.target) || '') : '';
+  if (!eventText)
+    return false;
+  return steps.some(step => {
+    if (step.action !== 'click')
+      return false;
+    const text = normalizedComparableText(step.target?.text || step.target?.name || step.target?.displayName || rawTextFromSelector(recorderSelectorForStep(step)) || '');
+    if (text !== eventText)
+      return false;
+    const rawControlType = rawTargetControlType(step.target?.raw);
+    const role = step.target?.role || '';
+    if (!/^(checkbox|radio|switch)$/.test(rawControlType) && !/^(checkbox|radio|switch)$/.test(role))
+      return false;
+    const eventWallTime = Number(event.wallTime ?? 0);
+    const existingWallTime = stepWallTime(step);
+    return !eventWallTime || typeof existingWallTime !== 'number' || Math.abs(existingWallTime - eventWallTime) < 2000;
+  });
+}
+
 function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: PageContextEvent) {
   const action = normalizeAction(asRecord(entry.rawAction) as ActionInContextLike);
   if (action.name !== 'click')
@@ -810,10 +832,10 @@ function mergeRecordedAndSyntheticTarget(recorded?: FlowTarget, synthetic?: Flow
 }
 
 function syntheticClickCoveredByRecordedStep(syntheticStep: FlowStep, draft: StepDraft) {
-  if (targetsLikelySame(syntheticStep.target, draft.step.target))
-    return true;
   if (isDropdownOptionContext(syntheticStep.context?.before.target) || isChoiceControlStep(syntheticStep))
     return false;
+  if (targetsLikelySame(syntheticStep.target, draft.step.target))
+    return true;
   const syntheticWallTime = Number(asRecord(syntheticStep.rawAction).syntheticContextEventWallTime ?? 0);
   const recordedWallTime = draft.entries.map(entry => entry.wallTime).find((value): value is number => typeof value === 'number');
   return !!syntheticWallTime && !!recordedWallTime && Math.abs(recordedWallTime - syntheticWallTime) < 1500;

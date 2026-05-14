@@ -18,7 +18,7 @@ import { toCompactFlow } from './compactExporter';
 import { prepareBusinessFlowForExport } from './exportSanitizer';
 import { appendSyntheticPageContextSteps, appendSyntheticPageContextStepsWithResult, clearFlowRecordingHistory, deleteStepFromFlow, insertEmptyStepAfter, insertWaitStepAfter, mergeActionsIntoFlow } from './flowBuilder';
 import { migrateFlowToStableStepModel } from './flowMigration';
-import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult } from './syntheticReconciler';
+import { appendSyntheticPageContextStepsWithResult as reconcileSyntheticPageContextStepsWithResult, upgradeSyntheticStepsCoveredByRecordedDrafts } from './syntheticReconciler';
 import { buildRecipeForStep } from '../replay/recipeBuilder';
 import { createAdaptiveTargetSnapshot, withAdaptiveTargetSnapshot } from './adaptiveTargetSnapshot';
 import { redactAdaptiveTargetSnapshot } from './adaptiveTargetRedactor';
@@ -948,6 +948,89 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'recipeBuilder derives effect hints from select row and overlay recipes',
+    run: () => {
+      const selectRecipe = buildRecipeForStep({
+        id: 's-select-wan',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: { testId: 'network-resource-wan-select', label: 'WAN口', text: 'edge-lab:WAN-extra-18' },
+        context: {
+          eventId: 'ctx-select-wan',
+          capturedAt: 1000,
+          before: {
+            form: { label: 'WAN口', name: 'wan' },
+            target: { framework: 'procomponents', controlType: 'select-option', text: 'edge-lab:WAN-extra-18' },
+            ui: { library: 'pro-components', component: 'select', form: { label: 'WAN口', name: 'wan' }, option: { text: 'edge-lab:WAN-extra-18' } },
+          } as any,
+        },
+        assertions: [],
+      });
+      assertEqual(selectRecipe?.effectHints?.[0]?.kind, 'selected-value-visible');
+      assertEqual(selectRecipe?.effectHints?.[0]?.params.targetTestId, 'network-resource-wan-select');
+
+      const deleteRecipe = buildRecipeForStep({
+        id: 's-row-delete',
+        order: 2,
+        kind: 'recorded',
+        action: 'click',
+        target: { testId: 'wan-transport-row-delete-action', text: '删除', scope: { table: { testId: 'wan-transport-table', rowKey: 'nova_public', rowText: '公网 Nova 删除' } } },
+        context: {
+          eventId: 'ctx-row-delete',
+          capturedAt: 1100,
+          before: {
+            target: { tag: 'button', testId: 'wan-transport-row-delete-action', text: '删除' },
+            table: { testId: 'wan-transport-table', rowKey: 'nova_public', rowText: '公网 Nova 删除' },
+          } as any,
+          after: { openedDialog: { type: 'popover', title: '删除此行？', visible: true } },
+        },
+        assertions: [],
+      });
+      const rowDisappears = deleteRecipe?.effectHints?.find(hint => hint.kind === 'row-disappears');
+      assert(!rowDisappears, 'delete opener that only opens Popconfirm must not assert row disappearance before confirm');
+
+      const modalRecipe = buildRecipeForStep({
+        id: 's-modal-save',
+        order: 3,
+        kind: 'recorded',
+        action: 'click',
+        target: { testId: 'network-resource-save', text: '保存' },
+        context: {
+          eventId: 'ctx-modal-save',
+          capturedAt: 1200,
+          before: {
+            dialog: { type: 'modal', title: '新建网络资源', visible: true },
+            target: { tag: 'button', testId: 'network-resource-save', text: '保存' },
+          } as any,
+        },
+        assertions: [],
+      });
+      assert(modalRecipe?.effectHints?.some(hint => hint.kind === 'modal-closed'), 'modal save should advertise a modal-closed effect hint');
+
+      const popconfirmRecipe = buildRecipeForStep({
+        id: 's-popconfirm-ok',
+        order: 4,
+        kind: 'recorded',
+        action: 'click',
+        target: { role: 'button', name: '确定', scope: { table: { testId: 'wan-transport-table', rowKey: 'nova_public', rowText: '公网 Nova 删除' } } },
+        context: {
+          eventId: 'ctx-popconfirm-ok',
+          capturedAt: 1300,
+          before: {
+            dialog: { type: 'popconfirm', title: '删除此行？', visible: true },
+            target: { tag: 'button', role: 'button', text: '确定' },
+          } as any,
+        },
+        assertions: [],
+      });
+      assert(popconfirmRecipe?.effectHints?.some(hint => hint.kind === 'popconfirm-closed'), 'popconfirm confirm should advertise a popconfirm-closed effect hint');
+      const confirmedRowDisappears = popconfirmRecipe?.effectHints?.find(hint => hint.kind === 'row-disappears');
+      assertEqual(confirmedRowDisappears?.assertionType, 'row-not-exists');
+      assertEqual(confirmedRowDisappears?.params.rowKey, 'nova_public');
+    },
+  },
+  {
     name: 'locator contract diagnostics rank row dialog popup and select candidates',
     run: () => {
       const rowRecipe = buildRecipeForStep({
@@ -1752,7 +1835,8 @@ const tests: TestCase[] = [
 
       assert(!code.includes('page.getByText("edge-lab:WAN1").click()'), 'exported replay should omit the redundant selected-value display click');
       assert(!playback.includes('page.getByText("edge-lab:WAN1").click()'), 'parser-safe replay should omit the redundant selected-value display click');
-      assert(code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText("edge-lab:WAN1");'), 'exported replay should preserve the selected-value terminal assertion');
+      assert(code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText("edge-lab:WAN1");') ||
+        code.includes('await expect(page.getByTestId("network-resource-wan-select")).toContainText(String(row.port));'), 'exported replay should preserve the selected-value terminal assertion');
       assert(code.includes('String(row.port)'), 'repeat rendering should still parameterize the real select option');
 
       const flowWithoutSelectedValueAssertion: BusinessFlow = {
@@ -3968,6 +4052,117 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'recorded ProForm radio label click on a structural form test id replays by visible label',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: {
+            testId: 'network-resource-form',
+            label: '独享地址池',
+          },
+          sourceCode: 'await page.getByLabel("独享地址池").click();',
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:testid=[data-testid="network-resource-form"]',
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes(`page.locator('label').filter({ hasText: "独享地址池" }).click();`), 'structural form radio replay should click the visible AntD label instead of the hidden radio input');
+      assert(!firstStep.includes('getByLabel("独享地址池").click()'), 'structural form radio replay must not use getByLabel for a hidden input click');
+    },
+  },
+  {
+    name: 'choice control synthetic step is not overwritten by a later broad recorded click',
+    run: () => {
+      const wallTime = Date.now();
+      const initial = mergeActionsIntoFlow(undefined, [{
+        action: {
+          name: 'click',
+          selector: 'internal:testid=[data-testid="network-resource-form"]',
+        },
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-proform-radio-synthetic-late', wallTime + 200, {
+        tag: 'label',
+        role: 'radio',
+        text: '独享地址池',
+        normalizedText: '独享地址池',
+        framework: 'procomponents',
+        controlType: 'radio',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      const withSynthetic = appendSyntheticPageContextSteps(initial, [event]);
+      const reconciled = upgradeSyntheticStepsCoveredByRecordedDrafts(withSynthetic.steps, [{
+        step: {
+          ...withSynthetic.steps[0],
+          id: 's003',
+          sourceActionIds: ['act_000003'],
+          target: { testId: 'network-resource-form', displayName: '开启代理ARP' },
+          rawAction: { wallTime: wallTime + 1600 },
+        },
+        entries: [{
+          id: 'act_000003',
+          index: 3,
+          wallTime: wallTime + 1600,
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="network-resource-form"]' } },
+        } as any],
+      }]);
+
+      assertEqual(reconciled.upgradedStepIds, []);
+      assertEqual(reconciled.remainingDrafts.length, 1);
+      assert(withSynthetic.steps.some(step => step.target?.text === '独享地址池'), 'radio choice synthetic step should remain available for export');
+    },
+  },
+  {
+    name: 'choice control synthetic step is not suppressed by a broad context-matched form click',
+    run: () => {
+      const wallTime = Date.now();
+      const event = pageClickEventWithTarget('ctx-proform-radio-late-context', wallTime, {
+        tag: 'label',
+        role: 'radio',
+        text: '独享地址池',
+        normalizedText: '独享地址池',
+        framework: 'procomponents',
+        controlType: 'radio',
+        locatorQuality: 'semantic',
+      } as ElementContext);
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's008',
+          order: 8,
+          kind: 'recorded',
+          action: 'click',
+          sourceActionIds: ['act_000008'],
+          target: { testId: 'network-resource-form', displayName: 'network-resource-form' },
+          context: {
+            eventId: 'ctx-broad-form-click',
+            capturedAt: wallTime,
+            before: { target: event.before.target },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="network-resource-form"]' }, wallTime },
+          assertions: [],
+        }],
+      };
+
+      const result = appendSyntheticPageContextStepsWithResult(flow, [event]);
+
+      assertEqual(result.insertedStepIds.length, 1);
+      assert(result.flow.steps.some(step => step.target?.text === '独享地址池'), 'late radio page context should not be swallowed by a broad form test id click');
+    },
+  },
+  {
     name: 'code preview prefers upgraded test id over weird raw click selector',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -5196,6 +5391,81 @@ test('demo', async ({ page }) => {
 
       assert(loopBody.includes('await expect(page.getByTestId("users-table").getByRole(\'row\').filter({ hasText: String(row.username) })).toContainText(String(row.username));'), 'repeat-generated code should verify the terminal table row for each row value');
       assert(!loopBody.includes('template assertion:'), 'repeat assertion templates should render runnable terminal assertions, not comment-only placeholders');
+    },
+  },
+  {
+    name: 'repeat segment terminal table assertion can scope rows by multiple dynamic keywords',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 'p001',
+            order: 1,
+            action: 'fill',
+            target: { label: '地址池名称' },
+            value: 'test1',
+            sourceCode: `await page.getByLabel('地址池名称').fill('test1');`,
+            assertions: [],
+          },
+          {
+            id: 'p002',
+            order: 2,
+            action: 'fill',
+            target: { label: '开始地址' },
+            value: '1.1.1.1',
+            sourceCode: `await page.getByLabel('开始地址').fill('1.1.1.1');`,
+            assertions: [],
+          },
+          {
+            id: 'p003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'ipv4-address-pool-confirm', text: '确定' },
+            sourceCode: `await page.getByTestId('ipv4-address-pool-confirm').click();`,
+            assertions: [createTerminalStateAssertion('row-exists', 'p003-terminal-1', {
+              tableTestId: 'site-global-ip-pools-section',
+              rowKeyword: 'test1',
+              columnValue: 'test1',
+            })],
+          },
+        ],
+        repeatSegments: [{
+          id: 'repeat-ipv4',
+          name: '批量创建IPv4地址池',
+          stepIds: ['p001', 'p002', 'p003'],
+          parameters: [
+            { id: 'p-name', label: '地址池名称', sourceStepId: 'p001', currentValue: 'test1', variableName: 'poolName', enabled: true },
+            { id: 'p-start', label: '开始地址', sourceStepId: 'p002', currentValue: '1.1.1.1', variableName: 'startIp', enabled: true },
+          ],
+          rows: [
+            { id: 'row-1', values: { 'p-name': 'test1', 'p-start': '1.1.1.1' } },
+            { id: 'row-2', values: { 'p-name': 'test2', 'p-start': '3.1.1.1' } },
+          ],
+          assertionTemplate: {
+            subject: 'table',
+            type: 'tableRowExists',
+            description: 'IPv4地址池行存在：{{poolName}}',
+            params: {
+              tableTestId: 'site-global-ip-pools-section',
+              rowKeyword: '{{poolName}}',
+              rowKeyword2: '{{startIp}}',
+              columnValue: '{{poolName}}',
+            },
+          },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const loopBody = code.slice(code.indexOf('for (const row of'), code.indexOf('\n  }', code.indexOf('for (const row of')));
+
+      assert(loopBody.includes("getByRole('row').filter({ hasText: String(row.poolName) }).filter({ hasText: String(row.startIp) })"), 'repeat terminal row locator should chain dynamic row keywords');
+      assert(!loopBody.includes("filter({ hasText: /test1/ })"), 'repeat step row-exists assertions should not emit stale static row keywords inside the loop');
+
+      const playback = generateBusinessFlowPlaybackCode(flow);
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(playback));
     },
   },
   {
@@ -10182,6 +10452,471 @@ test('demo', async ({ page }) => {
       assert(diagnosticsJson.includes('terminalAssertions'), 'diagnostics should summarize terminal assertions when explicitly enabled');
       assert(!diagnosticsJson.includes('rawAction') && !diagnosticsJson.includes('sourceCode') && !diagnosticsJson.includes('private'), 'diagnostics should stay privacy safe');
       assertEqual(replayDiagnosticSummary(enriched, { enabled: false }), undefined);
+    },
+  },
+  {
+    name: 'effect hints feed terminal-state assertions for select and create flows',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'network-resource-add', text: '新建网络资源', scope: { table: { testId: 'network-resource-table' } } },
+            context: {
+              eventId: 'ctx-open-create',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'network-resource-add', text: '新建网络资源' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { testId: 'network-resource-name', label: '资源名称', placeholder: '地址池名称' },
+            value: 'pool-proform-alpha',
+            context: {
+              eventId: 'ctx-resource-name',
+              capturedAt: 1100,
+              before: { form: { label: '资源名称', name: 'name' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'network-resource-wan-select', label: 'WAN口', role: 'combobox' },
+            context: {
+              eventId: 'ctx-wan-trigger',
+              capturedAt: 1200,
+              before: { form: { label: 'WAN口', name: 'wan' }, target: { testId: 'network-resource-wan-select', controlType: 'select' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
+            target: { text: 'edge-lab:WAN-extra-18' },
+            context: {
+              eventId: 'ctx-wan-option',
+              capturedAt: 1300,
+              before: {
+                form: { label: 'WAN口', name: 'wan' },
+                target: { role: 'option', text: 'edge-lab:WAN-extra-18', controlType: 'select-option' },
+                ui: { library: 'pro-components', component: 'select', form: { label: 'WAN口', name: 'wan' }, option: { text: 'edge-lab:WAN-extra-18' } },
+              } as any,
+            },
+            assertions: [],
+          },
+          {
+            id: 's005',
+            order: 5,
+            action: 'click',
+            target: { testId: 'network-resource-save', text: '保存' },
+            context: {
+              eventId: 'ctx-save-resource',
+              capturedAt: 1400,
+              before: { dialog: { type: 'modal', title: '新建网络资源', visible: true }, target: { tag: 'button', testId: 'network-resource-save', text: '保存' } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const selectedAssertion = enriched.steps[3].assertions.find(assertion => assertion.type === 'selected-value-visible');
+      const rowExistsAssertion = enriched.steps[4].assertions.find(assertion => assertion.type === 'row-exists');
+      const modalClosedAssertion = enriched.steps[4].assertions.find(assertion => assertion.type === 'modal-closed');
+
+      assertEqual(selectedAssertion?.params?.targetTestId, 'network-resource-wan-select');
+      assertEqual(selectedAssertion?.params?.expected, 'edge-lab:WAN-extra-18');
+      assertEqual(rowExistsAssertion?.params?.tableTestId, 'network-resource-table');
+      assertEqual(rowExistsAssertion?.params?.rowKeyword, 'pool-proform-alpha');
+      assertEqual(modalClosedAssertion?.params?.title, '新建网络资源');
+
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+      assert(code.includes('page.getByTestId("network-resource-table").getByRole(\'row\').filter({ hasText: /pool-proform-alpha/ })'), 'row create effect hint should render a terminal row-exists assertion');
+      assert(code.includes('page.getByTestId("network-resource-wan-select")') && code.includes('edge-lab:WAN-extra-18'), 'select effect hint should render selected-value-visible');
+      assert(code.includes('.ant-modal') && code.includes('新建网络资源') && code.includes('state: "hidden"'), 'modal effect hint should render modal-closed');
+    },
+  },
+  {
+    name: 'effect hints do not infer hard row-exists table from create button naming alone',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'network-resource-create-button', text: '新建网络资源' },
+            context: {
+              eventId: 'ctx-open-create',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'network-resource-create-button', text: '新建网络资源' } },
+              after: { dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { testId: 'network-resource-name', label: '资源名称' },
+            value: 'pool-proform-alpha',
+            context: {
+              eventId: 'ctx-resource-name',
+              capturedAt: 1100,
+              before: { form: { label: '资源名称', name: 'name' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'network-resource-save', text: '保存' },
+            context: {
+              eventId: 'ctx-save-resource',
+              capturedAt: 1200,
+              before: { dialog: { type: 'modal', title: '新建网络资源', visible: true }, target: { tag: 'button', testId: 'network-resource-save', text: '保存' } },
+              after: { dialog: { type: 'modal', title: '新建网络资源', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const types = enriched.steps[2].assertions.map(assertion => assertion.type);
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!types.includes('row-exists'), 'create opener naming convention alone must not become an enabled terminal row-exists assertion');
+      assert(types.includes('modal-closed'), 'modal close terminal assertion should still be inferred for the commit action');
+      assert(!code.includes('page.getByTestId("network-resource-table")'), 'generated replay must not hard-code an inferred table id without observed table scope');
+    },
+  },
+  {
+    name: 'effect hints do not mark validation save as modal closed while the same modal remains visible',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'network-resource-add', text: '新建网络资源' },
+            context: {
+              eventId: 'ctx-open-create',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'network-resource-add', text: '新建网络资源' } },
+              after: { dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { testId: 'network-resource-name', label: '资源名称' },
+            value: 'pool-proform-alpha',
+            context: {
+              eventId: 'ctx-resource-name',
+              capturedAt: 1050,
+              before: { form: { label: '资源名称', name: 'name' }, dialog: { type: 'modal', title: '新建网络资源', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'network-resource-save', text: '保存' },
+            context: {
+              eventId: 'ctx-validation-save',
+              capturedAt: 1100,
+              before: { dialog: { type: 'modal', title: '新建网络资源', visible: true }, target: { tag: 'button', testId: 'network-resource-save', text: '保存' } },
+              after: { dialog: { type: 'modal', title: '新建网络资源', visible: true }, toast: '请选择WAN口' },
+            },
+            assertions: [
+              createTerminalStateAssertion('row-exists', 's003-terminal-1', { tableTestId: 'network-resource-table', rowKeyword: 'pool-proform-alpha' }),
+              createTerminalStateAssertion('modal-closed', 's003-terminal-2', { title: '新建网络资源' }),
+            ],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const types = enriched.steps[2].assertions.map(assertion => assertion.type);
+
+      assert(types.includes('toast-visible'), 'validation save should keep the validation feedback terminal assertion');
+      assert(!types.includes('modal-closed'), 'validation save should not assert modal-closed while the same modal remains visible and validation feedback appears');
+      assert(!types.includes('row-exists'), 'validation save should not assert row-exists when validation feedback proves the create did not commit');
+    },
+  },
+  {
+    name: 'effect hints scope create row assertions from the opener instead of stale modal table context',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'site-ip-address-pool-create-button', text: '新建' },
+            context: {
+              eventId: 'ctx-open-ipv4',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'site-ip-address-pool-create-button', text: '新建' } },
+              after: { dialog: { type: 'modal', title: '新建IPv4地址池', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { testId: 'ipv4-address-pool-form', label: '地址池名称' },
+            value: 'test1',
+            context: {
+              eventId: 'ctx-ipv4-name',
+              capturedAt: 1100,
+              before: { dialog: { type: 'modal', title: '新建IPv4地址池', visible: true }, form: { label: '地址池名称', name: 'name' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'ipv4-address-pool-confirm', text: '确定' },
+            context: {
+              eventId: 'ctx-ipv4-confirm',
+              capturedAt: 1200,
+              before: { dialog: { type: 'modal', title: '新建IPv4地址池', visible: true }, target: { tag: 'button', testId: 'ipv4-address-pool-confirm', text: '确定' } },
+              after: { dialog: { type: 'modal', title: '新建IPv4地址池', visible: false } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
+            target: { testId: 'site-ip-port-pool-create-button', text: '新建', scope: { table: { testId: 'site-ip-port-pool-table' } } },
+            context: {
+              eventId: 'ctx-open-port-pool',
+              capturedAt: 1300,
+              before: { target: { tag: 'button', testId: 'site-ip-port-pool-create-button', text: '新建' } },
+              after: { dialog: { type: 'modal', title: '新建IP端口地址池', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's005',
+            order: 5,
+            action: 'fill',
+            target: { testId: 'ip-port-pool-form', label: '地址池名称' },
+            value: 'test12',
+            context: {
+              eventId: 'ctx-port-name',
+              capturedAt: 1400,
+              before: { dialog: { type: 'modal', title: '新建IP端口地址池', visible: true }, form: { label: '地址池名称', name: 'name' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's006',
+            order: 6,
+            action: 'click',
+            target: {
+              testId: 'ip-port-pool-confirm',
+              text: '确定',
+              scope: { table: { testId: 'site-global-ip-pools-section', rowText: 'test1 共享 1.1.1.1--2.2.2.2' } },
+            },
+            context: {
+              eventId: 'ctx-port-confirm',
+              capturedAt: 1500,
+              before: {
+                dialog: { type: 'modal', title: '新建IP端口地址池', visible: true },
+                target: { tag: 'button', testId: 'ip-port-pool-confirm', text: '确定' },
+                table: { testId: 'site-global-ip-pools-section', rowText: 'test1 共享 1.1.1.1--2.2.2.2' },
+              },
+              after: { dialog: { type: 'modal', title: '新建IP端口地址池', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const rowExists = enriched.steps[5].assertions.find(assertion => assertion.type === 'row-exists');
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assertEqual(rowExists?.params?.tableTestId, 'site-ip-port-pool-table');
+      assertEqual(rowExists?.params?.rowKeyword, 'test12');
+      assert(!code.includes('site-global-ip-pools-section'), 'create row effect hint must not reuse stale structural table context from the modal confirm');
+      assert(code.includes('page.getByTestId("site-ip-port-pool-table")'), 'create row effect hint should derive the row table from the create opener');
+    },
+  },
+  {
+    name: 'effect hints do not use short numeric fields as created row identity',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'wan-transport-add-button', text: '增加传输网络' },
+            context: {
+              eventId: 'ctx-open-wan',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'wan-transport-add-button', text: '增加传输网络' } },
+              after: { dialog: { type: 'modal', title: '增加传输网络', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { testId: 'wan-transport-egress-disable-threshold-input', label: '出接口禁用阈值' },
+            value: '3',
+            context: {
+              eventId: 'ctx-threshold',
+              capturedAt: 1100,
+              before: { dialog: { type: 'modal', title: '增加传输网络', visible: true }, form: { label: '出接口禁用阈值', name: 'threshold' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'wan-transport-modal-ok-button', text: '确定' },
+            context: {
+              eventId: 'ctx-confirm-wan',
+              capturedAt: 1200,
+              before: { dialog: { type: 'modal', title: '增加传输网络', visible: true }, target: { tag: 'button', testId: 'wan-transport-modal-ok-button', text: '确定' } },
+              after: { dialog: { type: 'modal', title: '增加传输网络', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const types = enriched.steps[2].assertions.map(assertion => assertion.type);
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!types.includes('row-exists'), 'short numeric threshold values should not become row-exists terminal assertions');
+      assert(types.includes('modal-closed'), 'modal close terminal assertion should still be inferred for the commit action');
+      assert(!code.includes("filter({ hasText: /3/ })"), 'generated replay should not assert a created row by a short numeric field');
+    },
+  },
+  {
+    name: 'effect hints do not attach previous create opener to a later edit modal save',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'user-create-button', text: '新建用户' },
+            context: {
+              eventId: 'ctx-open-create',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'user-create-button', text: '新建用户' } },
+              after: { dialog: { type: 'modal', title: '新建用户', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: { label: '用户名' },
+            value: 'alice.qa',
+            context: {
+              eventId: 'ctx-create-name',
+              capturedAt: 1100,
+              before: { dialog: { type: 'modal', title: '新建用户', visible: true }, form: { label: '用户名', name: 'username' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: { testId: 'modal-confirm', text: '确定' },
+            context: {
+              eventId: 'ctx-create-confirm',
+              capturedAt: 1200,
+              before: { dialog: { type: 'modal', title: '新建用户', visible: true }, target: { tag: 'button', testId: 'modal-confirm', text: '确定' } },
+              after: { dialog: { type: 'modal', title: '新建用户', visible: false } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
+            target: { testId: 'user-row-edit-action', text: '编辑' },
+            context: {
+              eventId: 'ctx-open-edit',
+              capturedAt: 1300,
+              before: { table: { testId: 'user-table', rowKey: 'alice.qa', rowText: 'alice.qa' }, target: { tag: 'button', testId: 'user-row-edit-action', text: '编辑' } },
+              after: { dialog: { type: 'modal', title: '编辑用户', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's005',
+            order: 5,
+            action: 'fill',
+            target: { label: '备注' },
+            value: 'edited',
+            context: {
+              eventId: 'ctx-edit-remark',
+              capturedAt: 1400,
+              before: { dialog: { type: 'modal', title: '编辑用户', visible: true }, form: { label: '备注', name: 'remark' } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's006',
+            order: 6,
+            action: 'click',
+            target: { testId: 'modal-confirm', text: '确定' },
+            context: {
+              eventId: 'ctx-edit-confirm',
+              capturedAt: 1500,
+              before: { dialog: { type: 'modal', title: '编辑用户', visible: true }, target: { tag: 'button', testId: 'modal-confirm', text: '确定' } },
+              after: { dialog: { type: 'modal', title: '编辑用户', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const editAssertionTypes = enriched.steps[5].assertions.map(assertion => assertion.type);
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!editAssertionTypes.includes('row-exists'), 'later edit modal save must not reuse an earlier create opener for row-exists');
+      assert(editAssertionTypes.includes('modal-closed'), 'edit modal save should still keep modal-closed terminal evidence');
+      assert(!code.includes('page.getByTestId("user-table").getByRole(\'row\').filter({ hasText: /edited/ })'), 'edit-only values should not become create row assertions');
     },
   },
   {

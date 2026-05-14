@@ -44,7 +44,7 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
             continue;
           if (isTruncatedSelectedValueDisplayEchoClick(segmentStep, previousSegmentStep))
             continue;
-          count += countStepActions(segmentStep, { parserSafe: true, previousStep: previousSegmentStep, nextStep: segmentSteps[stepIndex + 1] });
+          count += countStepActions(segmentStep, { parserSafe: true, previousStep: previousSegmentStep, nextStep: segmentSteps[stepIndex + 1], suppressRowExistsAssertions: !!segment.assertionTemplate });
           previousSegmentStep = segmentStep;
         }
       }

@@ -227,16 +227,35 @@ function createAssertionTemplate(parameters: FlowRepeatParameter[]): FlowRepeatS
   const nameParameter = parameters.find(parameter => /名称|name|pool/i.test(`${parameter.label} ${parameter.variableName}`));
   if (!nameParameter)
     return undefined;
+  const secondaryKeywords = assertionTemplateSecondaryKeywords(parameters, nameParameter);
   return {
     subject: 'table',
     type: 'tableRowExists',
     description: `表格行存在：${nameParameter.label} = {{${nameParameter.variableName}}}`,
     params: {
       rowKeyword: `{{${nameParameter.variableName}}}`,
+      ...Object.fromEntries(secondaryKeywords.map((parameter, index) => [`rowKeyword${index + 2}`, `{{${parameter.variableName}}}`])),
       columnName: nameParameter.label,
       columnValue: `{{${nameParameter.variableName}}}`,
     },
   };
+}
+
+function assertionTemplateSecondaryKeywords(parameters: FlowRepeatParameter[], primary: FlowRepeatParameter) {
+  const priority = (parameter: FlowRepeatParameter) => {
+    const text = `${parameter.label} ${parameter.variableName}`;
+    if (/rowKey|行|key|id/i.test(text))
+      return 1;
+    if (/ip|地址|start|end|range|范围/i.test(text))
+      return 2;
+    if (/port|wan|端口/i.test(text))
+      return 3;
+    return 4;
+  };
+  return parameters
+      .filter(parameter => parameter.enabled && parameter.id !== primary.id && parameter.currentValue)
+      .sort((left, right) => priority(left) - priority(right))
+      .slice(0, 3);
 }
 
 function defaultSegmentName(flow: BusinessFlow) {

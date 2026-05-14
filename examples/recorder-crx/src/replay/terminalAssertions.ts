@@ -43,10 +43,28 @@ function repeatTableRowLocator(segment: FlowRepeatSegment, params: Record<string
   const rowKey = repeatTemplateStaticText(params.rowKey, segment);
   if (rowKey)
     return `${tableLocator}.locator(${stringLiteral(`tr[data-row-key="${cssAttributeValue(rowKey)}"], [role="row"][data-row-key="${cssAttributeValue(rowKey)}"]`)})`;
-  const rowKeyword = repeatTemplateExpression(params.rowKeyword || params.columnValue || params.expected, segment);
-  if (rowKeyword)
-    return `${tableLocator}.getByRole('row').filter({ hasText: ${rowKeyword} })`;
+  const rowKeywords = repeatRowKeywordExpressions(params, segment);
+  if (rowKeywords.length)
+    return rowKeywords.reduce((locator, keyword) => `${locator}.filter({ hasText: ${keyword} })`, `${tableLocator}.getByRole('row')`);
   return `${tableLocator}.getByRole('row').first()`;
+}
+
+function repeatRowKeywordExpressions(params: Record<string, string | number | boolean | undefined>, segment: FlowRepeatSegment) {
+  const values = [
+    params.rowKeyword,
+    params.rowKeyword2,
+    params.rowKeyword3,
+    params.rowKeyword4,
+    params.columnValue,
+    params.expected,
+  ];
+  const expressions: string[] = [];
+  for (const value of values) {
+    const expression = repeatTemplateExpression(value, segment);
+    if (expression && !expressions.includes(expression))
+      expressions.push(expression);
+  }
+  return expressions;
 }
 
 function repeatTemplateExpression(value: unknown, segment: FlowRepeatSegment) {
