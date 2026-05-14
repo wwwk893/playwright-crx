@@ -5,6 +5,7 @@
  */
 import type { UiLibrary } from '../uiSemantics/types';
 import type { FlowStep } from '../flow/types';
+import { buildLocatorContract } from './locatorCandidates';
 import {
   type LegacyUiActionRecipeKind,
   type UiActionFramework,
@@ -14,21 +15,16 @@ import {
   type UiActionRecipeOption,
   type UiActionRecipeTarget,
   type UiActionReplayContract,
-} from '../uiSemantics/recipes';
+} from './types';
 
 export function buildRecipeForStep(step: FlowStep): UiActionRecipe | undefined {
-  if (step.uiRecipe?.version === 1)
-    return step.uiRecipe;
-
-  if (step.action === 'fill')
-    return fillRecipe(step);
-  if (step.action === 'select')
-    return selectRecipe(step);
-  if (step.action === 'check' || step.action === 'uncheck')
-    return toggleRecipe(step);
-  if (step.action === 'click')
-    return clickRecipe(step);
-  return normalizeLegacyRecipe(step);
+  const recipe = step.uiRecipe?.version === 1 ? step.uiRecipe :
+    step.action === 'fill' ? fillRecipe(step) :
+      step.action === 'select' ? selectRecipe(step) :
+        step.action === 'check' || step.action === 'uncheck' ? toggleRecipe(step) :
+          step.action === 'click' ? clickRecipe(step) :
+            normalizeLegacyRecipe(step);
+  return recipe ? withLocatorContract(recipe, step) : undefined;
 }
 
 function fillRecipe(step: FlowStep): UiActionRecipe {
@@ -208,6 +204,13 @@ function makeRecipe(options: {
     framework,
     replay: replayFor({ operation: options.operation, framework, component: options.component }),
     ...options,
+  };
+}
+
+function withLocatorContract(recipe: UiActionRecipe, step: FlowStep): UiActionRecipe {
+  return {
+    ...recipe,
+    locatorContract: buildLocatorContract(recipe, step),
   };
 }
 
