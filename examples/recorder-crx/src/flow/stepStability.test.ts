@@ -948,6 +948,154 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'locator contract diagnostics rank row dialog popup and select candidates',
+    run: () => {
+      const rowRecipe = buildRecipeForStep({
+        id: 's-row-edit',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: { testId: 'user-row-edit', role: 'button', name: '编辑', scope: { table: { title: '用户管理', rowKey: 'user-42', testId: 'users-table' } } },
+        context: {
+          eventId: 'ctx-row-edit',
+          capturedAt: 1000,
+          before: {
+            target: { tag: 'button', role: 'button', testId: 'user-row-edit', text: '编辑' },
+            table: { title: '用户管理', testId: 'users-table', rowKey: 'user-42', columnName: '操作' },
+          } as any,
+        },
+        assertions: [],
+      });
+      const selectRecipe = buildRecipeForStep({
+        id: 's-select-wan',
+        order: 2,
+        kind: 'recorded',
+        action: 'select',
+        target: { label: 'WAN口' },
+        value: 'edge-lab:WAN-extra-18',
+        context: {
+          eventId: 'ctx-select-wan',
+          capturedAt: 1100,
+          before: {
+            form: { label: 'WAN口', name: 'wan' },
+            target: { framework: 'procomponents', controlType: 'select-option', selectedOption: 'edge-lab:WAN-extra-18' },
+            ui: { library: 'pro-components', component: 'select', form: { label: 'WAN口', name: 'wan' } },
+          } as any,
+        },
+        rawAction: { action: { name: 'select', searchText: 'WAN-extra-18' } },
+        assertions: [],
+      });
+      const modalRecipe = buildRecipeForStep({
+        id: 's-modal-save',
+        order: 3,
+        kind: 'recorded',
+        action: 'click',
+        target: { testId: 'network-resource-save', role: 'button', name: '保存' },
+        context: {
+          eventId: 'ctx-modal-save',
+          capturedAt: 1200,
+          before: {
+            dialog: { type: 'modal', title: '新建网络资源', visible: true },
+            target: { tag: 'button', role: 'button', testId: 'network-resource-save', text: '保存' },
+          } as any,
+        },
+        assertions: [],
+      });
+      const popconfirmRecipe = buildRecipeForStep({
+        id: 's-popconfirm-ok',
+        order: 4,
+        kind: 'recorded',
+        action: 'click',
+        target: { role: 'button', name: '确定' },
+        context: {
+          eventId: 'ctx-popconfirm-ok',
+          capturedAt: 1300,
+          before: {
+            dialog: { type: 'popconfirm', title: '删除此行？', visible: true },
+            target: { tag: 'button', role: 'button', text: '确定' },
+          } as any,
+        },
+        assertions: [],
+      });
+
+      assertEqual(rowRecipe?.locatorContract?.primary?.kind, 'row-scoped-testid');
+      assert(rowRecipe?.locatorContract?.primary?.value.includes('rowKey=user-42'), 'row-scoped locator should keep row key evidence');
+      assertEqual(rowRecipe?.locatorContract?.primary?.payload?.rowKey, 'user-42');
+      assertEqual(rowRecipe?.locatorContract?.primaryDiagnostic?.kind, rowRecipe?.locatorContract?.primary?.kind);
+      assertEqual(rowRecipe?.locatorContract?.primaryExecutable, undefined);
+      assertEqual(selectRecipe?.locatorContract?.primary?.kind, 'active-popup-option');
+      assert(selectRecipe?.locatorContract?.primary?.value.includes('option=edge-lab:WAN-extra-18'), 'select candidate should keep option text');
+      assertEqual(selectRecipe?.locatorContract?.primary?.payload?.optionText, 'edge-lab:WAN-extra-18');
+      assertEqual(modalRecipe?.locatorContract?.primary?.kind, 'dialog-scoped-testid');
+      assert(modalRecipe?.locatorContract?.primary?.value.includes('dialogTitle=新建网络资源'), 'modal candidate should keep dialog scope');
+      assertEqual(modalRecipe?.locatorContract?.primary?.payload?.dialogTitle, '新建网络资源');
+      assertEqual(popconfirmRecipe?.locatorContract?.primary?.kind, 'visible-popconfirm-confirm');
+      assert(popconfirmRecipe?.locatorContract?.primary?.value.includes('title=删除此行？'), 'popconfirm candidate should keep visible popconfirm scope');
+    },
+  },
+  {
+    name: 'locator contract diagnostics mark row actions without rowKey as high risk',
+    run: () => {
+      const recipe = buildRecipeForStep({
+        id: 's-row-without-key',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: {
+          testId: 'user-row-edit',
+          role: 'button',
+          name: '编辑',
+          scope: { table: { title: '用户管理', testId: 'users-table', rowText: 'NAT集群A 编辑' } },
+        },
+        uiRecipe: { kind: 'table-row-action', library: 'pro-components', component: 'TableRowAction' } as any,
+        context: {
+          eventId: 'ctx-row-without-key',
+          capturedAt: 1000,
+          before: {
+            target: { tag: 'button', role: 'button', testId: 'user-row-edit', text: '编辑' },
+            table: { title: '用户管理', testId: 'users-table', rowText: 'NAT集群A 编辑', columnName: '操作' },
+          } as any,
+        },
+        assertions: [],
+      });
+      const contract = recipe?.locatorContract;
+      const riskCodes = new Set(contract?.risks.map(risk => risk.code));
+      const globalTestIdCandidate = contract?.candidates.find(candidate => candidate.kind === 'testid');
+
+      assertEqual(contract?.primary?.kind, 'row-scoped-testid');
+      assertEqual(contract?.primary?.risk, 'high');
+      assert(contract?.primary?.value.includes('rowText=NAT集群A 编辑'), 'row action without rowKey should keep row text as diagnostic evidence');
+      assert(riskCodes.has('row-action-without-row-key'), 'row action without rowKey should carry a semantic high-risk diagnostic');
+      assertEqual(globalTestIdCandidate?.risk, 'high');
+    },
+  },
+  {
+    name: 'locator contract diagnostics flag dynamic rc select nth and long selector risks',
+    run: () => {
+      const longCss = '.ant-form .ant-row .ant-col .ant-form-item .ant-select .ant-select-selector .ant-select-selection-search input[data-secret="nope"] .deep .deeper';
+      const recipe = buildRecipeForStep({
+        id: 's-brittle-locator',
+        order: 1,
+        kind: 'recorded',
+        action: 'click',
+        target: { selector: '#rc_select_14', role: 'button', name: '保存' },
+        rawAction: { action: { name: 'click', selector: longCss, locator: 'xpath=//div[@class="ant-modal"]//button[2]' } },
+        sourceCode: 'await page.getByLabel("密码").fill("secret-value"); await page.locator("[aria-activedescendant=rc_select_14_list_0]").nth(2).click();',
+        assertions: [],
+      });
+      const riskCodes = new Set(recipe?.locatorContract?.risks.map(risk => risk.code));
+      const candidateValues = recipe?.locatorContract?.candidates.map(candidate => candidate.value).join('\n') || '';
+
+      assert(riskCodes.has('dynamic-rc-select-id'), 'dynamic rc_select ids should be critical risk diagnostics');
+      assert(riskCodes.has('ordinal-locator'), 'ordinal locators should be high risk diagnostics');
+      assert(riskCodes.has('long-css-locator'), 'long css selectors should be high risk diagnostics');
+      assert(riskCodes.has('xpath-locator'), 'xpath selectors should be high risk diagnostics');
+      assert(!candidateValues.includes('secret-value'), 'sourceCode fill values must not become locator candidate values');
+      assert(!candidateValues.includes('getByLabel("密码")'), 'sourceCode action statements must not become raw locator candidates');
+      assert(recipe?.locatorContract?.candidates.every(candidate => candidate.diagnosticsOnly === true), 'locator candidates should stay diagnostics-only in BAGLC-02');
+    },
+  },
+  {
     name: 'recipeBuilder does not force AntD replay strategy for generic select steps',
     run: () => {
       const recipe = buildRecipeForStep({

@@ -4,11 +4,13 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import type { UiActionRecipe as SemanticUiActionRecipe } from '../uiSemantics/recipes';
+import type { LocatorContract } from './locatorTypes';
+
 export type {
   LegacyUiActionRecipeKind,
   UiActionFramework,
   UiActionOperation,
-  UiActionRecipe,
   UiActionRecipeComponent,
   UiActionRecipeOption,
   UiActionRecipeTarget,
@@ -17,6 +19,12 @@ export type {
   UiReplayParserSafeStrategy,
   UiReplayRuntimeFallback,
 } from '../uiSemantics/recipes';
+
+export type UiActionRecipe = SemanticUiActionRecipe & {
+  locatorContract?: LocatorContract;
+};
+
+export type { LocatorCandidate, LocatorCandidateKind, LocatorCandidatePayload, LocatorCandidateScope, LocatorContract, LocatorRisk, LocatorRiskSeverity } from './locatorTypes';
 
 export type RuntimeBridgeKind = 'runtime-bridge' | 'dom-dispatch' | 'native-event' | 'none';
 
