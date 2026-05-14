@@ -1,6 +1,8 @@
 # Playwright CRX Business Flow Architecture Migration Docs
 
-这份文档包用于指导 Hermes / Codex / coding agent 分 PR 完成 `playwright-crx` 的架构迁移。
+这份文档包最初用于指导 Hermes / Codex / coding agent 分 PR 完成
+`playwright-crx` 的架构迁移。PR-01 through PR-17 are now complete; this
+directory is retained as historical context and post-migration guardrails.
 
 目标不是继续“修下一个 flake”，而是把当前 recorder 从：
 
@@ -33,19 +35,17 @@ CrxPlayer 只做窄范围 runtime bridge。
 
 ## 使用方式
 
-建议把本目录复制到仓库根目录：
+These docs already live in the repository. Do not restart the old serial
+migration train. For current work, start with:
 
 ```text
-docs/mvp-0.1x-architecture-migration/
+docs/mvp-0.1x-architecture-migration/STATUS.md
+docs/architecture/RECORDER_REPLAY_ARCHITECTURE.md
+tests/crx/TEST_LAYERING.md
+docs/harness/README.md
 ```
 
-然后让 Hermes 每次只执行一个 PR 文档。例如：
-
-```text
-请阅读 AGENTS.md、docs/mvp-0.1x-architecture-migration/README.md、MIGRATION_ROADMAP.md，
-然后只执行 docs/mvp-0.1x-architecture-migration/docs/prs/PR-03-session-finalizer.md。
-不要提前实现后续 PR。
-```
+Future work should be issue-scoped post-migration hardening.
 
 ## 文档结构
 
@@ -95,9 +95,9 @@ docs/migration/
   MODULE_BOUNDARIES.md
 ```
 
-## 总体节奏
+## Historical migration sequence
 
-这是一条渐进迁移链，不是一次性重写：
+This was the completed migration sequence:
 
 ```text
 PR-01：先更新 AGENTS 和架构护栏。
@@ -112,6 +112,11 @@ PR-09：Runtime Player Bridge，只保留窄范围 fallback。
 PR-10：Repeat + terminal-state assertions hardening。
 PR-11：Diagnostics/adaptive target snapshot，fail-closed。
 PR-12：清理旧字段、移除过时 patch、冻结迁移。
+PR-13：flowBuilder facade cleanup。
+PR-14：Replay compiler physical split。
+PR-15：Recipe-first replay contract。
+PR-16：Adaptive replay diagnostics surfacing。
+PR-17：Explicit L1/L2/L3 regression layers。
 ```
 
 ## 硬边界

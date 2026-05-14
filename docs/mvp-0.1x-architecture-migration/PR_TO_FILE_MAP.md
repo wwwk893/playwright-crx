@@ -2,6 +2,12 @@
 
 This file maps each PR to the target files it is allowed to create/modify. It prevents architectural drift.
 
+## Status
+
+PR-01 through PR-17 are complete. This file is now a historical migration map,
+not an active serial execution plan. Future post-migration work should use
+GitHub issues and the scoped AGENTS.md files near the code being changed.
+
 ## PR-01 — Architecture guardrails and AGENTS
 
 Create/modify:
@@ -207,3 +213,119 @@ Acceptance:
 - Legacy helper functions marked deprecated or removed.
 - Final module tree matches `FINAL_FILE_TREE.md`.
 - Full CRX regression and flow tests pass.
+
+## PR-13 — flowBuilder facade cleanup
+
+GitHub PR: #35
+
+Create/modify:
+
+```text
+examples/recorder-crx/src/flow/recorderActionMerge.ts
+examples/recorder-crx/src/flow/recordedActionEntries.ts
+examples/recorder-crx/src/flow/stepDrafts.ts
+examples/recorder-crx/src/flow/stepInsertion.ts
+examples/recorder-crx/src/capture/targetFromRecorderSelector.ts
+examples/recorder-crx/src/flow/flowBuilder.ts
+examples/recorder-crx/src/flow/stepStability.test.ts
+```
+
+Acceptance:
+
+- `flowBuilder.ts` delegates recorder action merge internals.
+- Recorded action extraction, step draft creation, insertion, and source rendering
+  are physically split.
+- No replay/runtime behavior changes.
+
+## PR-14 — replay compiler physical split
+
+GitHub PR: #40
+
+Create/modify:
+
+```text
+examples/recorder-crx/src/replay/stepEmitter.ts
+examples/recorder-crx/src/replay/exportedRenderer.ts
+examples/recorder-crx/src/replay/parserSafeRenderer.ts
+examples/recorder-crx/src/replay/actionCounter.ts
+examples/recorder-crx/src/replay/assertionRenderer.ts
+examples/recorder-crx/src/replay/repeatRenderer.ts
+examples/recorder-crx/src/replay/antDRecipeRenderers.ts
+examples/recorder-crx/src/flow/codePreview.ts
+examples/recorder-crx/src/flow/stepStability.test.ts
+```
+
+Acceptance:
+
+- `codePreview.ts` remains a re-export / compatibility facade.
+- Parser-safe replay and action counting are no longer thin aliases around the
+  exported renderer.
+- Token-order handling for parser-safe AntD option matching is covered by L1.
+
+## PR-15 — recipe-first replay contract
+
+GitHub PR: #41
+
+Create/modify:
+
+```text
+examples/recorder-crx/src/uiSemantics/recipes.ts
+examples/recorder-crx/src/replay/recipeBuilder.ts
+examples/recorder-crx/src/replay/stepEmitter.ts
+examples/recorder-crx/src/replay/exportedRenderer.ts
+examples/recorder-crx/src/replay/parserSafeRenderer.ts
+examples/recorder-crx/src/replay/actionCounter.ts
+examples/recorder-crx/src/flow/terminalAssertions.ts
+examples/recorder-crx/src/flow/stepStability.test.ts
+```
+
+Acceptance:
+
+- AntD/ProComponents Select replay strategy is expressed through UiActionRecipe.
+- TreeSelect and Cascader do not accidentally use ordinary Select owned-option
+  replay mechanics.
+- Selected-value echo suppression is field-scoped or assertion-tied.
+
+## PR-16 — adaptive diagnostics surfacing
+
+GitHub PR: #42
+
+Create/modify:
+
+```text
+examples/recorder-crx/src/flow/adaptiveFailureReport.ts
+examples/recorder-crx/src/flow/adaptiveTargetSnapshot.ts
+examples/recorder-crx/src/flow/adaptiveTargetRedactor.ts
+examples/recorder-crx/src/flow/locatorCandidates.ts
+tests/crx/helpers/replayAssertions.ts
+tests/crx/businessFlowRecorder.spec.ts
+tests/crx/humanLikeRecorder.spec.ts
+```
+
+Acceptance:
+
+- Replay failure artifacts include privacy-safe diagnostics.
+- Diagnostics are not exported in business-flow JSON or compact YAML.
+- Generated replay failure reports are retained under the raw replay artifacts.
+
+## PR-17 — explicit L1/L2/L3 regression layers
+
+GitHub PR: #43
+
+Create/modify:
+
+```text
+package.json
+.github/workflows/crx-regression.yml
+.github/pull_request_template.md
+tests/crx/TEST_LAYERING.md
+docs/checklists/REVIEW_CHECKLIST.md
+docs/mvp-0.1x-architecture-migration/docs/checklists/REVIEW_CHECKLIST.md
+```
+
+Acceptance:
+
+- `test:crx:business-flow:l1`, `:l2`, `:l3`, and `:layers` scripts exist.
+- The historical `test:crx:business-flow` aggregate command remains available.
+- CI exposes L1 contract, L2 deterministic replay, and L3 human-like smoke as
+  named steps.

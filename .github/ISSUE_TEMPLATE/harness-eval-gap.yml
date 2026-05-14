@@ -1,0 +1,50 @@
+name: Harness eval gap
+description: Add or tighten a harness eval case, artifact contract, or scoring rule.
+title: "[harness eval] "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - L1
+        - L2
+        - L3
+        - runtime bridge
+        - legacy
+        - docs/governance
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: Gap
+    validations:
+      required: true
+  - type: textarea
+    id: oracle
+    attributes:
+      label: Positive / negative oracle
+    validations:
+      required: true
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Expected failure artifacts
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation
+      render: bash
+    validations:
+      required: true

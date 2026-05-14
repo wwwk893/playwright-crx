@@ -1,6 +1,8 @@
 # ARCHITECTURE_CONTRACT.md
 
-This migration succeeds only if every PR moves the repository closer to the target layer model.
+The PR-01 through PR-17 migration is complete. This contract remains active as
+the post-migration reviewer checklist: every future PR must preserve the target
+layer model.
 
 ## Contract
 
@@ -18,7 +20,7 @@ For every PR, reviewers must ask:
 4. Did this PR make exported Playwright and parser-safe runtime playback diverge? If yes, require a shared `UiActionRecipe` or explicit runtime bridge contract.
 5. Did this PR modify `src/server/*`? If yes, require narrow runtime bridge scope and legacy player regression.
 
-## Required end state by PR-12
+## Required post-migration state
 
 - `flowBuilder.ts`: façade only.
 - `codePreview.ts`: façade only.
@@ -27,3 +29,11 @@ For every PR, reviewers must ask:
 - `src/server/recorder/crxPlayer.ts`: runtime bridge only.
 - `interactions/*`: transaction composition.
 - `replay/*`: recipe-based rendering.
+
+Known remaining cleanup issues:
+
+```text
+#27 syntheticReconciler responsibility split
+#37 recorder selector parsing layer refinement
+#45 stepEmitter focused module split
+```
