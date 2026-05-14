@@ -46,8 +46,14 @@ jobs:
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
 
-      - name: Run business-flow and human-like E2E
-        run: npm run test:crx:business-flow -- --reporter=line --global-timeout=1200000
+      - name: L1 flow/unit/codegen/recipe contract tests
+        run: npm run test:crx:business-flow:l1
+
+      - name: L2 deterministic CRX generated replay tests
+        run: npm run test:crx:business-flow:l2 -- --reporter=line --global-timeout=1200000
+
+      - name: L3 human-like CRX smoke tests
+        run: npm run test:crx:business-flow:l3 -- --reporter=line --global-timeout=1200000
 
       - name: Upload Playwright artifacts on failure
         if: failure()

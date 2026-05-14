@@ -93,14 +93,13 @@ Focused tests plus full CRX regression pass.
 PR author should paste:
 
 ```bash
-npm run test:flow --prefix examples/recorder-crx
+npm run test:crx:business-flow:l1
 npm run build:examples:recorder
 npm run build:tests
-xvfb-run -a npx playwright test -c tests/playwright.config.ts \
-  tests/crx/humanLikeRecorder.spec.ts tests/crx/businessFlowRecorder.spec.ts tests/crx/semanticAdapter.spec.ts \
-  --project=Chrome --workers=1 --reporter=line --global-timeout=900000
-xvfb-run -a npx playwright test -c tests/playwright.config.ts \
-  --project=Chrome --workers=1 --reporter=line --global-timeout=1200000
+npm run test:crx:business-flow:l2 -- --reporter=line --global-timeout=1200000
+npm run test:crx:business-flow:l3 -- --reporter=line --global-timeout=1200000
+CI=1 npm run test:crx:business-flow -- --reporter=line --global-timeout=1200000
+CI=1 npm run test:crx:legacy-core -- --reporter=line --global-timeout=1200000
 npm run build
 npm run build:crx
 git diff --check

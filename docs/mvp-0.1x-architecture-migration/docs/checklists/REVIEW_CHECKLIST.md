@@ -31,6 +31,10 @@
 ## Tests
 
 - Was a failing/edge case test added first?
-- Are L1/L2/L3 layers used correctly?
+- Are L1/L2/L3 layers used correctly and reported separately?
+- L1: did `npm run test:crx:business-flow:l1` cover pure flow/codegen/recipe contracts?
+- L2: did `npm run test:crx:business-flow:l2 -- --reporter=line --global-timeout=1200000` cover deterministic CRX generated replay terminal state?
+- L3: did `npm run test:crx:business-flow:l3 -- --reporter=line --global-timeout=1200000` cover human-like smoke paths when user interaction stability matters?
+- Did the current aggregate `npm run test:crx:business-flow -- --reporter=line --global-timeout=1200000` remain available for full parity?
 - Are human-like fallbacks failing or reported?
 - Are real AntD/ProComponents fixtures preserved?
