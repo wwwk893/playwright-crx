@@ -56,6 +56,7 @@ import { downloadText, safeFilename } from './flow/download';
 import { redactBusinessFlow } from './flow/redactor';
 import { deleteFlowDraft, deleteFlowRecord, listFlowRecords, loadLatestFlowDraft, saveFlowDraft, saveFlowRecord } from './flow/storage';
 import { filterPageContextEventsForCapture, isPageContextEventWithinCapture } from './flow/pageContextCapture';
+import { hasPendingOverlayPrediction, pageContextEventSignature, pageContextEventsForIngestion, shouldQueueSyntheticPageContextEvent, updatePageContextEventSignatures } from './flow/pageContextIngestion';
 import type { PageContextEvent } from './flow/pageContextTypes';
 import type { BusinessFlow, FlowAssertion, FlowAssertionSubject, FlowAssertionType, FlowRepeatSegment, FlowStep } from './flow/types';
 import { createEmptyBusinessFlow } from './flow/types';
@@ -138,22 +139,11 @@ async function requestSettledPageContextEvents(options: { settleMs?: number; tim
   while (Date.now() < deadline) {
     await new Promise(resolve => window.setTimeout(resolve, settleMs));
     const next = await requestPageContextEvents({ sinceWallTime: options.sinceWallTime });
-    if (pageContextEventSignature(next) === pageContextEventSignature(previous))
+    if (pageContextEventSignature(next) === pageContextEventSignature(previous) && !hasPendingOverlayPrediction(next))
       return next;
     previous = next;
   }
   return previous;
-}
-
-function pageContextEventSignature(events: PageContextEvent[]) {
-  return JSON.stringify(events.map(event => ({
-    id: event.id,
-    kind: event.kind,
-    wallTime: event.wallTime,
-    before: event.before,
-    after: event.after,
-    tabId: event.tabId,
-  })));
 }
 
 function cloneFlowRecord(flow: BusinessFlow): BusinessFlow {
@@ -524,6 +514,7 @@ export const CrxRecorder: React.FC = ({
   const aiAutoTimerRef = React.useRef<number>();
   const diagnosticLogIdRef = React.useRef(nextDiagnosticLogId(diagnosticLogs));
   const lastDiagnosticContextEventIdRef = React.useRef<string>();
+  const diagnosticContextEventSignaturesByIdRef = React.useRef<Map<string, string>>(new Map());
   const scheduledSyntheticContextEventIdsRef = React.useRef<Set<string>>(new Set());
   const pendingSyntheticClickEventsRef = React.useRef<PageContextEvent[]>([]);
   const pageContextCaptureStartedAtRef = React.useRef<number>();
@@ -550,6 +541,7 @@ export const CrxRecorder: React.FC = ({
     if (active && !wasActive) {
       pageContextCaptureStartedAtRef.current = Date.now();
       lastDiagnosticContextEventIdRef.current = undefined;
+      diagnosticContextEventSignaturesByIdRef.current.clear();
       scheduledSyntheticContextEventIdsRef.current.clear();
       pendingSyntheticClickEventsRef.current = [];
     }
@@ -560,6 +552,7 @@ export const CrxRecorder: React.FC = ({
         syntheticFlushTimerRef.current = undefined;
       }
       pendingSyntheticClickEventsRef.current = [];
+      diagnosticContextEventSignaturesByIdRef.current.clear();
     }
   }, []);
 
@@ -667,6 +660,7 @@ export const CrxRecorder: React.FC = ({
     // otherwise table rowKey / AntD option context can miss the final flow export.
     const captureStartedAt = pageContextCaptureStartedAtRef.current;
     const requestedEvents = await requestSettledPageContextEvents({ sinceWallTime: captureStartedAt });
+    updatePageContextEventSignatures(requestedEvents, diagnosticContextEventSignaturesByIdRef.current);
     const requestedEventsById = new Map(requestedEvents.map(event => [event.id, event]));
     const queuedEventsAfterSettle = pendingSyntheticClickEventsRef.current;
     pendingSyntheticClickEventsRef.current = [];
@@ -1011,8 +1005,10 @@ export const CrxRecorder: React.FC = ({
 
     let disposed = false;
     requestPageContextEvents({ sinceWallTime: pageContextCaptureStartedAtRef.current }).then(events => {
-      if (!disposed)
+      if (!disposed) {
+        updatePageContextEventSignatures(events, diagnosticContextEventSignaturesByIdRef.current);
         lastDiagnosticContextEventIdRef.current = events[events.length - 1]?.id;
+      }
     }).catch(() => {});
 
     const interval = window.setInterval(() => {
@@ -1020,11 +1016,13 @@ export const CrxRecorder: React.FC = ({
         const events = filterPageContextEventsForCapture(rawEvents, pageContextCaptureStartedAtRef.current);
         if (disposed || !pageContextCaptureActiveRef.current || !events.length)
           return;
-        const lastId = lastDiagnosticContextEventIdRef.current;
-        const lastIndex = lastId ? events.findIndex(event => event.id === lastId) : events.length - 1;
-        const newEvents = lastIndex >= 0 ? events.slice(lastIndex + 1) : events.slice(-3);
-        lastDiagnosticContextEventIdRef.current = events[events.length - 1]?.id;
-        for (const event of newEvents) {
+        const ingestion = pageContextEventsForIngestion({
+          events,
+          lastEventId: lastDiagnosticContextEventIdRef.current,
+          signaturesById: diagnosticContextEventSignaturesByIdRef.current,
+        });
+        lastDiagnosticContextEventIdRef.current = ingestion.lastEventId;
+        for (const event of ingestion.eventsToProcess) {
           appendDiagnosticLog({
             type: 'page.context-event',
             message: `页面侧捕获 ${pageContextEventLabel(event) || event.kind}`,
@@ -1037,7 +1035,11 @@ export const CrxRecorder: React.FC = ({
               target: event.before.target,
             },
           });
-          if (event.kind === 'click' && event.wallTime && !scheduledSyntheticContextEventIdsRef.current.has(event.id)) {
+          if (shouldQueueSyntheticPageContextEvent({
+            event,
+            changedEventIds: ingestion.changedEventIds,
+            scheduledEventIds: scheduledSyntheticContextEventIdsRef.current,
+          })) {
             scheduledSyntheticContextEventIdsRef.current.add(event.id);
             queueSyntheticClickEvent(event);
           }

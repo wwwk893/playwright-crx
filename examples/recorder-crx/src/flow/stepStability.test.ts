@@ -42,6 +42,7 @@ import { finalizeRecordingSession } from './sessionFinalizer';
 import { appendTerminalStateAssertions, createTerminalStateAssertion, replayDiagnosticSummary } from './terminalAssertions';
 import { eventJournalStats } from './eventJournal';
 import { mergePageContextIntoFlow } from './flowContextMerger';
+import { hasPendingOverlayPrediction, pageContextEventsForIngestion, shouldQueueSyntheticPageContextEvent, updatePageContextEventSignatures } from './pageContextIngestion';
 import { suggestIntent } from './intentRules';
 import { createRepeatSegment } from './repeatSegments';
 import { redactBusinessFlow } from './redactor';
@@ -268,6 +269,130 @@ const tests: TestCase[] = [
       assertEqual(updatedRecorder.eventJournal.eventOrder, ['page-context:ctx-overlay-update']);
       const envelope = updatedRecorder.eventJournal.eventsById['page-context:ctx-overlay-update'];
       assertEqual((envelope.payload as PageContextEvent).after?.overlayPrediction?.status, 'resolved');
+    },
+  },
+  {
+    name: 'page context ingestion queues same-id richer overlay prediction updates',
+    run: () => {
+      const baseEvent = pageClickEventWithTarget('ctx-richer-update', 1100, {
+        tag: 'div',
+        role: 'combobox',
+        controlType: 'select',
+        text: 'IP地址池',
+      });
+      const signaturesById = new Map<string, string>();
+      updatePageContextEventSignatures([baseEvent], signaturesById);
+
+      const afterEvent: PageContextEvent = {
+        ...baseEvent,
+        after: {
+          dialog: { type: 'dropdown', visible: true },
+        },
+      };
+      const afterIngestion = pageContextEventsForIngestion({
+        events: [afterEvent],
+        lastEventId: baseEvent.id,
+        signaturesById,
+      });
+      assertEqual(afterIngestion.eventsToProcess.map(event => event.id), ['ctx-richer-update']);
+      assert(afterIngestion.changedEventIds.has('ctx-richer-update'), 'same-id after snapshot should be detected as a changed payload');
+      assert(shouldQueueSyntheticPageContextEvent({
+        event: afterEvent,
+        changedEventIds: afterIngestion.changedEventIds,
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'changed same-id click should still replace the pending queued event after scheduling');
+
+      const prediction = createOverlayPrediction({
+        expectedKind: 'select-dropdown',
+        candidates: [overlayPredictionCandidate('select-dropdown', 'IP地址池')],
+      });
+      const predictionEvent: PageContextEvent = {
+        ...afterEvent,
+        after: {
+          ...afterEvent.after,
+          overlayPrediction: prediction,
+        },
+      };
+      const predictionIngestion = pageContextEventsForIngestion({
+        events: [predictionEvent],
+        lastEventId: afterEvent.id,
+        signaturesById,
+      });
+      assertEqual(predictionIngestion.eventsToProcess.map(event => event.after?.overlayPrediction?.status), ['resolved']);
+      assert(shouldQueueSyntheticPageContextEvent({
+        event: predictionEvent,
+        changedEventIds: predictionIngestion.changedEventIds,
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'late overlayPrediction update should bypass the scheduled-id duplicate guard');
+      assert(!shouldQueueSyntheticPageContextEvent({
+        event: predictionEvent,
+        changedEventIds: new Set(),
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'unchanged already scheduled click should still be suppressed');
+    },
+  },
+  {
+    name: 'page context ingestion keeps post-action merged clicks available for live synthetic queue',
+    run: () => {
+      const previousEvent = pageClickEvent('ctx-previous', 900, '保存');
+      const pageOnlyEvent = pageClickEventWithTarget('ctx-page-only-radio', 1200, {
+        tag: 'label',
+        role: 'radio',
+        controlType: 'radio',
+        text: '独享地址池',
+        normalizedText: '独享地址池',
+      });
+      const signaturesById = new Map<string, string>();
+      updatePageContextEventSignatures([previousEvent], signaturesById);
+
+      const ingestion = pageContextEventsForIngestion({
+        events: [previousEvent, pageOnlyEvent],
+        lastEventId: previousEvent.id,
+        signaturesById,
+      });
+
+      assertEqual(ingestion.eventsToProcess.map(event => event.id), ['ctx-page-only-radio']);
+      assert(shouldQueueSyntheticPageContextEvent({
+        event: pageOnlyEvent,
+        changedEventIds: ingestion.changedEventIds,
+        scheduledEventIds: new Set(),
+      }), 'post-action page-context-only click should still enter the live synthetic queue on the interval pass');
+    },
+  },
+  {
+    name: 'page context settle waits while expected overlay prediction is pending',
+    run: () => {
+      const pendingSelect = pageClickEventWithTarget('ctx-pending-select', 1100, {
+        tag: 'div',
+        role: 'combobox',
+        controlType: 'select',
+        text: 'IP地址池',
+      });
+      pendingSelect.after = {
+        dialog: { type: 'dropdown', visible: true },
+      };
+      assert(hasPendingOverlayPrediction([pendingSelect], { now: () => 1500 }), 'expected select overlay without overlayPrediction should keep settle pending while it is still fresh');
+      assert(hasPendingOverlayPrediction([pendingSelect], { now: () => 2480 }), 'pending overlay prediction should cover after delay observer timeout and a settle tick');
+      assert(!hasPendingOverlayPrediction([pendingSelect], { now: () => 2800 }), 'stale unresolved overlay prediction should not hold every later stop/export flush');
+
+      const resolvedSelect: PageContextEvent = {
+        ...pendingSelect,
+        after: {
+          ...pendingSelect.after,
+          overlayPrediction: createOverlayPrediction({
+            expectedKind: 'select-dropdown',
+            candidates: [overlayPredictionCandidate('select-dropdown', 'IP地址池')],
+          }),
+        },
+      };
+      assert(!hasPendingOverlayPrediction([resolvedSelect], { now: () => 1500 }), 'resolved overlayPrediction should release settle');
+
+      const ordinaryOpenLink = pageClickEventWithTarget('ctx-open-link', 1200, {
+        tag: 'a',
+        role: 'link',
+        text: '打开详情',
+      });
+      assert(!hasPendingOverlayPrediction([ordinaryOpenLink], { now: () => 1500 }), 'ordinary open link should not hold stop/export settle');
     },
   },
   {
