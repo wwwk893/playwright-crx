@@ -1929,6 +1929,199 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'replay preserves recorded exact role locator for duplicate Create-like buttons',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          sourceCode: `await page.getByRole('button', { name: 'Create', exact: true }).click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            locatorHint: {
+              strategy: 'global-role',
+              confidence: 0.62,
+              pageCount: 1,
+              pageIndex: 0,
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assert(exported.includes('exact: true'), 'exported replay should preserve exact role matching');
+      assert(playback.includes('exact: true'), 'parser-safe playback should preserve exact role matching');
+      assert(!exported.includes('getByRole("button", { name: "Create" }).click()'), 'exported replay must not widen the recorded exact role locator');
+      assert(!playback.includes('getByRole("button", { name: "Create" }).click()'), 'parser-safe playback must not widen the recorded exact role locator');
+    },
+  },
+  {
+    name: 'internal exact role selector emits exact role options without recorded source',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            locatorHint: {
+              strategy: 'global-role',
+              confidence: 0.62,
+              pageCount: 1,
+              pageIndex: 0,
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assert(exported.includes('page.getByRole("button", { name: "Create", exact: true }).click();'), 'exported replay should rebuild exact role matching from internal selector suffix s');
+      assert(playback.includes('page.getByRole("button", { name: "Create", exact: true }).click();'), 'parser-safe playback should rebuild exact role matching from internal selector suffix s');
+    },
+  },
+  {
+    name: 'duplicate role locator preserves exact matching and ordinal disambiguation',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            locatorHint: {
+              strategy: 'global-role',
+              confidence: 0.62,
+              pageCount: 2,
+              pageIndex: 0,
+            },
+          },
+          assertions: [],
+        }],
+      };
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+      const expected = 'page.getByRole("button", { name: "Create", exact: true }).nth(0).click();';
+
+      assert(exported.includes(expected), 'exported replay should preserve exact role matching before applying nth(pageIndex)');
+      assert(playback.includes(expected), 'parser-safe playback should preserve exact role matching before applying nth(pageIndex)');
+      assert(!exported.includes('page.getByRole("button", { name: "Create" }).click();'), 'duplicate role replay must not fall back to a bare global role locator');
+    },
+  },
+  {
+    name: 'non-exact role evidence does not force exact role matching',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          sourceCode: `await page.getByRole('button', { name: 'Create' }).click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"i]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"i]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+          },
+          assertions: [],
+        }],
+      };
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const playback = generateBusinessFlowPlaybackCode(flow);
+
+      assert(!exported.includes('exact: true'), 'exported replay should not invent exact matching without exact evidence');
+      assert(!playback.includes('exact: true'), 'parser-safe playback should not invent exact matching without exact evidence');
+      assert(/page\.getByRole\(["']button["'], \{ name: ["']Create["'] \}\)\.click\(\);/.test(exported), 'non-exact evidence should keep the existing role/name fallback shape');
+    },
+  },
+  {
+    name: 'section scoped role locator preserves recorded exact role matching',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            scope: { section: { testId: 'environment-toolbar', kind: 'section' } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.getByTestId("environment-toolbar").getByRole("button", { name: "Create", exact: true }).click();'), 'section-scoped role locator should not widen exact role evidence');
+    },
+  },
+  {
+    name: 'dialog scoped role locator preserves recorded exact role matching',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            scope: { dialog: { title: 'Create Environment', type: 'modal', visible: true } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "Create Environment" }).getByRole("button", { name: "Create", exact: true }).click();'), 'dialog-scoped role locator should not widen exact role evidence');
+    },
+  },
+  {
     name: 'replay compiler omits redundant AntD select trigger and search before option workaround',
     run: () => {
       const flow: BusinessFlow = {
@@ -11245,6 +11438,81 @@ test('demo', async ({ page }) => {
       assert(!types.includes('row-exists'), 'short numeric threshold values should not become row-exists terminal assertions');
       assert(types.includes('modal-closed'), 'modal close terminal assertion should still be inferred for the commit action');
       assert(!code.includes("filter({ hasText: /3/ })"), 'generated replay should not assert a created row by a short numeric field');
+    },
+  },
+  {
+    name: 'effect hints do not infer modal closed from modal form fill text',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: { testId: 'create-user-btn', text: '新建用户' },
+            context: {
+              eventId: 'ctx-open-create-user',
+              capturedAt: 1000,
+              before: { target: { tag: 'button', testId: 'create-user-btn', text: '新建用户' } },
+              after: { dialog: { type: 'modal', title: '新建用户', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'fill',
+            target: {
+              testId: 'create-user-modal',
+              label: '用户名',
+              text: '新建用户 用户名 角色 审计员 取 消确 定',
+            },
+            value: 'alice',
+            context: {
+              eventId: 'ctx-fill-user-name',
+              capturedAt: 1100,
+              before: {
+                dialog: { type: 'modal', title: '新建用户', visible: true },
+                form: { label: '用户名', name: 'username' },
+                target: {
+                  tag: 'input',
+                  testId: 'create-user-modal',
+                  text: '新建用户 用户名 角色 审计员 取 消确 定',
+                  controlType: 'input',
+                },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'press',
+            target: { testId: 'modal-confirm', text: '确 定' },
+            value: 'Enter',
+            context: {
+              eventId: 'ctx-confirm-user',
+              capturedAt: 1200,
+              before: {
+                dialog: { type: 'modal', title: '新建用户', visible: true },
+                target: { tag: 'button', testId: 'modal-confirm', text: '确 定', controlType: 'button' },
+              },
+              after: { dialog: { type: 'modal', title: '新建用户', visible: false } },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const fillAssertionTypes = enriched.steps[1].assertions.map(assertion => assertion.type);
+      const confirmAssertionTypes = enriched.steps[2].assertions.map(assertion => assertion.type);
+      const code = generateBusinessFlowPlaywrightCode(enriched);
+
+      assert(!fillAssertionTypes.includes('modal-closed'), 'modal root text around a fill must not imply modal close');
+      assert(confirmAssertionTypes.includes('modal-closed'), 'explicit confirm press should still infer modal closed');
+      assert(!stepCodeBlock(code, 's002').includes('waitFor({ state: "hidden"'), 'fill step should not emit modal hidden terminal assertion');
     },
   },
   {

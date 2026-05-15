@@ -125,6 +125,8 @@ function rowExistsEffectHint(recipe: UiActionRecipe, step: FlowStep, previousSte
 
 function overlayClosedEffectHint(recipe: UiActionRecipe, step: FlowStep, previousSteps: FlowStep[]): EffectHint | undefined {
   const dialog = step.context?.before.dialog || step.target?.scope?.dialog;
+  if (!isOverlayCommitActionStep(step))
+    return undefined;
   if (blocksOverlayClosedEffect(step, dialog))
     return undefined;
   if (sameOverlayRemainsVisible(step, dialog) && hasValidationFeedback(step))
@@ -212,10 +214,16 @@ function sameOverlayScope(left?: { type?: string; title?: string; testId?: strin
 }
 
 function isCreateCommitStep(recipe: UiActionRecipe, step: FlowStep) {
+  if (!isOverlayCommitActionStep(step))
+    return false;
   const dialog = step.context?.before.dialog || step.target?.scope?.dialog;
   if (dialog?.type !== 'modal' && dialog?.type !== 'drawer')
     return false;
   return /save|submit|confirm|ok|保存|提交|确 定|确定|确认|完成/i.test(criticalText(recipe, step));
+}
+
+function isOverlayCommitActionStep(step: FlowStep) {
+  return step.action === 'click' || step.action === 'press';
 }
 
 function rowActionHasDeleteCommitEvidence(step: FlowStep) {
