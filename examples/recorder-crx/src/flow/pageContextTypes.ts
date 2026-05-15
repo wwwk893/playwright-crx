@@ -13,6 +13,7 @@
  */
 import type { UiSemanticContext } from '../uiSemantics/types';
 import type { BusinessActionGroundingEvidence } from '../uiSemantics/anchorDiagnostics';
+import type { OverlayPrediction } from '../capture/overlayPrediction';
 
 export type IntentSource = 'rule' | 'ai' | 'user';
 
@@ -46,6 +47,7 @@ export interface PageContextAfterSnapshot {
   activeTab?: TabContext;
   dialog?: DialogContext;
   openedDialog?: DialogContext;
+  overlayPrediction?: OverlayPrediction;
   toast?: string;
 }
 

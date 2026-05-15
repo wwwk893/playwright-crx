@@ -13,6 +13,10 @@ export type EventJournalStats = {
   eventCount: number;
   recorderActionCount: number;
   pageContextEventCount: number;
+  overlayPredictionCount: number;
+  overlayPredictionResolvedCount: number;
+  overlayPredictionExpiredCount: number;
+  overlayPredictionAmbiguousCount: number;
   lastEventAt?: number;
   lastRecorderActionAt?: number;
   lastPageContextEventAt?: number;
@@ -71,10 +75,18 @@ export function appendPageContextEvents(recorder: FlowRecorderState, events: Pag
 export function eventJournalStats(recorder: FlowRecorderState): EventJournalStats {
   const journal = ensureEventJournal(recorder);
   const events = journal.eventOrder.map(id => journal.eventsById[id]).filter(Boolean);
+  const overlayPredictions = events
+      .filter(event => event.source === 'page-context')
+      .map(event => (event.payload as PageContextEvent | undefined)?.after?.overlayPrediction)
+      .filter(Boolean);
   return {
     eventCount: events.length,
     recorderActionCount: recorderEventCount(journal),
     pageContextEventCount: pageContextEventCount(journal),
+    overlayPredictionCount: overlayPredictions.length,
+    overlayPredictionResolvedCount: overlayPredictions.filter(prediction => prediction?.status === 'resolved').length,
+    overlayPredictionExpiredCount: overlayPredictions.filter(prediction => prediction?.status === 'expired').length,
+    overlayPredictionAmbiguousCount: overlayPredictions.filter(prediction => prediction?.status === 'ambiguous').length,
     lastEventAt: lastWallTime(events),
     lastRecorderActionAt: lastWallTime(events.filter(event => event.source === 'playwright-recorder')),
     lastPageContextEventAt: lastWallTime(events.filter(event => event.source === 'page-context')),
@@ -82,11 +94,46 @@ export function eventJournalStats(recorder: FlowRecorderState): EventJournalStat
 }
 
 function appendEvent(journal: RecorderEventJournal, event: RecorderEventEnvelope): boolean {
-  if (journal.eventsById[event.id])
+  const existing = journal.eventsById[event.id];
+  if (existing) {
+    if (existing.source === 'page-context' && event.source === 'page-context') {
+      const merged = mergePageContextEnvelope(existing, event);
+      if (JSON.stringify(merged.payload) !== JSON.stringify(existing.payload)) {
+        journal.eventsById[event.id] = merged;
+        return true;
+      }
+    }
     return false;
+  }
   journal.eventsById[event.id] = event;
   journal.eventOrder.push(event.id);
   return true;
+}
+
+function mergePageContextEnvelope(existing: RecorderEventEnvelope, incoming: RecorderEventEnvelope): RecorderEventEnvelope {
+  const existingPayload = existing.payload as Partial<PageContextEvent>;
+  const incomingPayload = incoming.payload as Partial<PageContextEvent>;
+  return {
+    ...existing,
+    kind: incoming.kind || existing.kind,
+    payload: {
+      ...existingPayload,
+      ...incomingPayload,
+      before: mergePageContextSnapshot(existingPayload.before, incomingPayload.before),
+      after: mergePageContextSnapshot(existingPayload.after, incomingPayload.after),
+    },
+  };
+}
+
+function mergePageContextSnapshot<T extends object | undefined>(existing: T, incoming: T): T {
+  if (!incoming)
+    return existing;
+  if (!existing)
+    return incoming;
+  return {
+    ...existing,
+    ...incoming,
+  };
 }
 
 function recorderEventCount(journal: RecorderEventJournal) {
@@ -144,6 +191,7 @@ function compactPageContextEvent(event: PageContextEvent) {
       activeTab: event.after.activeTab,
       dialog: event.after.dialog,
       openedDialog: event.after.openedDialog,
+      overlayPrediction: event.after.overlayPrediction,
       toast: event.after.toast,
     } : undefined,
   };

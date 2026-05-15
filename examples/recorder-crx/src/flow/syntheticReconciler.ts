@@ -68,7 +68,10 @@ export function appendSyntheticPageContextStepsWithResult(flow: BusinessFlow, ev
       continue;
     }
     const choiceControlEvent = isChoiceControlContext(event);
-    const hasExistingStep = choiceControlEvent ? hasExistingChoiceControlStepForEvent(steps, event) : hasSyntheticStepForEvent(steps, event);
+    const radioChoiceControlEvent = isRadioChoiceControlContext(event);
+    const hasExistingStep = radioChoiceControlEvent
+      ? hasExistingSyntheticChoiceStepForEvent(steps, event)
+      : choiceControlEvent ? hasExistingChoiceControlStepForEvent(steps, event) : hasSyntheticStepForEvent(steps, event);
     if (hasExistingStep || !choiceControlEvent && hasRecordedClickForEvent(recorder, event)) {
       skippedEventIds.push(event.id);
       continue;
@@ -511,7 +514,12 @@ function hasRecordedClickForEvent(recorder: FlowRecorderState, event: PageContex
 }
 
 function hasExistingChoiceControlStepForEvent(steps: FlowStep[], event: PageContextEvent) {
-  const eventText = event.before.target ? normalizedComparableText(stableElementText(event.before.target) || '') : '';
+  const eventText = normalizedComparableText(
+      (event.before.target ? stableElementText(event.before.target) : undefined) ||
+      event.before.form?.label ||
+      event.before.ui?.form?.label ||
+      '');
+  const eventHasStableTestId = !!(event.before.target?.testId || event.before.ui?.targetTestId);
   if (!eventText)
     return false;
   return steps.some(step => {
@@ -522,12 +530,16 @@ function hasExistingChoiceControlStepForEvent(steps: FlowStep[], event: PageCont
       return false;
     const rawControlType = rawTargetControlType(step.target?.raw);
     const role = step.target?.role || '';
-    if (!/^(checkbox|radio|switch)$/.test(rawControlType) && !/^(checkbox|radio|switch)$/.test(role))
+    if (!eventHasStableTestId && !/^(checkbox|radio|switch)$/.test(rawControlType) && !/^(checkbox|radio|switch)$/.test(role))
       return false;
     const eventWallTime = Number(event.wallTime ?? 0);
     const existingWallTime = stepWallTime(step);
     return !eventWallTime || typeof existingWallTime !== 'number' || Math.abs(existingWallTime - eventWallTime) < 2000;
   });
+}
+
+function hasExistingSyntheticChoiceStepForEvent(steps: FlowStep[], event: PageContextEvent) {
+  return steps.some(step => isSyntheticClickStep(step) && hasSyntheticStepForEvent([step], event));
 }
 
 function recordedEntryCoversContextEvent(entry: RecordedActionEntry, event: PageContextEvent) {
@@ -563,6 +575,11 @@ function isChoiceControlContext(event: PageContextEvent) {
   if (!/^(checkbox|radio|switch)$/.test(target?.controlType || '') && !/^(checkbox|radio|switch)$/.test(target?.role || ''))
     return false;
   return !!event.before.form?.label || !!stableElementText(target);
+}
+
+function isRadioChoiceControlContext(event: PageContextEvent) {
+  const target = event.before.target;
+  return /^(radio)$/.test(target?.controlType || '') || /^(radio)$/.test(target?.role || '');
 }
 
 function isWeakPageContextClickTarget(target?: ElementContext) {

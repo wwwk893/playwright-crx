@@ -22,7 +22,64 @@ import { applySafetyPreflightToSource } from './safetyGuard';
 import { renderRepeatAssertionTemplate } from './terminalAssertions';
 
 export function createEffectiveReplayFlow(flow: BusinessFlow): BusinessFlow {
-  return withDedupedRepeatedPopoverOpenerClicks(withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow)))));
+  return withDedupedSameEventChoiceClicks(withDedupedRepeatedPopoverOpenerClicks(withDedupedAdjacentDropdownOptionClicks(withInheritedTableRowContext(withInheritedAntdSelectOptionContext(withInheritedDialogContext(flow))))));
+}
+
+function withDedupedSameEventChoiceClicks(flow: BusinessFlow): BusinessFlow {
+  const keepByKey = new Map<string, FlowStep>();
+  for (const step of flow.steps) {
+    const key = sameEventChoiceClickKey(step);
+    if (!key)
+      continue;
+    const previous = keepByKey.get(key);
+    if (!previous || choiceClickDedupeScore(step) > choiceClickDedupeScore(previous))
+      keepByKey.set(key, step);
+  }
+  if (!keepByKey.size)
+    return flow;
+
+  let changed = false;
+  const steps = flow.steps.filter(step => {
+    const key = sameEventChoiceClickKey(step);
+    if (!key)
+      return true;
+    const keep = keepByKey.get(key);
+    const shouldKeep = keep?.id === step.id;
+    changed = changed || !shouldKeep;
+    return shouldKeep;
+  });
+  if (!changed)
+    return flow;
+  const keptStepIds = new Set(steps.map(step => step.id));
+  return {
+    ...flow,
+    steps,
+    repeatSegments: flow.repeatSegments
+        ?.map(segment => ({ ...segment, stepIds: segment.stepIds.filter(stepId => keptStepIds.has(stepId)) }))
+        .filter(segment => segment.stepIds.length > 0),
+  };
+}
+
+function sameEventChoiceClickKey(step: FlowStep) {
+  if (step.action !== 'click')
+    return undefined;
+  const eventId = step.context?.eventId;
+  if (!eventId || !isChoiceControlStepForDedupe(step))
+    return undefined;
+  const identity = normalizeComparableText(step.target?.testId || step.context?.before.target?.testId || choiceControlText(step) || '');
+  return identity ? `${eventId}::${identity}` : undefined;
+}
+
+function choiceClickDedupeScore(step: FlowStep) {
+  return (step.kind === 'recorded' ? 100 : 0) +
+    (step.sourceActionIds?.length ? 20 : 0) +
+    (step.target?.testId || step.context?.before.target?.testId ? 5 : 0);
+}
+
+function isChoiceControlStepForDedupe(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { target?: { controlType?: unknown }; ui?: { form?: { fieldKind?: unknown } } } | undefined)?.target?.controlType || (step.target?.raw as { ui?: { form?: { fieldKind?: unknown } } } | undefined)?.ui?.form?.fieldKind || '');
+  return /^(checkbox|radio|switch)$/.test(role) || /^(checkbox|radio|switch)$/.test(controlType);
 }
 
 function withDedupedAdjacentDropdownOptionClicks(flow: BusinessFlow): BusinessFlow {
@@ -2031,8 +2088,12 @@ function inferredOwnedSelectSearchText(step: FlowStep, selectedOptionText?: stri
   );
   if (!optionText || bestCompactIpRangeMatch(optionText))
     return undefined;
-  const prefixMatch = optionText.match(/^([^:：]{2,})[:：]/);
-  return normalizeGeneratedText(prefixMatch?.[1] || '');
+  const prefixMatch = optionText.match(/^([^:：]{2,})[:：](.+)$/);
+  const prefix = normalizeGeneratedText(prefixMatch?.[1] || '');
+  const suffix = normalizeGeneratedText(prefixMatch?.[2] || '');
+  if (prefix && suffix && !/\d/.test(prefix) && /\d/.test(suffix) && !bestCompactIpRangeMatch(suffix))
+    return suffix;
+  return prefix;
 }
 
 function previousStepAlreadyTargetsAntdSelectField(previousStep: FlowStep | undefined, optionStep: FlowStep) {

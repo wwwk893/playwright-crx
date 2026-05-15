@@ -5,6 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
+import { collectOverlayPredictionCandidates, createOverlayPrediction, expectedOverlayKindForTrigger, newOverlayPredictionCandidates, overlayPredictionSignatureCounts, type OverlayPredictionCandidate } from '../capture/overlayPrediction';
 import { extractTargetFromRecorderAction } from '../capture/targetFromRecorderSelector';
 import { equivalentAnchorCandidates, rankAnchorCandidates } from '../uiSemantics/anchorDiagnostics';
 import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from '../uiSemantics/anchorGrounding';
@@ -41,10 +42,11 @@ import { finalizeRecordingSession } from './sessionFinalizer';
 import { appendTerminalStateAssertions, createTerminalStateAssertion, replayDiagnosticSummary } from './terminalAssertions';
 import { eventJournalStats } from './eventJournal';
 import { mergePageContextIntoFlow } from './flowContextMerger';
+import { hasPendingOverlayPrediction, pageContextEventsForIngestion, shouldQueueSyntheticPageContextEvent, updatePageContextEventSignatures } from './pageContextIngestion';
 import { suggestIntent } from './intentRules';
 import { createRepeatSegment } from './repeatSegments';
 import { redactBusinessFlow } from './redactor';
-import type { PageContextEvent, ElementContext } from './pageContextTypes';
+import type { PageContextEvent, ElementContext, StepContextSnapshot } from './pageContextTypes';
 import type { BusinessFlow, FlowStep } from './types';
 import { createEmptyBusinessFlow } from './types';
 
@@ -114,6 +116,291 @@ const tests: TestCase[] = [
       assert(now >= 160, 'finalizer should respect maxWaitMs when facts keep changing');
       assert(diagnostics.some(event => event.type === 'finalize.timeout'), 'finalizer should emit timeout diagnostics');
       assert(diagnostics.some(event => event.data?.reason === 'enter-review'), 'timeout diagnostics should include reason');
+    },
+  },
+  {
+    name: 'overlay prediction shadow mode resolves expected overlay outcomes without changing steps',
+    run: () => {
+      assertEqual(expectedOverlayKindForTrigger({ controlType: 'select', text: 'IP地址池' }), 'select-dropdown');
+      assertEqual(expectedOverlayKindForTrigger({ testId: 'network-resource-create-button', text: '新增' }), 'modal');
+      assertEqual(expectedOverlayKindForTrigger({ testId: 'wan-row-delete-button', text: '删除' }), 'popconfirm');
+      assertEqual(expectedOverlayKindForTrigger({ text: '打开详情' }), undefined);
+      assertEqual(expectedOverlayKindForTrigger({ role: 'link', text: '打开详情' }), undefined);
+      assertEqual(expectedOverlayKindForTrigger({ role: 'button', text: '新增' }), 'modal');
+      assertEqual(expectedOverlayKindForTrigger({ testId: 'open-user-modal-button', text: '打开' }), 'modal');
+
+      const selectPrediction = createOverlayPrediction({
+        expectedKind: 'select-dropdown',
+        candidates: [overlayPredictionCandidate('select-dropdown', 'IP地址池')],
+        elapsedMs: 120,
+      });
+      assertEqual(selectPrediction.status, 'resolved');
+      assertEqual(selectPrediction.resolved?.overlayKind, 'select-dropdown');
+
+      const expiredPrediction = createOverlayPrediction({
+        expectedKind: 'modal',
+        candidates: [],
+        elapsedMs: 420,
+      });
+      assertEqual(expiredPrediction.status, 'expired');
+
+      const ambiguousPrediction = createOverlayPrediction({
+        expectedKind: 'popconfirm',
+        candidates: [
+          overlayPredictionCandidate('popconfirm', '删除此行？', 'delete-confirm-1'),
+          overlayPredictionCandidate('popconfirm', '删除此行？', 'delete-confirm-2'),
+        ],
+      });
+      assertEqual(ambiguousPrediction.status, 'ambiguous');
+      assertEqual(ambiguousPrediction.candidates?.length, 2);
+    },
+  },
+  {
+    name: 'overlay prediction resolves nested AntD select dropdown DOM as one visual overlay',
+    run: () => {
+      const listbox = testOverlayElement({ role: 'listbox' });
+      const dropdown = testOverlayElement({ class: 'ant-select-dropdown' }, [listbox]);
+      const candidates = collectOverlayPredictionCandidates({
+        root: testOverlayRoot([dropdown]),
+        isVisible: () => true,
+        now: () => 42,
+      });
+
+      assertEqual(candidates.length, 1);
+      assertEqual(candidates[0].overlayKind, 'select-dropdown');
+      assertEqual(candidates[0].signature, 'select-dropdown');
+      assertEqual(createOverlayPrediction({
+        expectedKind: 'select-dropdown',
+        candidates,
+      }).status, 'resolved');
+    },
+  },
+  {
+    name: 'overlay prediction duplicate filtering preserves stable signatures across transitions',
+    run: () => {
+      const existing = overlayPredictionCandidate('popconfirm', '删除此行？');
+      const newDuplicate = overlayPredictionCandidate('popconfirm', '删除此行？');
+      const observedAfter = [existing, newDuplicate];
+      const newCandidates = newOverlayPredictionCandidates(
+          observedAfter,
+          overlayPredictionSignatureCounts([existing]),
+      );
+
+      assertEqual(newCandidates.length, 1);
+      assertEqual(newCandidates[0].signature, existing.signature);
+      assert(!newCandidates[0].signature.includes(':#'), 'duplicate overlay signature should remain stable');
+      assertEqual(createOverlayPrediction({
+        expectedKind: 'popconfirm',
+        candidates: newCandidates,
+      }).status, 'resolved');
+
+      assertEqual(createOverlayPrediction({
+        expectedKind: 'popconfirm',
+        candidates: newOverlayPredictionCandidates(observedAfter, overlayPredictionSignatureCounts([])),
+      }).status, 'ambiguous');
+    },
+  },
+  {
+    name: 'event journal preserves overlay prediction diagnostics without changing exported flow context',
+    run: async () => {
+      const prediction = createOverlayPrediction({
+        expectedKind: 'modal',
+        candidates: [overlayPredictionCandidate('modal', '新建网络资源')],
+        elapsedMs: 96,
+      });
+      const event = pageClickEvent('ctx-overlay-prediction', 1100, '新增');
+      event.after = {
+        dialog: { type: 'modal', title: '新建网络资源', visible: true },
+        overlayPrediction: prediction,
+      };
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [event]);
+      const recorder = flow.artifacts?.recorder;
+      assert(recorder?.eventJournal, 'event journal should exist');
+      const stats = eventJournalStats(recorder);
+      assertEqual(stats.pageContextEventCount, 1);
+      assertEqual(stats.overlayPredictionCount, 1);
+      assertEqual(stats.overlayPredictionResolvedCount, 1);
+      const envelope = recorder.eventJournal.eventsById['page-context:ctx-overlay-prediction'];
+      assertEqual((envelope.payload as PageContextEvent).after?.overlayPrediction?.status, 'resolved');
+
+      const diagnostics: Array<{ type: string; data?: any }> = [];
+      await finalizeRecordingSession(flow, {
+        reason: 'export',
+        stableForMs: 0,
+        maxWaitMs: 0,
+        now: () => 0,
+        wait: async () => {},
+        diagnostics: event => diagnostics.push(event),
+      });
+      assert(diagnostics.some(event => event.data?.counts?.overlayPredictionResolvedCount === 1), 'finalizer diagnostics should include overlay prediction counts');
+
+      const exported = JSON.stringify(prepareBusinessFlowForExport(flow));
+      assert(!exported.includes('overlayPrediction'), 'exported flow should omit internal overlay prediction diagnostics');
+      assert(!toCompactFlow(flow).includes('overlayPrediction'), 'compact flow should omit internal overlay prediction diagnostics');
+    },
+  },
+  {
+    name: 'event journal upgrades same-id page context overlay prediction updates',
+    run: () => {
+      const baseEvent = pageClickEvent('ctx-overlay-update', 1100, '新增');
+      const baseFlow = mergePageContextIntoFlow(createNamedFlow(), [baseEvent]);
+      const baseRecorder = baseFlow.artifacts?.recorder;
+      assert(baseRecorder?.eventJournal, 'base page context event should be journaled');
+      assertEqual(eventJournalStats(baseRecorder).pageContextEventCount, 1);
+      assertEqual(eventJournalStats(baseRecorder).overlayPredictionCount, 0);
+
+      const prediction = createOverlayPrediction({
+        expectedKind: 'modal',
+        candidates: [overlayPredictionCandidate('modal', '新建网络资源')],
+        elapsedMs: 96,
+      });
+      const updatedEvent = pageClickEvent('ctx-overlay-update', 1100, '新增');
+      updatedEvent.after = {
+        dialog: { type: 'modal', title: '新建网络资源', visible: true },
+        overlayPrediction: prediction,
+      };
+      const updatedFlow = mergePageContextIntoFlow(baseFlow, [updatedEvent]);
+      const updatedRecorder = updatedFlow.artifacts?.recorder;
+      assert(updatedRecorder?.eventJournal, 'same-id overlay prediction update should be stored');
+      const stats = eventJournalStats(updatedRecorder);
+      assertEqual(stats.pageContextEventCount, 1);
+      assertEqual(stats.overlayPredictionCount, 1);
+      assertEqual(stats.overlayPredictionResolvedCount, 1);
+      assertEqual(updatedRecorder.eventJournal.eventOrder, ['page-context:ctx-overlay-update']);
+      const envelope = updatedRecorder.eventJournal.eventsById['page-context:ctx-overlay-update'];
+      assertEqual((envelope.payload as PageContextEvent).after?.overlayPrediction?.status, 'resolved');
+    },
+  },
+  {
+    name: 'page context ingestion queues same-id richer overlay prediction updates',
+    run: () => {
+      const baseEvent = pageClickEventWithTarget('ctx-richer-update', 1100, {
+        tag: 'div',
+        role: 'combobox',
+        controlType: 'select',
+        text: 'IP地址池',
+      });
+      const signaturesById = new Map<string, string>();
+      updatePageContextEventSignatures([baseEvent], signaturesById);
+
+      const afterEvent: PageContextEvent = {
+        ...baseEvent,
+        after: {
+          dialog: { type: 'dropdown', visible: true },
+        },
+      };
+      const afterIngestion = pageContextEventsForIngestion({
+        events: [afterEvent],
+        lastEventId: baseEvent.id,
+        signaturesById,
+      });
+      assertEqual(afterIngestion.eventsToProcess.map(event => event.id), ['ctx-richer-update']);
+      assert(afterIngestion.changedEventIds.has('ctx-richer-update'), 'same-id after snapshot should be detected as a changed payload');
+      assert(shouldQueueSyntheticPageContextEvent({
+        event: afterEvent,
+        changedEventIds: afterIngestion.changedEventIds,
+        pendingEventIds: new Set(['ctx-richer-update']),
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'changed same-id click should still replace the pending queued event after scheduling');
+
+      const prediction = createOverlayPrediction({
+        expectedKind: 'select-dropdown',
+        candidates: [overlayPredictionCandidate('select-dropdown', 'IP地址池')],
+      });
+      const predictionEvent: PageContextEvent = {
+        ...afterEvent,
+        after: {
+          ...afterEvent.after,
+          overlayPrediction: prediction,
+        },
+      };
+      const predictionIngestion = pageContextEventsForIngestion({
+        events: [predictionEvent],
+        lastEventId: afterEvent.id,
+        signaturesById,
+      });
+      assertEqual(predictionIngestion.eventsToProcess.map(event => event.after?.overlayPrediction?.status), ['resolved']);
+      assert(shouldQueueSyntheticPageContextEvent({
+        event: predictionEvent,
+        changedEventIds: predictionIngestion.changedEventIds,
+        pendingEventIds: new Set(['ctx-richer-update']),
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'late overlayPrediction update should replace a still-pending queued event');
+      assert(!shouldQueueSyntheticPageContextEvent({
+        event: predictionEvent,
+        changedEventIds: predictionIngestion.changedEventIds,
+        pendingEventIds: new Set(),
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'late same-id update after the synthetic queue has flushed should not create another click step');
+      assert(!shouldQueueSyntheticPageContextEvent({
+        event: predictionEvent,
+        changedEventIds: new Set(),
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'unchanged already scheduled click should still be suppressed');
+    },
+  },
+  {
+    name: 'page context ingestion keeps post-action merged clicks available for live synthetic queue',
+    run: () => {
+      const previousEvent = pageClickEvent('ctx-previous', 900, '保存');
+      const pageOnlyEvent = pageClickEventWithTarget('ctx-page-only-radio', 1200, {
+        tag: 'label',
+        role: 'radio',
+        controlType: 'radio',
+        text: '独享地址池',
+        normalizedText: '独享地址池',
+      });
+      const signaturesById = new Map<string, string>();
+      updatePageContextEventSignatures([previousEvent], signaturesById);
+
+      const ingestion = pageContextEventsForIngestion({
+        events: [previousEvent, pageOnlyEvent],
+        lastEventId: previousEvent.id,
+        signaturesById,
+      });
+
+      assertEqual(ingestion.eventsToProcess.map(event => event.id), ['ctx-page-only-radio']);
+      assert(shouldQueueSyntheticPageContextEvent({
+        event: pageOnlyEvent,
+        changedEventIds: ingestion.changedEventIds,
+        scheduledEventIds: new Set(),
+      }), 'post-action page-context-only click should still enter the live synthetic queue on the interval pass');
+    },
+  },
+  {
+    name: 'page context settle waits while expected overlay prediction is pending',
+    run: () => {
+      const pendingSelect = pageClickEventWithTarget('ctx-pending-select', 1100, {
+        tag: 'div',
+        role: 'combobox',
+        controlType: 'select',
+        text: 'IP地址池',
+      });
+      pendingSelect.after = {
+        dialog: { type: 'dropdown', visible: true },
+      };
+      assert(hasPendingOverlayPrediction([pendingSelect], { now: () => 1500 }), 'expected select overlay without overlayPrediction should keep settle pending while it is still fresh');
+      assert(hasPendingOverlayPrediction([pendingSelect], { now: () => 2480 }), 'pending overlay prediction should cover after delay observer timeout and a settle tick');
+      assert(!hasPendingOverlayPrediction([pendingSelect], { now: () => 2800 }), 'stale unresolved overlay prediction should not hold every later stop/export flush');
+
+      const resolvedSelect: PageContextEvent = {
+        ...pendingSelect,
+        after: {
+          ...pendingSelect.after,
+          overlayPrediction: createOverlayPrediction({
+            expectedKind: 'select-dropdown',
+            candidates: [overlayPredictionCandidate('select-dropdown', 'IP地址池')],
+          }),
+        },
+      };
+      assert(!hasPendingOverlayPrediction([resolvedSelect], { now: () => 1500 }), 'resolved overlayPrediction should release settle');
+
+      const ordinaryOpenLink = pageClickEventWithTarget('ctx-open-link', 1200, {
+        tag: 'a',
+        role: 'link',
+        text: '打开详情',
+      });
+      assert(!hasPendingOverlayPrediction([ordinaryOpenLink], { now: () => 1500 }), 'ordinary open link should not hold stop/export settle');
     },
   },
   {
@@ -4163,6 +4450,30 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'choice control synthetic step is suppressed by a matching recorded switch test id',
+    run: () => {
+      const wallTime = Date.now();
+      const flow = mergeActionsIntoFlow(undefined, [{
+        ...rawClickAction('internal:text="启用健康检查"i'),
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-health-switch-recorded', wallTime + 100, {
+        tag: 'button',
+        role: 'switch',
+        testId: 'network-resource-health-switch',
+        framework: 'procomponents',
+        controlType: 'button',
+        locatorQuality: 'testid',
+      } as ElementContext);
+      event.before.form = { label: '启用健康检查' };
+
+      const result = appendSyntheticPageContextStepsWithResult(flow, [event]);
+
+      assertEqual(result.insertedStepIds, []);
+      assertEqual(result.flow.steps.filter(step => step.target?.text === '启用健康检查' || step.target?.displayName === '启用健康检查').length, 1);
+    },
+  },
+  {
     name: 'code preview prefers upgraded test id over weird raw click selector',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -5286,6 +5597,76 @@ test('demo', async ({ page }) => {
 
       assertEqual(withSynthetic.steps.map(step => step.id), ['s002', 's001']);
       assertEqual(withSynthetic.steps.map(step => step.target?.testId || step.value), ['network-resource-health-switch', 'https://probe.example/health']);
+    },
+  },
+  {
+    name: 'same-event choice clicks keep one replay action inside repeat segments',
+    run: () => {
+      const eventId = 'ctx-health-switch';
+      const choiceContext: StepContextSnapshot = {
+        eventId,
+        capturedAt: 2000,
+        before: {
+          form: { label: '启用健康检查' },
+          target: { tag: 'button', role: 'switch', testId: 'network-resource-health-switch', controlType: 'button' },
+        },
+      };
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's030',
+            order: 1,
+            kind: 'manual',
+            action: 'click',
+            sourceActionIds: [],
+            target: { testId: 'network-resource-health-switch', role: 'switch', label: '启用健康检查' },
+            context: choiceContext,
+            rawAction: { syntheticContextEventId: eventId, syntheticContextEventWallTime: 2000 },
+            assertions: [],
+          },
+          {
+            id: 's013',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            sourceActionIds: ['act_000013'],
+            target: { testId: 'network-resource-health-switch', role: 'switch', label: '启用健康检查' },
+            context: choiceContext,
+            rawAction: { wallTime: 2000, action: { name: 'click', selector: 'internal:text="启用健康检查"i' } },
+            assertions: [],
+          },
+          {
+            id: 's018',
+            order: 3,
+            kind: 'manual',
+            action: 'click',
+            sourceActionIds: [],
+            target: { testId: 'network-resource-health-switch', role: 'switch', label: '启用健康检查' },
+            context: choiceContext,
+            rawAction: { syntheticContextEventId: eventId, syntheticContextEventWallTime: 2000 },
+            assertions: [],
+          },
+          {
+            id: 's014',
+            order: 4,
+            kind: 'recorded',
+            action: 'fill',
+            sourceActionIds: ['act_000014'],
+            target: { testId: 'network-resource-health-url', role: 'textbox', label: '探测地址' },
+            value: 'https://probe.example/health',
+            rawAction: { wallTime: 2200, action: { name: 'fill', selector: 'internal:testid=[data-testid="network-resource-health-url"s]', text: 'https://probe.example/health' } },
+            assertions: [],
+          },
+        ],
+      };
+      const segment = createRepeatSegment(flow, flow.steps.map(step => step.id));
+      const repeated = { ...flow, repeatSegments: [{ ...segment, parameters: [], rows: [{ id: 'row-1', values: {} }] }] };
+      const code = generateBusinessFlowPlaywrightCode(repeated);
+      const switchClicks = code.match(/network-resource-health-switch"\)\.click/g) || [];
+
+      assertEqual(switchClicks.length, 1);
+      assert(code.includes('network-resource-health-url'), 'the dependent health URL fill should remain after choice dedupe');
     },
   },
   {
@@ -7013,6 +7394,49 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('await trigger.locator(inputSelector).first().fill(searchText);'), 'inferred search text should be typed before dispatching the owned option');
       assert(firstStep.includes('ownedRoots()'), 'option lookup should be scoped to the current trigger-owned dropdown/listbox');
       assert(!firstStep.includes('getByText'), 'human-like option replay must not use ambiguous global text locator');
+    },
+  },
+  {
+    name: 'colon option replay infers the narrower numeric suffix search when prefix is broad',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            label: 'WAN口',
+            text: 'edge-lab:WAN-extra-18',
+            raw: {
+              target: { role: 'option', framework: 'procomponents', controlType: 'select-option', text: 'edge-lab:WAN-extra-18' },
+              ui: { library: 'pro-components', component: 'select', form: { label: 'WAN口' }, option: { text: 'edge-lab:WAN-extra-18' } },
+            },
+          },
+          context: {
+            eventId: 'ctx-edge-extra-option',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'WAN口' },
+              target: { role: 'option', framework: 'procomponents', controlType: 'select-option', text: 'edge-lab:WAN-extra-18' },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:text="edge-lab:WAN-extra-18"i',
+            },
+          },
+          sourceCode: `await page.getByText('edge-lab:WAN-extra-18').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('const searchText = "WAN-extra-18";'), 'broad prefix should not hide the virtualized target option');
+      assert(firstStep.includes('edge-lab:WAN-extra-18'), 'full option text should remain the dispatch target');
     },
   },
   {
@@ -10993,6 +11417,52 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'terminal-state selected value cleanup removes generated assertions when step no longer suggests selected value',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's013',
+          order: 13,
+          action: 'click',
+          target: {
+            testId: 'network-resource-health-switch',
+            role: 'switch',
+            label: '启用健康检查',
+          },
+          context: {
+            eventId: 'ctx-health-switch',
+            capturedAt: 1200,
+            before: {
+              target: {
+                testId: 'network-resource-health-switch',
+                role: 'switch',
+                controlType: 'button',
+              },
+            },
+            after: {
+              toast: '选择发布范围',
+            },
+          },
+          assertions: [{
+            id: 's013-terminal-1',
+            type: 'selected-value-visible',
+            subject: 'element',
+            target: { testId: 'network-resource-health-switch' },
+            expected: '选择发布范围',
+            params: { targetTestId: 'network-resource-health-switch', expected: '选择发布范围' },
+            enabled: true,
+          }],
+        }],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const selectedAssertions = enriched.steps[0].assertions.filter(assertion => assertion.type === 'selected-value-visible' && assertion.enabled !== false);
+
+      assertEqual(selectedAssertions.map(assertion => assertion.expected), []);
+    },
+  },
+  {
     name: 'terminal-state selected value inference uses generic select evidence instead of domain words',
     run: () => {
       const selectableFlow: BusinessFlow = {
@@ -12320,6 +12790,77 @@ function semanticUi(options: {
     confidence: 0.9,
     reasons: ['test fixture'],
   };
+}
+
+function overlayPredictionCandidate(kind: OverlayPredictionCandidate['overlayKind'], title: string, testId?: string): OverlayPredictionCandidate {
+  return {
+    type: kind === 'modal' ? 'modal' : kind === 'drawer' ? 'drawer' : kind === 'select-dropdown' || kind === 'dropdown' ? 'dropdown' : 'popover',
+    overlayKind: kind,
+    title,
+    testId,
+    visible: true,
+    signature: [kind, testId, title].filter(Boolean).join(':'),
+  };
+}
+
+type TestOverlayElement = Element & {
+  __attrs: Record<string, string>;
+  __children: TestOverlayElement[];
+  __parent?: TestOverlayElement;
+};
+
+function testOverlayRoot(children: TestOverlayElement[]): ParentNode {
+  return {
+    querySelectorAll: (selector: string) => collectTestOverlayDescendants(children).filter(element => testOverlayMatches(element, selector)),
+  } as unknown as ParentNode;
+}
+
+function testOverlayElement(attrs: Record<string, string>, children: TestOverlayElement[] = []): TestOverlayElement {
+  const element = {
+    tagName: 'DIV',
+    __attrs: attrs,
+    __children: children,
+    getAttribute: (name: string) => element.__attrs[name] ?? null,
+    querySelector: (selector: string) => collectTestOverlayDescendants(element.__children).find(child => testOverlayMatches(child, selector)) ?? null,
+    querySelectorAll: (selector: string) => collectTestOverlayDescendants(element.__children).filter(child => testOverlayMatches(child, selector)),
+    closest: (selector: string) => {
+      let current: TestOverlayElement | undefined = element;
+      while (current) {
+        if (testOverlayMatches(current, selector))
+          return current;
+        current = current.__parent;
+      }
+      return null;
+    },
+    getBoundingClientRect: () => ({ width: 100, height: 20 }) as DOMRect,
+  } as unknown as TestOverlayElement;
+  for (const child of children)
+    child.__parent = element;
+  return element;
+}
+
+function collectTestOverlayDescendants(elements: TestOverlayElement[]): TestOverlayElement[] {
+  const result: TestOverlayElement[] = [];
+  for (const element of elements) {
+    result.push(element);
+    result.push(...collectTestOverlayDescendants(element.__children));
+  }
+  return result;
+}
+
+function testOverlayMatches(element: TestOverlayElement, selector: string) {
+  return selector.split(',').some(part => testOverlayMatchesSimpleSelector(element, part.trim()));
+}
+
+function testOverlayMatchesSimpleSelector(element: TestOverlayElement, selector: string) {
+  if (!selector)
+    return false;
+  if (selector.startsWith('.'))
+    return (element.getAttribute('class') || '').split(/\s+/).includes(selector.slice(1));
+  const role = selector.match(/^\[role="([^"]+)"\]$/);
+  if (role)
+    return element.getAttribute('role') === role[1];
+  return false;
 }
 
 function assert(value: unknown, message: string): asserts value {
