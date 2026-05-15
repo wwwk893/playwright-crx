@@ -46,7 +46,7 @@ import { hasPendingOverlayPrediction, pageContextEventsForIngestion, shouldQueue
 import { suggestIntent } from './intentRules';
 import { createRepeatSegment } from './repeatSegments';
 import { redactBusinessFlow } from './redactor';
-import type { PageContextEvent, ElementContext } from './pageContextTypes';
+import type { PageContextEvent, ElementContext, StepContextSnapshot } from './pageContextTypes';
 import type { BusinessFlow, FlowStep } from './types';
 import { createEmptyBusinessFlow } from './types';
 
@@ -299,6 +299,7 @@ const tests: TestCase[] = [
       assert(shouldQueueSyntheticPageContextEvent({
         event: afterEvent,
         changedEventIds: afterIngestion.changedEventIds,
+        pendingEventIds: new Set(['ctx-richer-update']),
         scheduledEventIds: new Set(['ctx-richer-update']),
       }), 'changed same-id click should still replace the pending queued event after scheduling');
 
@@ -322,8 +323,15 @@ const tests: TestCase[] = [
       assert(shouldQueueSyntheticPageContextEvent({
         event: predictionEvent,
         changedEventIds: predictionIngestion.changedEventIds,
+        pendingEventIds: new Set(['ctx-richer-update']),
         scheduledEventIds: new Set(['ctx-richer-update']),
-      }), 'late overlayPrediction update should bypass the scheduled-id duplicate guard');
+      }), 'late overlayPrediction update should replace a still-pending queued event');
+      assert(!shouldQueueSyntheticPageContextEvent({
+        event: predictionEvent,
+        changedEventIds: predictionIngestion.changedEventIds,
+        pendingEventIds: new Set(),
+        scheduledEventIds: new Set(['ctx-richer-update']),
+      }), 'late same-id update after the synthetic queue has flushed should not create another click step');
       assert(!shouldQueueSyntheticPageContextEvent({
         event: predictionEvent,
         changedEventIds: new Set(),
@@ -4442,6 +4450,30 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'choice control synthetic step is suppressed by a matching recorded switch test id',
+    run: () => {
+      const wallTime = Date.now();
+      const flow = mergeActionsIntoFlow(undefined, [{
+        ...rawClickAction('internal:text="启用健康检查"i'),
+        wallTime,
+      }], [], {});
+      const event = pageClickEventWithTarget('ctx-health-switch-recorded', wallTime + 100, {
+        tag: 'button',
+        role: 'switch',
+        testId: 'network-resource-health-switch',
+        framework: 'procomponents',
+        controlType: 'button',
+        locatorQuality: 'testid',
+      } as ElementContext);
+      event.before.form = { label: '启用健康检查' };
+
+      const result = appendSyntheticPageContextStepsWithResult(flow, [event]);
+
+      assertEqual(result.insertedStepIds, []);
+      assertEqual(result.flow.steps.filter(step => step.target?.text === '启用健康检查' || step.target?.displayName === '启用健康检查').length, 1);
+    },
+  },
+  {
     name: 'code preview prefers upgraded test id over weird raw click selector',
     run: () => {
       const flow = mergeActionsIntoFlow(undefined, [
@@ -5565,6 +5597,76 @@ test('demo', async ({ page }) => {
 
       assertEqual(withSynthetic.steps.map(step => step.id), ['s002', 's001']);
       assertEqual(withSynthetic.steps.map(step => step.target?.testId || step.value), ['network-resource-health-switch', 'https://probe.example/health']);
+    },
+  },
+  {
+    name: 'same-event choice clicks keep one replay action inside repeat segments',
+    run: () => {
+      const eventId = 'ctx-health-switch';
+      const choiceContext: StepContextSnapshot = {
+        eventId,
+        capturedAt: 2000,
+        before: {
+          form: { label: '启用健康检查' },
+          target: { tag: 'button', role: 'switch', testId: 'network-resource-health-switch', controlType: 'button' },
+        },
+      };
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's030',
+            order: 1,
+            kind: 'manual',
+            action: 'click',
+            sourceActionIds: [],
+            target: { testId: 'network-resource-health-switch', role: 'switch', label: '启用健康检查' },
+            context: choiceContext,
+            rawAction: { syntheticContextEventId: eventId, syntheticContextEventWallTime: 2000 },
+            assertions: [],
+          },
+          {
+            id: 's013',
+            order: 2,
+            kind: 'recorded',
+            action: 'click',
+            sourceActionIds: ['act_000013'],
+            target: { testId: 'network-resource-health-switch', role: 'switch', label: '启用健康检查' },
+            context: choiceContext,
+            rawAction: { wallTime: 2000, action: { name: 'click', selector: 'internal:text="启用健康检查"i' } },
+            assertions: [],
+          },
+          {
+            id: 's018',
+            order: 3,
+            kind: 'manual',
+            action: 'click',
+            sourceActionIds: [],
+            target: { testId: 'network-resource-health-switch', role: 'switch', label: '启用健康检查' },
+            context: choiceContext,
+            rawAction: { syntheticContextEventId: eventId, syntheticContextEventWallTime: 2000 },
+            assertions: [],
+          },
+          {
+            id: 's014',
+            order: 4,
+            kind: 'recorded',
+            action: 'fill',
+            sourceActionIds: ['act_000014'],
+            target: { testId: 'network-resource-health-url', role: 'textbox', label: '探测地址' },
+            value: 'https://probe.example/health',
+            rawAction: { wallTime: 2200, action: { name: 'fill', selector: 'internal:testid=[data-testid="network-resource-health-url"s]', text: 'https://probe.example/health' } },
+            assertions: [],
+          },
+        ],
+      };
+      const segment = createRepeatSegment(flow, flow.steps.map(step => step.id));
+      const repeated = { ...flow, repeatSegments: [{ ...segment, parameters: [], rows: [{ id: 'row-1', values: {} }] }] };
+      const code = generateBusinessFlowPlaywrightCode(repeated);
+      const switchClicks = code.match(/network-resource-health-switch"\)\.click/g) || [];
+
+      assertEqual(switchClicks.length, 1);
+      assert(code.includes('network-resource-health-url'), 'the dependent health URL fill should remain after choice dedupe');
     },
   },
   {
@@ -7292,6 +7394,49 @@ test('demo', async ({ page }) => {
       assert(firstStep.includes('await trigger.locator(inputSelector).first().fill(searchText);'), 'inferred search text should be typed before dispatching the owned option');
       assert(firstStep.includes('ownedRoots()'), 'option lookup should be scoped to the current trigger-owned dropdown/listbox');
       assert(!firstStep.includes('getByText'), 'human-like option replay must not use ambiguous global text locator');
+    },
+  },
+  {
+    name: 'colon option replay infers the narrower numeric suffix search when prefix is broad',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            label: 'WAN口',
+            text: 'edge-lab:WAN-extra-18',
+            raw: {
+              target: { role: 'option', framework: 'procomponents', controlType: 'select-option', text: 'edge-lab:WAN-extra-18' },
+              ui: { library: 'pro-components', component: 'select', form: { label: 'WAN口' }, option: { text: 'edge-lab:WAN-extra-18' } },
+            },
+          },
+          context: {
+            eventId: 'ctx-edge-extra-option',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'WAN口' },
+              target: { role: 'option', framework: 'procomponents', controlType: 'select-option', text: 'edge-lab:WAN-extra-18' },
+            },
+          },
+          rawAction: {
+            action: {
+              name: 'click',
+              selector: 'internal:text="edge-lab:WAN-extra-18"i',
+            },
+          },
+          sourceCode: `await page.getByText('edge-lab:WAN-extra-18').click();`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('const searchText = "WAN-extra-18";'), 'broad prefix should not hide the virtualized target option');
+      assert(firstStep.includes('edge-lab:WAN-extra-18'), 'full option text should remain the dispatch target');
     },
   },
   {
@@ -11269,6 +11414,52 @@ test('demo', async ({ page }) => {
 
       assertEqual(selectedAssertions.map(assertion => assertion.id), ['user-authored-selected-vrf-visible']);
       assertEqual(selectedAssertions.map(assertion => assertion.expected), ['关联VRF']);
+    },
+  },
+  {
+    name: 'terminal-state selected value cleanup removes generated assertions when step no longer suggests selected value',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's013',
+          order: 13,
+          action: 'click',
+          target: {
+            testId: 'network-resource-health-switch',
+            role: 'switch',
+            label: '启用健康检查',
+          },
+          context: {
+            eventId: 'ctx-health-switch',
+            capturedAt: 1200,
+            before: {
+              target: {
+                testId: 'network-resource-health-switch',
+                role: 'switch',
+                controlType: 'button',
+              },
+            },
+            after: {
+              toast: '选择发布范围',
+            },
+          },
+          assertions: [{
+            id: 's013-terminal-1',
+            type: 'selected-value-visible',
+            subject: 'element',
+            target: { testId: 'network-resource-health-switch' },
+            expected: '选择发布范围',
+            params: { targetTestId: 'network-resource-health-switch', expected: '选择发布范围' },
+            enabled: true,
+          }],
+        }],
+      };
+
+      const enriched = appendTerminalStateAssertions(flow);
+      const selectedAssertions = enriched.steps[0].assertions.filter(assertion => assertion.type === 'selected-value-visible' && assertion.enabled !== false);
+
+      assertEqual(selectedAssertions.map(assertion => assertion.expected), []);
     },
   },
   {

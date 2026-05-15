@@ -68,11 +68,15 @@ export function pageContextEventsForIngestion(options: {
 export function shouldQueueSyntheticPageContextEvent(options: {
   event: PageContextEvent;
   changedEventIds: ReadonlySet<string>;
+  pendingEventIds?: ReadonlySet<string>;
   scheduledEventIds: ReadonlySet<string>;
 }) {
+  const scheduled = options.scheduledEventIds.has(options.event.id);
+  const changedWhilePending = options.changedEventIds.has(options.event.id) &&
+    !!options.pendingEventIds?.has(options.event.id);
   return options.event.kind === 'click' &&
     !!options.event.wallTime &&
-    (options.changedEventIds.has(options.event.id) || !options.scheduledEventIds.has(options.event.id));
+    (!scheduled || changedWhilePending);
 }
 
 function uniquePageContextEvents(events: PageContextEvent[]) {

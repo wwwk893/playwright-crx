@@ -355,7 +355,7 @@ function removeStaleSelectedValueAssertions(assertions: FlowAssertion[], suggest
     if (expected && !isMeaningfulSelectedValue(expected, step))
       return false;
     if (!selectedSuggestions.length)
-      return true;
+      return false;
     const targetKey = selectedValueAssertionTargetKey(assertion);
     if (!targetKey || !expected)
       return true;

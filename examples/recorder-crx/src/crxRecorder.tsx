@@ -596,13 +596,13 @@ export const CrxRecorder: React.FC = ({
     if (!activeEvents.length)
       return flowDraftRef.current;
     const pendingRecording = pendingInsertRecordingRef.current;
-    const withContext = mergePageContextIntoFlow(flowDraftRef.current, activeEvents);
-    const lastStepId = withContext.steps[withContext.steps.length - 1]?.id;
+    const lastStepId = flowDraftRef.current.steps[flowDraftRef.current.steps.length - 1]?.id;
     const insertAfterStepId = pendingRecording?.appendToEnd ? lastStepId : pendingRecording?.afterStepId;
-    const result = appendSyntheticPageContextStepsWithResult(withContext, activeEvents, {
+    const result = appendSyntheticPageContextStepsWithResult(flowDraftRef.current, activeEvents, {
       insertAfterStepId,
       diagnostics: appendDiagnosticLog,
     });
+    const withContext = mergePageContextIntoFlow(result.flow, activeEvents);
     if (pendingRecording && !pendingRecording.appendToEnd && result.insertedStepIds.length) {
       pendingRecording.afterStepId = result.insertedStepIds[result.insertedStepIds.length - 1];
       setInsertRecordingAfterStepId(pendingRecording.afterStepId);
@@ -616,9 +616,9 @@ export const CrxRecorder: React.FC = ({
         },
       });
     }
-    flowDraftRef.current = result.flow;
-    setFlowDraft(result.flow);
-    return result.flow;
+    flowDraftRef.current = withContext;
+    setFlowDraft(withContext);
+    return withContext;
   }, [appendDiagnosticLog]);
 
   const queueSyntheticClickEvent = React.useCallback((event: PageContextEvent) => {
@@ -672,11 +672,21 @@ export const CrxRecorder: React.FC = ({
         scheduledSyntheticContextEventIdsRef.current.add(latestEvent.id);
     }
     for (const event of requestedEvents) {
-      eventsById.set(event.id, event);
-      if (event.kind === 'click' && event.wallTime)
+      if (event.kind === 'click' && event.wallTime && !scheduledSyntheticContextEventIdsRef.current.has(event.id)) {
+        eventsById.set(event.id, event);
         scheduledSyntheticContextEventIdsRef.current.add(event.id);
+      }
     }
     const events = [...eventsById.values()];
+    if (requestedEvents.length) {
+      const syntheticEventIds = new Set(events.map(event => event.id));
+      const journalOnlyEvents = requestedEvents.filter(event => !syntheticEventIds.has(event.id));
+      if (journalOnlyEvents.length) {
+        const withRequestedContext = mergePageContextIntoFlow(flowDraftRef.current, journalOnlyEvents);
+        flowDraftRef.current = withRequestedContext;
+        setFlowDraft(withRequestedContext);
+      }
+    }
     if (events.length)
       lastDiagnosticContextEventIdRef.current = events[events.length - 1]?.id;
     return applyPageContextEventsToDraft(events);
@@ -1022,6 +1032,8 @@ export const CrxRecorder: React.FC = ({
           signaturesById: diagnosticContextEventSignaturesByIdRef.current,
         });
         lastDiagnosticContextEventIdRef.current = ingestion.lastEventId;
+        const pendingSyntheticEventIds = new Set(pendingSyntheticClickEventsRef.current.map(event => event.id));
+        const eventsForJournalOnlyMerge: PageContextEvent[] = [];
         for (const event of ingestion.eventsToProcess) {
           appendDiagnosticLog({
             type: 'page.context-event',
@@ -1038,11 +1050,21 @@ export const CrxRecorder: React.FC = ({
           if (shouldQueueSyntheticPageContextEvent({
             event,
             changedEventIds: ingestion.changedEventIds,
+            pendingEventIds: pendingSyntheticEventIds,
             scheduledEventIds: scheduledSyntheticContextEventIdsRef.current,
           })) {
             scheduledSyntheticContextEventIdsRef.current.add(event.id);
             queueSyntheticClickEvent(event);
+          } else {
+            eventsForJournalOnlyMerge.push(event);
           }
+        }
+        if (eventsForJournalOnlyMerge.length) {
+          setFlowDraft(flow => {
+            const nextFlow = mergePageContextIntoFlow(flow, eventsForJournalOnlyMerge);
+            flowDraftRef.current = nextFlow;
+            return nextFlow;
+          });
         }
       }).catch(() => {});
     }, 1000);
