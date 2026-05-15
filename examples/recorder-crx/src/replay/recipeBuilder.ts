@@ -31,8 +31,17 @@ export function buildRecipeForStep(step: FlowStep): UiActionRecipe | undefined {
 
 function fillRecipe(step: FlowStep): UiActionRecipe {
   const library = libraryForStep(step);
-  const label = step.target?.label || step.context?.before.form?.label || step.target?.placeholder || step.target?.name;
-  const name = step.context?.before.form?.name || step.target?.name;
+  const label = step.target?.label ||
+    step.target?.placeholder ||
+    step.target?.scope?.form?.label ||
+    step.context?.before.form?.label ||
+    step.context?.before.ui?.form?.label ||
+    step.target?.name;
+  const name = step.target?.scope?.form?.name ||
+    step.target?.name ||
+    step.context?.before.ui?.form?.name ||
+    step.context?.before.ui?.form?.dataIndex ||
+    step.context?.before.form?.name;
   return makeRecipe({
     library,
     component: 'Input',
@@ -269,15 +278,31 @@ function targetForStep(step: FlowStep, fallback: { label?: string } = {}): UiAct
   const table = step.context?.before.table || step.target?.scope?.table;
   const dialog = step.context?.before.dialog || step.target?.scope?.dialog;
   const rowKey = step.context?.before.table?.rowKey || step.target?.scope?.table?.rowKey;
+  const fieldName = step.target?.scope?.form?.name ||
+    step.target?.name ||
+    step.context?.before.ui?.form?.name ||
+    step.context?.before.ui?.form?.dataIndex ||
+    step.context?.before.form?.name;
   return {
-    testId: step.target?.testId || step.context?.before.target?.testId,
+    testId: step.target?.testId ||
+      step.context?.before.target?.testId ||
+      inputFieldWrapperTestId(step.context?.before.form?.testId || step.context?.before.ui?.form?.testId),
     label: fallback.label || step.target?.label || step.context?.before.form?.label,
+    name: step.target?.name || fieldName,
+    placeholder: step.target?.placeholder || step.context?.before.ui?.form?.placeholder || step.context?.before.target?.placeholder,
+    fieldName,
     role: step.target?.role || step.context?.before.target?.role,
     text: step.target?.text || step.target?.name || step.context?.before.target?.text,
     dialog: dialog ? { title: dialog.title, type: dialog.type, testId: dialog.testId } : undefined,
     table: table ? { title: table.title, testId: table.testId } : undefined,
     row: rowKey ? { key: rowKey, text: step.context?.before.table?.rowText || step.target?.scope?.table?.rowText } : undefined,
   };
+}
+
+function inputFieldWrapperTestId(testId?: string) {
+  if (!testId || /(^|[-_])(modal|dialog|drawer|form|container|wrapper|root)([-_]|$)/i.test(testId))
+    return undefined;
+  return testId;
 }
 
 function libraryForStep(step: FlowStep, fallback: UiLibrary = 'unknown'): UiLibrary {

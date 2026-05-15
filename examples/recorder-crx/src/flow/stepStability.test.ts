@@ -2732,6 +2732,53 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'parser-safe contextless required WAN combobox search uses scoped AntD input',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: { role: 'combobox', name: '* WAN口' },
+            rawAction: { action: { name: 'click', selector: 'internal:role=combobox[name="* WAN口"i]' } },
+            sourceCode: `await page.getByRole("combobox", { name: "* WAN口" }).click();`,
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            kind: 'recorded',
+            action: 'fill',
+            target: { role: 'combobox', name: '* WAN口' },
+            value: 'xtest16',
+            rawAction: { action: { name: 'fill', selector: 'internal:role=combobox[name="* WAN口"i]', text: 'xtest16' } },
+            sourceCode: `await page.getByRole("combobox", { name: "* WAN口" }).fill("xtest16");`,
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            kind: 'recorded',
+            action: 'click',
+            target: { text: 'xtest16:WAN1', displayName: 'xtest16:WAN1' },
+            rawAction: { action: { name: 'click', selector: 'internal:text="xtest16:WAN1"s' } },
+            sourceCode: `await page.getByText("xtest16:WAN1").click();`,
+            assertions: [],
+          },
+        ],
+      };
+      const playback = generateBusinessFlowPlaybackCode(flow);
+      const searchStep = stepCodeBlock(playback, 's002');
+
+      assert(searchStep.includes('filter({ hasText: "WAN口" })'), 'parser-safe search fill should infer required WAN form item from combobox name');
+      assert(searchStep.includes('.locator("input:visible").fill("xtest16")'), 'parser-safe search fill should target the visible AntD search input');
+      assert(!searchStep.includes('input[name="* WAN口"]'), 'parser-safe search fill must not treat the combobox accessible name as an input name');
+    },
+  },
+  {
     name: 'exported replay omits non-adjacent redundant required combobox click before projected select transaction',
     run: () => {
       const flow: BusinessFlow = {
@@ -3236,6 +3283,111 @@ const tests: TestCase[] = [
       assertEqual(composition.inputTransactions.map(transaction => transaction.field.label), ['用户名', '邮箱']);
       assertEqual(composition.inputTransactions.map(transaction => transaction.commitReason), ['next-action', 'next-action']);
       assertEqual(composition.openInputTransactions.length, 0);
+    },
+  },
+  {
+    name: 'input focus click context with ProComponents metadata upgrades weak recorder fill target',
+    run: () => {
+      const flow = issue60RangeInputFlow();
+      const step = flow.steps.find(step => step.action === 'fill' && step.value === '1.1.1.1');
+
+      assert(step, 'projected fill step should exist');
+      assertEqual(step?.target?.testId, 'site-ip-address-pool-range-field');
+      assertEqual(step?.target?.placeholder, '开始地址，例如：192.168.1.1');
+      assertEqual(step?.target?.name, 'pool.start');
+      assert(!JSON.stringify(step?.target).includes('internal:role=textbox[name="开始地址，例如："i]'), 'weak recorder selector must not be the field identity');
+    },
+  },
+  {
+    name: 'ProComponents range inputs sharing wrapper test id stay separate by field identity',
+    run: () => {
+      const withRecorder = mergeActionsIntoFlow(createNamedFlow(), [
+        weakTextboxFillAction('开始地址，例如：', '1.1.1.1', 1200),
+        weakTextboxFillAction('结束地址，例如：', '1.1.1.10', 1500),
+      ], recordedSource([
+        `await page.getByRole('textbox', { name: '开始地址，例如：' }).fill('1.1.1.1');`,
+        `await page.getByRole('textbox', { name: '结束地址，例如：' }).fill('1.1.1.10');`,
+      ]), {});
+      const flow = mergePageContextIntoFlow(withRecorder, [
+        proComponentsRangeInputFocusEvent('ctx-range-start-focus', 1000, {
+          testId: 'site-ip-address-pool-range-field',
+          label: '开始地址，例如：192.168.1.1',
+          placeholder: '开始地址，例如：192.168.1.1',
+          fieldName: 'pool.start',
+        }),
+        proComponentsRangeInputFocusEvent('ctx-range-end-focus', 1300, {
+          testId: 'site-ip-address-pool-range-field',
+          label: '结束地址，例如：192.168.1.254',
+          placeholder: '结束地址，例如：192.168.1.254',
+          fieldName: 'pool.end',
+        }),
+      ]);
+
+      const fills = flow.steps.filter(step => step.action === 'fill');
+      assertEqual(fills.length, 2);
+      assertEqual(fills.map(step => step.value), ['1.1.1.1', '1.1.1.10']);
+      assertEqual(fills.map(step => step.target?.name), ['pool.start', 'pool.end']);
+      assertEqual(fills.map(step => step.target?.placeholder), ['开始地址，例如：192.168.1.1', '结束地址，例如：192.168.1.254']);
+      const composition = composeInputTransactionsFromJournal(flow.artifacts?.recorder?.eventJournal, { commitOpen: true });
+      const targetKeys = composition.inputTransactions.map(transaction => transaction.targetKey).filter(key => key.includes('site-ip-address-pool-range-field'));
+      assertEqual(targetKeys.length, 2);
+      assert(targetKeys.some(key => key.includes('|name:pool.start')), 'start range input target key should include fieldName');
+      assert(targetKeys.some(key => key.includes('|name:pool.end')), 'end range input target key should include fieldName');
+      assertEqual(new Set(targetKeys).size, 2);
+    },
+  },
+  {
+    name: 'input target merge preserves top-level page context evidence',
+    run: () => {
+      const composition = composeInputTransactionsFromJournal(journalFromPageEvents([
+        proComponentsRangeInputEvent('ctx-range-start-input-1', 1000, {
+          testId: 'site-ip-address-pool-range-field',
+          label: '开始地址，例如：192.168.1.1',
+          placeholder: '开始地址，例如：192.168.1.1',
+          fieldName: 'pool.start',
+        }, '1'),
+        proComponentsRangeInputEvent('ctx-range-start-input-2', 1050, {
+          testId: 'site-ip-address-pool-range-field',
+          label: '开始地址，例如：192.168.1.1',
+          placeholder: '开始地址，例如：192.168.1.1',
+          fieldName: 'pool.start',
+        }, '1.1'),
+      ]), { commitOpen: true });
+
+      const raw = composition.inputTransactions[0]?.target?.raw as any;
+      assert(raw?.pageContext, 'merged input target raw should keep top-level pageContext evidence');
+      assertEqual(raw.pageContext.ui?.form?.name, 'pool.start');
+      assertEqual(composition.inputTransactions[0]?.finalValue, '1.1');
+    },
+  },
+  {
+    name: 'exported replay uses wrapper test id plus full placeholder for ProComponents range fill',
+    run: () => {
+      const code = generateBusinessFlowPlaywrightCode(issue60RangeInputFlow());
+
+      assert(code.includes('page.getByTestId("site-ip-address-pool-range-field").getByPlaceholder("开始地址，例如：192.168.1.1").fill("1.1.1.1")'), 'exported code should use stable wrapper test id plus full placeholder');
+      assert(!code.includes('getByLabel("开始地址，例如：")'), 'exported code must not downgrade to truncated label');
+    },
+  },
+  {
+    name: 'parser-safe replay does not emit truncated internal label for ProComponents range fill',
+    run: () => {
+      const playback = generateBusinessFlowPlaybackCode(issue60RangeInputFlow());
+
+      assert(playback.includes('page.getByTestId("site-ip-address-pool-range-field").getByPlaceholder("开始地址，例如：192.168.1.1").fill("1.1.1.1")'), 'parser-safe replay should keep stable field context');
+      assert(!playback.includes('internal:label="开始地址，例如："'), 'parser-safe replay must not emit the weak truncated internal label');
+      assert(!playback.includes('getByLabel("开始地址，例如：")'), 'parser-safe replay must not use truncated label fallback when stronger context exists');
+    },
+  },
+  {
+    name: 'ordinary label-only input fill keeps label fallback without stronger field context',
+    run: () => {
+      const flow = mergeActionsIntoFlow(undefined, [
+        fillAction('地址池名称', 'pool-a'),
+      ], [], {});
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.getByLabel("地址池名称").fill("pool-a")'), 'ordinary label-only input should keep label fallback');
     },
   },
   {
@@ -6738,13 +6890,27 @@ test('demo', async ({ page }) => {
           },
           rawAction: { action: { name: 'fill', selector: 'internal:testid=[data-testid="usage-note"s]', text: 'modal closed note' } },
           assertions: [],
+        }, {
+          id: 's004',
+          order: 4,
+          kind: 'recorded',
+          sourceActionIds: ['a004'],
+          action: 'fill',
+          target: { label: '使用备注', scope: { form: { label: '使用备注', name: 'remark' } } },
+          value: 'contextless note',
+          rawAction: { action: { name: 'fill', selector: 'internal:role=textbox[name="使用备注"i]', text: 'contextless note' } },
+          sourceCode: `await page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "新建条目" }).getByLabel("使用备注").fill("contextless note");`,
+          assertions: [],
         }],
       };
       const code = generateBusinessFlowPlaywrightCode(flow);
       const noteStep = stepCodeBlock(code, 's003');
+      const contextlessNoteStep = stepCodeBlock(code, 's004');
 
       assert(noteStep.includes('modal closed note'), 'page field should still fill its own value');
       assert(!noteStep.includes('filter({ hasText: "新建条目" })'), 'page field should not inherit a stale modal scope');
+      assert(contextlessNoteStep.includes('contextless note'), 'contextless page field should still fill its own value');
+      assert(!contextlessNoteStep.includes('filter({ hasText: "新建条目" })'), 'contextless page field should not inherit a stale modal scope from weak form evidence');
     },
   },
   {
@@ -9848,6 +10014,7 @@ test('demo', async ({ page }) => {
           target: {
             testId: 'network-resource-name',
             name: '选择一个WAN口',
+            placeholder: '地址池名称',
             displayName: '选择一个WAN口',
             scope: {
               dialog: { type: 'modal', title: '新建网络资源', visible: true },
@@ -9864,8 +10031,18 @@ test('demo', async ({ page }) => {
               target: {
                 tag: 'input',
                 testId: 'network-resource-name',
+                placeholder: '地址池名称',
                 framework: 'procomponents',
                 controlType: 'input',
+              },
+              ui: {
+                library: 'pro-components',
+                component: 'pro-form-field',
+                targetTestId: 'network-resource-name',
+                form: { label: '资源名称', name: 'name', placeholder: '地址池名称' },
+                locatorHints: [],
+                confidence: 0.9,
+                reasons: [],
               },
             },
           },
@@ -9885,6 +10062,117 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('page.getByTestId("network-resource-name").fill("pool-proform-alpha");'), 'stable test id fill should win over polluted select label context');
       assert(!firstStep.includes('filter({ hasText: "WAN口" })'), 'resource-name fill should not target the WAN ProFormSelect input');
+    },
+  },
+  {
+    name: 'actual textarea test id is not treated as a field wrapper without context',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            testId: 'network-resource-remark',
+            role: 'textbox',
+            displayName: 'network-resource-remark',
+            scope: {
+              dialog: { type: 'modal', title: '新建网络资源', visible: true },
+              form: { testId: 'network-resource-remark' },
+            },
+          },
+          value: 'production policy',
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="network-resource-remark"s]',
+              text: 'production policy',
+            },
+          },
+          sourceCode: `await page.getByTestId("network-resource-remark").locator("input:visible, textarea:visible, [contenteditable=\\"true\\"]").first().fill("production policy");`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('page.getByTestId("network-resource-remark").fill("production policy");'), 'actual textarea test id should be filled directly');
+      assert(!firstStep.includes('locator("input:visible, textarea:visible'), 'actual textarea test id must not be downgraded to a child-input wrapper locator');
+    },
+  },
+  {
+    name: 'actual input-like test id is not downgraded to wrapper child locator',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            testId: 'wan-transport-egress-disable-threshold-input',
+            displayName: 'wan-transport-egress-disable-threshold-input',
+            scope: {
+              dialog: { type: 'modal', title: '增加传输网络', visible: true },
+              form: { testId: 'wan-transport-egress-disable-threshold-input' },
+            },
+          },
+          value: '3',
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="wan-transport-egress-disable-threshold-input"s]',
+              text: '3',
+            },
+          },
+          sourceCode: `await page.getByTestId("wan-transport-egress-disable-threshold-input").locator("input:visible, textarea:visible, [contenteditable=\\"true\\"]").first().fill("3");`,
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const firstStep = stepCodeBlock(code, 's001');
+
+      assert(firstStep.includes('page.getByTestId("wan-transport-egress-disable-threshold-input").fill("3");'), 'input-like test id should be filled directly');
+      assert(!firstStep.includes('locator("input:visible, textarea:visible'), 'input-like test id must not be treated as a field wrapper');
+    },
+  },
+  {
+    name: 'direct input test id containing field is not treated as wrapper without page context evidence',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'fill',
+          target: {
+            testId: 'email-field',
+            role: 'textbox',
+            displayName: 'email-field',
+          },
+          value: 'owner@example.com',
+          rawAction: {
+            action: {
+              name: 'fill',
+              selector: 'internal:testid=[data-testid="email-field"s]',
+              text: 'owner@example.com',
+            },
+          },
+          sourceCode: `await page.getByTestId("email-field").locator("input:visible, textarea:visible, [contenteditable=\\"true\\"]").first().fill("owner@example.com");`,
+          assertions: [],
+        }],
+      };
+      const firstStep = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(firstStep.includes('page.getByTestId("email-field").fill("owner@example.com");'), 'actual input test id ending in field should be filled directly');
+      assert(!firstStep.includes('locator("input:visible, textarea:visible'), 'field-like actual input test id must not be treated as a wrapper');
     },
   },
   {
@@ -12685,6 +12973,17 @@ function fillActionWithWallTime(label: string, value: string, wallTime: number) 
   };
 }
 
+function weakTextboxFillAction(accessibleName: string, value: string, wallTime: number) {
+  return {
+    action: {
+      name: 'fill',
+      selector: `internal:role=textbox[name="${escapeSelectorName(accessibleName)}"i]`,
+      text: value,
+    },
+    wallTime,
+  };
+}
+
 function selectTriggerAction(label: string, wallTime: number) {
   return {
     action: {
@@ -12761,6 +13060,74 @@ function pageClickEventWithTarget(id: string, wallTime: number, target: ElementC
       target,
     },
   };
+}
+
+function issue60RangeInputFlow() {
+  const withRecorder = mergeActionsIntoFlow(createNamedFlow(), [
+    weakTextboxFillAction('开始地址，例如：', '1.1.1.1', 1200),
+  ], recordedSource([
+    `await page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "新建IP端口地址池" }).getByRole('textbox', { name: '开始地址，例如：' }).fill('1.1.1.1');`,
+  ]), {});
+  return mergePageContextIntoFlow(withRecorder, [
+    proComponentsRangeInputFocusEvent('ctx-range-start-focus', 1000, {
+      testId: 'site-ip-address-pool-range-field',
+      label: '开始地址，例如：192.168.1.1',
+      placeholder: '开始地址，例如：192.168.1.1',
+      fieldName: 'pool.start',
+    }),
+  ]);
+}
+
+function proComponentsRangeInputFocusEvent(id: string, wallTime: number, options: { testId: string; label: string; placeholder: string; fieldName: string }): PageContextEvent {
+  const event = pageClickEventWithTarget(id, wallTime, {
+    tag: 'input',
+    role: 'textbox',
+    placeholder: options.placeholder,
+    normalizedText: options.placeholder,
+    framework: 'procomponents',
+    controlType: 'input',
+    locatorQuality: 'semantic',
+  } as ElementContext);
+  event.before.form = {
+    label: options.label,
+    name: options.fieldName,
+    testId: options.testId,
+  };
+  event.before.dialog = { type: 'modal', title: '新建IP端口地址池', visible: true };
+  event.before.ui = {
+    library: 'pro-components',
+    component: 'input',
+    targetTestId: options.testId,
+    targetText: options.label,
+    form: {
+      formKind: 'pro-form',
+      fieldKind: 'input',
+      label: options.label,
+      name: options.fieldName,
+      dataIndex: options.fieldName,
+      placeholder: options.placeholder,
+      testId: options.testId,
+    },
+    locatorHints: [{ kind: 'testid', value: options.testId, score: 0.95, reason: 'issue #60 fixture' }],
+    recipe: {
+      kind: 'fill-form-field',
+      library: 'pro-components',
+      component: 'input',
+      fieldKind: 'input',
+      fieldLabel: options.label,
+      fieldName: options.fieldName,
+    },
+    confidence: 0.95,
+    reasons: ['issue #60 fixture'],
+  } as any;
+  return event;
+}
+
+function proComponentsRangeInputEvent(id: string, wallTime: number, options: { testId: string; label: string; placeholder: string; fieldName: string }, value: string): PageContextEvent {
+  const event = proComponentsRangeInputFocusEvent(id, wallTime, options);
+  event.kind = 'input';
+  event.before.ui!.form!.valuePreview = value;
+  return event;
 }
 
 function anchorGroundingFixture() {

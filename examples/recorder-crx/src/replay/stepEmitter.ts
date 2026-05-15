@@ -373,7 +373,7 @@ function stepOpensPersistentDialog(step: FlowStep) {
 
 function hasOwnPageContext(step: FlowStep) {
   const raw = step.target?.raw as { pageContext?: unknown } | undefined;
-  return !!(step.context?.before.target || step.context?.before.form || step.target?.scope?.form || raw?.pageContext);
+  return !!(step.context?.before.target || step.context?.before.form || raw?.pageContext);
 }
 
 function canInheritDialogContext(step: FlowStep) {
@@ -544,7 +544,7 @@ function popupFieldLabelFromName(value?: string) {
       .trim();
   if (!text)
     return undefined;
-  if (/选择|select|范围|路径|角色|类型|标签|分类|名称|端口|地址/i.test(text))
+  if (/选择|select|范围|路径|角色|类型|标签|分类|名称|端口|地址|WAN口|LAN口/i.test(text))
     return text;
   return undefined;
 }
@@ -2961,7 +2961,7 @@ function choiceControlText(step: FlowStep) {
 function fillTestIdLocator(step: FlowStep) {
   const testId = step.target?.testId;
   const preferred = fieldLocator(step);
-  if (testId && preferred && isContainerTestIdForFill(step, testId))
+  if (testId && preferred && (isContainerTestIdForFill(step, testId) || isFieldWrapperTestId(step, testId)))
     return undefined;
   return globalTestIdLocator(step);
 }
@@ -2980,23 +2980,143 @@ function fieldLocator(step: FlowStep, options: { allowSelectLike?: boolean } = {
   const label = step.target?.label ||
     step.target?.scope?.form?.label ||
     step.context?.before.form?.label ||
+    step.context?.before.ui?.form?.label ||
     popupFieldLabelFromName(targetText);
+  const labelForLocator = label ? normalizeRequiredLabel(label) : undefined;
+  const placeholder = fillFieldPlaceholder(step);
+  const fieldName = fillFieldName(step);
+  const fieldTestId = fillFieldTestId(step);
   const controlType = step.context?.before.target?.controlType || String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  const isTextLikeField = step.action === 'fill' || role === 'textbox' || /^(input|textarea|text|number|password)$/.test(controlType) || !!placeholder;
+  const preferFieldContext = shouldPreferWrapperInputLocator(step, { label: labelForLocator, placeholder, fieldName });
   const source = `${step.sourceCode || ''}\n${JSON.stringify(rawAction(step.rawAction))}\n${step.target?.selector || ''}\n${step.target?.locator || ''}`;
   const isSelectLikeField = options.allowSelectLike !== false && !hasExplicitTextFieldContext(step) && (/^(select|tree-select|cascader)$/.test(controlType) || step.target?.role === 'combobox' || /ant-select|ant-cascader|role=combobox/.test(source));
   if ((step.target?.role === 'button' || controlType === 'button') && !isSelectLikeField)
     return undefined;
-  if (label && isSelectLikeField)
-    return antdSelectFieldLocator(step) || `page.getByRole('combobox', { name: ${stringLiteral(label)} })`;
-  if (label) {
-    const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);
-    return `${root}.getByLabel(${stringLiteral(label)})`;
+  if (isTextLikeField && fieldTestId && isFieldWrapperTestId(step, fieldTestId) && preferFieldContext) {
+    const root = testIdLocatorWithOrdinal(step, fieldTestId, step.target?.testId === fieldTestId ? 'target' : 'context');
+    if (placeholder)
+      return `${root}.getByPlaceholder(${stringLiteral(placeholder)})`;
+    if (fieldName)
+      return `${root}.locator(${stringLiteral(fieldNameInputSelector(fieldName))}).first()`;
+    if (isFieldWrapperTestId(step, fieldTestId))
+      return `${root}.locator(${stringLiteral('input:visible, textarea:visible, [contenteditable="true"]')}).first()`;
   }
-  if (step.target?.placeholder) {
+  if (isTextLikeField && placeholder && preferFieldContext) {
     const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);
-    return `${root}.getByPlaceholder(${stringLiteral(step.target.placeholder)})`;
+    return `${root}.getByPlaceholder(${stringLiteral(placeholder)})`;
+  }
+  if (isTextLikeField && fieldName && preferFieldContext) {
+    const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);
+    return `${root}.locator(${stringLiteral(fieldNameInputSelector(fieldName))}).first()`;
+  }
+  if (labelForLocator && isSelectLikeField)
+    return antdSelectFieldLocator(step) || `page.getByRole('combobox', { name: ${stringLiteral(labelForLocator)} })`;
+  if (labelForLocator) {
+    const root = dialogRootLocator(step.target?.scope?.dialog || step.context?.before.dialog);
+    return `${root}.getByLabel(${stringLiteral(labelForLocator)})`;
   }
   return undefined;
+}
+
+function fillFieldTestId(step: FlowStep) {
+  return step.target?.testId ||
+    step.target?.scope?.form?.testId ||
+    step.context?.before.form?.testId ||
+    step.context?.before.ui?.form?.testId ||
+    step.context?.before.target?.testId;
+}
+
+function fillFieldName(step: FlowStep) {
+  return step.target?.name ||
+    step.target?.scope?.form?.name ||
+    step.context?.before.ui?.form?.name ||
+    step.context?.before.ui?.form?.dataIndex ||
+    step.context?.before.form?.name;
+}
+
+function fillFieldPlaceholder(step: FlowStep) {
+  return step.target?.placeholder ||
+    step.context?.before.ui?.form?.placeholder ||
+    step.context?.before.target?.placeholder;
+}
+
+function isFieldWrapperTestId(step: FlowStep, testId: string) {
+  if (looksLikeStructuralFormTestId(testId))
+    return false;
+  if (testId === step.target?.testId && looksLikeActualControlTestId(testId))
+    return false;
+  if (stepHasActualControlTestId(step, testId))
+    return false;
+  return hasObservedFieldWrapperTestId(step, testId);
+}
+
+function shouldPreferWrapperInputLocator(step: FlowStep, field: { label?: string; placeholder?: string; fieldName?: string }) {
+  const library = step.context?.before.ui?.library || step.uiRecipe?.library;
+  if (library === 'pro-components')
+    return true;
+  const label = normalizeGeneratedText(field.label);
+  return !label;
+}
+
+function fieldNameInputSelector(name: string) {
+  return `input[name="${cssAttributeValue(name)}"], textarea[name="${cssAttributeValue(name)}"]`;
+}
+
+function stepHasActualControlTestId(step: FlowStep, testId: string) {
+  const contextTarget = step.context?.before.target;
+  const rawTarget = rawPageContextTarget(step.target?.raw);
+  if (contextTarget?.testId === testId)
+    return isActualTextControl(contextTarget, step.target?.role);
+  if (rawTarget?.testId === testId)
+    return isActualTextControl(rawTarget, step.target?.role);
+  if (hasObservedFieldWrapperTestId(step, testId) || step.target?.testId !== testId)
+    return false;
+  return isActualTextControl({
+    role: step.target?.role,
+    controlType: String((step.target?.raw as { controlType?: unknown } | undefined)?.controlType || ''),
+  });
+}
+
+function hasObservedFieldWrapperTestId(step: FlowStep, testId: string) {
+  const rawPageContext = rawPageContextFromTarget(step.target?.raw);
+  return step.context?.before.form?.testId === testId ||
+    step.context?.before.ui?.form?.testId === testId ||
+    rawPageContextFormTestId(rawPageContext) === testId;
+}
+
+function rawPageContextFromTarget(raw: unknown, depth = 0): any {
+  if (!raw || typeof raw !== 'object' || depth > 4)
+    return undefined;
+  const record = raw as { pageContext?: unknown; incoming?: unknown; previous?: unknown; inputTransaction?: { target?: { raw?: unknown } } };
+  return record.pageContext ||
+    rawPageContextFromTarget(record.inputTransaction?.target?.raw, depth + 1) ||
+    rawPageContextFromTarget(record.incoming, depth + 1) ||
+    rawPageContextFromTarget(record.previous, depth + 1);
+}
+
+function rawPageContextTarget(raw: unknown): any {
+  return rawPageContextFromTarget(raw)?.target;
+}
+
+function rawPageContextFormTestId(pageContext: any) {
+  return pageContext?.form?.testId || pageContext?.ui?.form?.testId;
+}
+
+function isActualTextControl(target: { role?: unknown; controlType?: unknown; tag?: unknown }, fallbackRole?: string) {
+  const role = String(target.role || fallbackRole || '');
+  const controlType = String(target.controlType || '');
+  const tag = String(target.tag || '').toLowerCase();
+  return role === 'textbox' || /^(input|textarea)$/.test(tag) || /^(input|textarea|text|number|password)$/.test(controlType);
+}
+
+function looksLikeActualControlTestId(testId: string) {
+  return /(^|[-_])(input|textarea|textbox|digit|number|password)([-_]|$)/i.test(testId);
+}
+
+function looksLikeStructuralFormTestId(testId: string) {
+  return /(^|[-_])(modal|dialog|drawer|form|container|wrapper|root)([-_]|$)/i.test(testId);
 }
 
 function globalRoleLocator(step: FlowStep) {
