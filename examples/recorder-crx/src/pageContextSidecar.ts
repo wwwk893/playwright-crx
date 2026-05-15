@@ -233,19 +233,25 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
     wallTime: Date.now(),
     before,
   };
-  const emit = (contextEvent: typeof baseEvent & { after?: Awaited<ReturnType<typeof collectAfterContext>> }) => chrome.runtime.sendMessage({
+  const emit = (contextEvent: typeof baseEvent & { after?: ReturnType<typeof collectAfterContext> }) => chrome.runtime.sendMessage({
     event: 'pageContextEvent',
     contextEvent,
   }).catch(() => {});
 
   if (kind === 'click') {
     const overlayPrediction = startOverlayPredictionForClick(before.target);
+    let emittedAfter: ReturnType<typeof collectAfterContext> | undefined;
+    let resolvedOverlayPrediction: OverlayPrediction | undefined;
     emit(baseEvent);
     window.setTimeout(() => {
-      collectAfterContext(before.dialog, overlayPrediction)
-          .then(after => emit({ ...baseEvent, after }))
-          .catch(() => emit(baseEvent));
+      emittedAfter = collectAfterContext(before.dialog);
+      emit({ ...baseEvent, after: withOverlayPrediction(emittedAfter, resolvedOverlayPrediction) });
     }, 160);
+    overlayPrediction?.then(prediction => {
+      resolvedOverlayPrediction = prediction;
+      if (emittedAfter)
+        emit({ ...baseEvent, after: withOverlayPrediction(emittedAfter, prediction) });
+    }).catch(() => {});
   } else {
     emit(baseEvent);
   }
@@ -345,7 +351,7 @@ function collectSafeAnchorGroundingEvidence(target: Element, anchor: Element, ev
   }
 }
 
-async function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>, overlayPrediction?: Promise<OverlayPrediction | undefined>) {
+function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>) {
   const openedDialog = collectOpenedOverlay(beforeDialog);
   const dialog = openedDialog ?? collectTopVisibleOverlay();
   return compactObject({
@@ -355,8 +361,16 @@ async function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContex
     activeTab: collectActiveTab(),
     dialog,
     openedDialog,
-    overlayPrediction: await overlayPrediction?.catch(() => undefined),
     toast: textFromFirst('.ant-message-notice-content, .ant-notification-notice-message, .toast, [role="alert"]'),
+  });
+}
+
+function withOverlayPrediction(after: ReturnType<typeof collectAfterContext>, overlayPrediction?: OverlayPrediction) {
+  if (!overlayPrediction)
+    return after;
+  return compactObject({
+    ...after,
+    overlayPrediction,
   });
 }
 

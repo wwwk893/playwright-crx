@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
-import { createOverlayPrediction, expectedOverlayKindForTrigger, type OverlayPredictionCandidate } from '../capture/overlayPrediction';
+import { createOverlayPrediction, expectedOverlayKindForTrigger, newOverlayPredictionCandidates, overlayPredictionSignatureCounts, type OverlayPredictionCandidate } from '../capture/overlayPrediction';
 import { extractTargetFromRecorderAction } from '../capture/targetFromRecorderSelector';
 import { equivalentAnchorCandidates, rankAnchorCandidates } from '../uiSemantics/anchorDiagnostics';
 import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from '../uiSemantics/anchorGrounding';
@@ -148,6 +148,31 @@ const tests: TestCase[] = [
       });
       assertEqual(ambiguousPrediction.status, 'ambiguous');
       assertEqual(ambiguousPrediction.candidates?.length, 2);
+    },
+  },
+  {
+    name: 'overlay prediction duplicate filtering preserves stable signatures across transitions',
+    run: () => {
+      const existing = overlayPredictionCandidate('popconfirm', '删除此行？');
+      const newDuplicate = overlayPredictionCandidate('popconfirm', '删除此行？');
+      const observedAfter = [existing, newDuplicate];
+      const newCandidates = newOverlayPredictionCandidates(
+          observedAfter,
+          overlayPredictionSignatureCounts([existing]),
+      );
+
+      assertEqual(newCandidates.length, 1);
+      assertEqual(newCandidates[0].signature, existing.signature);
+      assert(!newCandidates[0].signature.includes(':#'), 'duplicate overlay signature should remain stable');
+      assertEqual(createOverlayPrediction({
+        expectedKind: 'popconfirm',
+        candidates: newCandidates,
+      }).status, 'resolved');
+
+      assertEqual(createOverlayPrediction({
+        expectedKind: 'popconfirm',
+        candidates: newOverlayPredictionCandidates(observedAfter, overlayPredictionSignatureCounts([])),
+      }).status, 'ambiguous');
     },
   },
   {

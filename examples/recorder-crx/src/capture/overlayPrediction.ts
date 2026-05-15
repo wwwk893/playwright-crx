@@ -140,7 +140,7 @@ export function collectOverlayPredictionCandidates(options: {
   const root = options.root || document;
   const now = options.now || defaultNow;
   const elements = Array.from(root.querySelectorAll(overlayPredictionSelectors));
-  const candidates = elements
+  return elements
       .filter(element => (options.isVisible || defaultIsVisible)(element))
       .map(element => overlayPredictionCandidateForElement(element, {
         observedAt: now(),
@@ -148,7 +148,6 @@ export function collectOverlayPredictionCandidates(options: {
         testIdForElement: options.testIdForElement,
       }))
       .filter(Boolean) as OverlayPredictionCandidate[];
-  return disambiguateDuplicateCandidateSignatures(candidates);
 }
 
 export function observeOverlayPrediction(options: OverlayPredictionObserverOptions): Promise<OverlayPrediction> {
@@ -158,7 +157,7 @@ export function observeOverlayPrediction(options: OverlayPredictionObserverOptio
   const settleMs = options.settleMs ?? 80;
   const now = options.now || defaultNow;
   const startedAt = now();
-  const beforeSignatures = new Set(collectOverlayPredictionCandidates(options).map(candidate => candidate.signature));
+  const beforeSignatureCounts = overlayPredictionSignatureCounts(collectOverlayPredictionCandidates(options));
   let done = false;
   let observer: MutationObserver | undefined;
   let settleTimer: number | undefined;
@@ -174,8 +173,10 @@ export function observeOverlayPrediction(options: OverlayPredictionObserverOptio
       if (timeoutTimer)
         window.clearTimeout(timeoutTimer);
       observer?.disconnect();
-      const candidates = collectOverlayPredictionCandidates(options)
-          .filter(candidate => !beforeSignatures.has(candidate.signature));
+      const candidates = newOverlayPredictionCandidates(
+          collectOverlayPredictionCandidates(options),
+          beforeSignatureCounts,
+      );
       resolve(createOverlayPrediction({
         expectedKind: options.expectedKind,
         candidates,
@@ -199,6 +200,22 @@ export function observeOverlayPrediction(options: OverlayPredictionObserverOptio
       attributeFilter: ['class', 'style', 'aria-hidden'],
     });
     timeoutTimer = window.setTimeout(finish, timeoutMs);
+  });
+}
+
+export function overlayPredictionSignatureCounts(candidates: OverlayPredictionCandidate[]) {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates)
+    counts.set(candidate.signature, (counts.get(candidate.signature) || 0) + 1);
+  return counts;
+}
+
+export function newOverlayPredictionCandidates(candidates: OverlayPredictionCandidate[], beforeSignatureCounts: ReadonlyMap<string, number>) {
+  const seenAfterCounts = new Map<string, number>();
+  return candidates.filter(candidate => {
+    const seenAfterCount = (seenAfterCounts.get(candidate.signature) || 0) + 1;
+    seenAfterCounts.set(candidate.signature, seenAfterCount);
+    return seenAfterCount > (beforeSignatureCounts.get(candidate.signature) || 0);
   });
 }
 
@@ -252,23 +269,6 @@ function dialogTypeForOverlayPredictionKind(kind: OverlayPredictionKind): Dialog
 function looksLikePopconfirm(candidate: OverlayPredictionCandidate) {
   const text = normalizeOverlayPredictionText([candidate.title, candidate.testId].filter(Boolean).join(' '));
   return /(popconfirm|confirm|delete|remove|删除|移除|确认|确定)/i.test(text);
-}
-
-function disambiguateDuplicateCandidateSignatures(candidates: OverlayPredictionCandidate[]) {
-  const counts = new Map<string, number>();
-  for (const candidate of candidates)
-    counts.set(candidate.signature, (counts.get(candidate.signature) || 0) + 1);
-  const indexes = new Map<string, number>();
-  return candidates.map(candidate => {
-    if ((counts.get(candidate.signature) || 0) <= 1)
-      return candidate;
-    const index = (indexes.get(candidate.signature) || 0) + 1;
-    indexes.set(candidate.signature, index);
-    return {
-      ...candidate,
-      signature: `${candidate.signature}:#${index}`,
-    };
-  });
 }
 
 function overlayPredictionSignature(candidate: Pick<OverlayPredictionCandidate, 'overlayKind' | 'title' | 'testId'>) {
