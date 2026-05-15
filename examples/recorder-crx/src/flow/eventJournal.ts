@@ -13,6 +13,10 @@ export type EventJournalStats = {
   eventCount: number;
   recorderActionCount: number;
   pageContextEventCount: number;
+  overlayPredictionCount: number;
+  overlayPredictionResolvedCount: number;
+  overlayPredictionExpiredCount: number;
+  overlayPredictionAmbiguousCount: number;
   lastEventAt?: number;
   lastRecorderActionAt?: number;
   lastPageContextEventAt?: number;
@@ -71,10 +75,18 @@ export function appendPageContextEvents(recorder: FlowRecorderState, events: Pag
 export function eventJournalStats(recorder: FlowRecorderState): EventJournalStats {
   const journal = ensureEventJournal(recorder);
   const events = journal.eventOrder.map(id => journal.eventsById[id]).filter(Boolean);
+  const overlayPredictions = events
+      .filter(event => event.source === 'page-context')
+      .map(event => (event.payload as PageContextEvent | undefined)?.after?.overlayPrediction)
+      .filter(Boolean);
   return {
     eventCount: events.length,
     recorderActionCount: recorderEventCount(journal),
     pageContextEventCount: pageContextEventCount(journal),
+    overlayPredictionCount: overlayPredictions.length,
+    overlayPredictionResolvedCount: overlayPredictions.filter(prediction => prediction?.status === 'resolved').length,
+    overlayPredictionExpiredCount: overlayPredictions.filter(prediction => prediction?.status === 'expired').length,
+    overlayPredictionAmbiguousCount: overlayPredictions.filter(prediction => prediction?.status === 'ambiguous').length,
     lastEventAt: lastWallTime(events),
     lastRecorderActionAt: lastWallTime(events.filter(event => event.source === 'playwright-recorder')),
     lastPageContextEventAt: lastWallTime(events.filter(event => event.source === 'page-context')),
@@ -144,6 +156,7 @@ function compactPageContextEvent(event: PageContextEvent) {
       activeTab: event.after.activeTab,
       dialog: event.after.dialog,
       openedDialog: event.after.openedDialog,
+      overlayPrediction: event.after.overlayPrediction,
       toast: event.after.toast,
     } : undefined,
   };

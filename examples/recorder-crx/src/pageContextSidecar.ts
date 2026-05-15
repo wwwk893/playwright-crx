@@ -12,6 +12,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 import { collectUiSemanticContext } from './uiSemantics';
+import { expectedOverlayKindForTrigger, observeOverlayPrediction, type OverlayPrediction } from './capture/overlayPrediction';
 import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from './uiSemantics/anchorGrounding';
 import { compactSemanticDiagnostic, compactSemanticDisabledDiagnostic, recordSemanticDiagnostic, semanticDiagnostics } from './uiSemantics/diagnostics';
 import type { UiSemanticContext } from './uiSemantics/types';
@@ -232,17 +233,19 @@ function recordEventForTarget(kind: ContextEventKind, event: Event, target?: Ele
     wallTime: Date.now(),
     before,
   };
-  const emit = (contextEvent: typeof baseEvent & { after?: ReturnType<typeof collectAfterContext> }) => chrome.runtime.sendMessage({
+  const emit = (contextEvent: typeof baseEvent & { after?: Awaited<ReturnType<typeof collectAfterContext>> }) => chrome.runtime.sendMessage({
     event: 'pageContextEvent',
     contextEvent,
   }).catch(() => {});
 
   if (kind === 'click') {
+    const overlayPrediction = startOverlayPredictionForClick(before.target);
     emit(baseEvent);
-    window.setTimeout(() => emit({
-      ...baseEvent,
-      after: collectAfterContext(before.dialog),
-    }), 160);
+    window.setTimeout(() => {
+      collectAfterContext(before.dialog, overlayPrediction)
+          .then(after => emit({ ...baseEvent, after }))
+          .catch(() => emit(baseEvent));
+    }, 160);
   } else {
     emit(baseEvent);
   }
@@ -342,7 +345,7 @@ function collectSafeAnchorGroundingEvidence(target: Element, anchor: Element, ev
   }
 }
 
-function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>) {
+async function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>, overlayPrediction?: Promise<OverlayPrediction | undefined>) {
   const openedDialog = collectOpenedOverlay(beforeDialog);
   const dialog = openedDialog ?? collectTopVisibleOverlay();
   return compactObject({
@@ -352,8 +355,26 @@ function collectAfterContext(beforeDialog?: ReturnType<typeof dialogContext>) {
     activeTab: collectActiveTab(),
     dialog,
     openedDialog,
+    overlayPrediction: await overlayPrediction?.catch(() => undefined),
     toast: textFromFirst('.ant-message-notice-content, .ant-notification-notice-message, .toast, [role="alert"]'),
   });
+}
+
+function startOverlayPredictionForClick(contextTarget?: ReturnType<typeof collectElement>) {
+  const expectedKind = expectedOverlayKindForTrigger(contextTarget);
+  if (!expectedKind)
+    return undefined;
+  return observeOverlayPrediction({
+    root: document,
+    expectedKind,
+    isVisible,
+    titleForElement: overlayTitleForElement,
+    testIdForElement: testIdOf,
+  });
+}
+
+function overlayTitleForElement(element: Element) {
+  return textFromFirst('.ant-modal-title, .ant-drawer-title, .ant-popover-title, [class*="title"], h1, h2, h3, h4', element);
 }
 
 function collectElement(element: Element, knownAnchor?: Element) {

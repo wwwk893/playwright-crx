@@ -15,6 +15,10 @@ export type FinalizeRecordingReason = 'stop-recording' | 'enter-review' | 'expor
 export type FinalizerCounts = {
   recorderActionCount: number;
   pageContextEventCount: number;
+  overlayPredictionCount: number;
+  overlayPredictionResolvedCount: number;
+  overlayPredictionExpiredCount: number;
+  overlayPredictionAmbiguousCount: number;
   pendingContextCount: number;
   openTransactionCount: number;
   lastEventAt?: number;
@@ -118,6 +122,10 @@ export function finalizerCounts(flow: BusinessFlow): FinalizerCounts {
     return {
       recorderActionCount: 0,
       pageContextEventCount: 0,
+      overlayPredictionCount: 0,
+      overlayPredictionResolvedCount: 0,
+      overlayPredictionExpiredCount: 0,
+      overlayPredictionAmbiguousCount: 0,
       pendingContextCount: 0,
       openTransactionCount: 0,
     };
@@ -129,6 +137,10 @@ export function finalizerCounts(flow: BusinessFlow): FinalizerCounts {
   return {
     recorderActionCount: stats.recorderActionCount,
     pageContextEventCount: stats.pageContextEventCount,
+    overlayPredictionCount: stats.overlayPredictionCount,
+    overlayPredictionResolvedCount: stats.overlayPredictionResolvedCount,
+    overlayPredictionExpiredCount: stats.overlayPredictionExpiredCount,
+    overlayPredictionAmbiguousCount: stats.overlayPredictionAmbiguousCount,
     pendingContextCount: openTransactionCount,
     openTransactionCount,
     lastEventAt: stats.lastEventAt,

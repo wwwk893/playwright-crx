@@ -5,6 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
+import { createOverlayPrediction, expectedOverlayKindForTrigger, type OverlayPredictionCandidate } from '../capture/overlayPrediction';
 import { extractTargetFromRecorderAction } from '../capture/targetFromRecorderSelector';
 import { equivalentAnchorCandidates, rankAnchorCandidates } from '../uiSemantics/anchorDiagnostics';
 import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from '../uiSemantics/anchorGrounding';
@@ -114,6 +115,78 @@ const tests: TestCase[] = [
       assert(now >= 160, 'finalizer should respect maxWaitMs when facts keep changing');
       assert(diagnostics.some(event => event.type === 'finalize.timeout'), 'finalizer should emit timeout diagnostics');
       assert(diagnostics.some(event => event.data?.reason === 'enter-review'), 'timeout diagnostics should include reason');
+    },
+  },
+  {
+    name: 'overlay prediction shadow mode resolves expected overlay outcomes without changing steps',
+    run: () => {
+      assertEqual(expectedOverlayKindForTrigger({ controlType: 'select', text: 'IP地址池' }), 'select-dropdown');
+      assertEqual(expectedOverlayKindForTrigger({ testId: 'network-resource-create-button', text: '新增' }), 'modal');
+      assertEqual(expectedOverlayKindForTrigger({ testId: 'wan-row-delete-button', text: '删除' }), 'popconfirm');
+
+      const selectPrediction = createOverlayPrediction({
+        expectedKind: 'select-dropdown',
+        candidates: [overlayPredictionCandidate('select-dropdown', 'IP地址池')],
+        elapsedMs: 120,
+      });
+      assertEqual(selectPrediction.status, 'resolved');
+      assertEqual(selectPrediction.resolved?.overlayKind, 'select-dropdown');
+
+      const expiredPrediction = createOverlayPrediction({
+        expectedKind: 'modal',
+        candidates: [],
+        elapsedMs: 420,
+      });
+      assertEqual(expiredPrediction.status, 'expired');
+
+      const ambiguousPrediction = createOverlayPrediction({
+        expectedKind: 'popconfirm',
+        candidates: [
+          overlayPredictionCandidate('popconfirm', '删除此行？', 'delete-confirm-1'),
+          overlayPredictionCandidate('popconfirm', '删除此行？', 'delete-confirm-2'),
+        ],
+      });
+      assertEqual(ambiguousPrediction.status, 'ambiguous');
+      assertEqual(ambiguousPrediction.candidates?.length, 2);
+    },
+  },
+  {
+    name: 'event journal preserves overlay prediction diagnostics without changing exported flow context',
+    run: async () => {
+      const prediction = createOverlayPrediction({
+        expectedKind: 'modal',
+        candidates: [overlayPredictionCandidate('modal', '新建网络资源')],
+        elapsedMs: 96,
+      });
+      const event = pageClickEvent('ctx-overlay-prediction', 1100, '新增');
+      event.after = {
+        dialog: { type: 'modal', title: '新建网络资源', visible: true },
+        overlayPrediction: prediction,
+      };
+      const flow = mergePageContextIntoFlow(createNamedFlow(), [event]);
+      const recorder = flow.artifacts?.recorder;
+      assert(recorder?.eventJournal, 'event journal should exist');
+      const stats = eventJournalStats(recorder);
+      assertEqual(stats.pageContextEventCount, 1);
+      assertEqual(stats.overlayPredictionCount, 1);
+      assertEqual(stats.overlayPredictionResolvedCount, 1);
+      const envelope = recorder.eventJournal.eventsById['page-context:ctx-overlay-prediction'];
+      assertEqual((envelope.payload as PageContextEvent).after?.overlayPrediction?.status, 'resolved');
+
+      const diagnostics: Array<{ type: string; data?: any }> = [];
+      await finalizeRecordingSession(flow, {
+        reason: 'export',
+        stableForMs: 0,
+        maxWaitMs: 0,
+        now: () => 0,
+        wait: async () => {},
+        diagnostics: event => diagnostics.push(event),
+      });
+      assert(diagnostics.some(event => event.data?.counts?.overlayPredictionResolvedCount === 1), 'finalizer diagnostics should include overlay prediction counts');
+
+      const exported = JSON.stringify(prepareBusinessFlowForExport(flow));
+      assert(!exported.includes('overlayPrediction'), 'exported flow should omit internal overlay prediction diagnostics');
+      assert(!toCompactFlow(flow).includes('overlayPrediction'), 'compact flow should omit internal overlay prediction diagnostics');
     },
   },
   {
@@ -12319,6 +12392,17 @@ function semanticUi(options: {
     locatorHints: [{ kind: 'testid', value: 'semantic-test', score: 0.9, reason: 'test fixture' }],
     confidence: 0.9,
     reasons: ['test fixture'],
+  };
+}
+
+function overlayPredictionCandidate(kind: OverlayPredictionCandidate['overlayKind'], title: string, testId?: string): OverlayPredictionCandidate {
+  return {
+    type: kind === 'modal' ? 'modal' : kind === 'drawer' ? 'drawer' : kind === 'select-dropdown' || kind === 'dropdown' ? 'dropdown' : 'popover',
+    overlayKind: kind,
+    title,
+    testId,
+    visible: true,
+    signature: [kind, testId, title].filter(Boolean).join(':'),
   };
 }
 
