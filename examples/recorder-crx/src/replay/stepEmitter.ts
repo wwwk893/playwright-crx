@@ -1132,7 +1132,23 @@ function stepAssertionsForEmission(step: FlowStep, options: EmitStepOptions = {}
   return step.assertions.filter(assertion => assertion.enabled &&
     (!options.suppressRowExistsAssertions || assertion.type !== 'row-exists') &&
     (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion)) &&
+    !isOverlayClosedAssertionSupersededByNextDialog(assertion, options.nextStep) &&
     !isNoisyDropdownOptionSelectedValueAssertion(step, assertion));
+}
+
+function isOverlayClosedAssertionSupersededByNextDialog(assertion: FlowAssertion, nextStep?: FlowStep) {
+  if (assertion.type !== 'modal-closed' && assertion.type !== 'drawer-closed')
+    return false;
+  const nextDialog = nextStep?.target?.scope?.dialog || nextStep?.context?.before.dialog;
+  if (!isPersistentDialog(nextDialog))
+    return false;
+  const assertionDialog: FlowDialogScope = {
+    type: assertion.type === 'drawer-closed' ? 'drawer' : 'modal',
+    visible: false,
+    title: stringParam(assertion.params?.title),
+    testId: stringParam(assertion.params?.testId),
+  };
+  return !sameDialogScope(nextDialog, assertionDialog);
 }
 
 function isNoisyDropdownOptionSelectedValueAssertion(step: FlowStep, assertion: FlowAssertion) {
@@ -1202,6 +1218,8 @@ function shouldPreserveRecordedDisambiguatedSource(sourceCode: string[], step: F
     return false;
   if (isDropdownOptionLikeClick(step))
     return false;
+  if (hasStrongerStructuredRoleScope(step))
+    return false;
   const role = step.target?.role || step.context?.before.target?.role || '';
   if (role === 'tooltip')
     return false;
@@ -1220,6 +1238,24 @@ function shouldPreserveRecordedDisambiguatedSource(sourceCode: string[], step: F
   if (/(?:getByTestId|locator)\([^)]*\)\.getBy(?:Role|Text|Label)\(/.test(joined) || /\.filter\([^)]*\)\.getBy(?:Role|Text|Label)\(/.test(joined))
     return true;
   return false;
+}
+
+function hasStrongerStructuredRoleScope(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role;
+  const targetName = targetNameForLocator(step);
+  if (!role || !targetName)
+    return false;
+
+  const table = step.target?.scope?.table || step.context?.before.table;
+  if (table?.testId && (table.rowKey || table.rowIdentity?.stable || table.rowText))
+    return true;
+
+  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  if (dialog && (dialog.testId || dialog.title) && dialog.visible !== false)
+    return true;
+
+  const section = step.target?.scope?.section || step.context?.before.section;
+  return !!section?.testId;
 }
 
 function shouldPreserveRecordedOpenerTestIdSource(sourceCode: string[], step: FlowStep) {

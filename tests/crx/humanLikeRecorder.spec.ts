@@ -178,14 +178,17 @@ test('human-like records SD-WAN WAN2 transport delete flow and replays through A
       { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
   );
   await expect(wanDialog).toBeVisible({ timeout: 10_000 });
-  await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('Nova专线');
+  const transportRow = wanDialog.getByTestId('wan-transport-row').filter({ hasText: 'Nova专线' }).first();
+  await expect(transportRow).toContainText('Nova专线');
 
   const popconfirm = deletePopconfirm(page);
-  await humanClickUntil(
-      wanDialog.getByTestId('wan-transport-row-delete-action'),
-      async () => await isActionablePopconfirm(popconfirm),
-      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
-  );
+  const deleteAction = wanDialog.getByTestId('wan-transport-row-delete-action').first();
+  for (let attempt = 0; attempt < 8 && !await isActionablePopconfirm(popconfirm); attempt++) {
+    await transportRow.hover({ timeout: 2_000 }).catch(() => {});
+    await expect(deleteAction).toBeVisible({ timeout: 10_000 });
+    await humanClickVisible(deleteAction, { delayMs: 80, ...strictHumanOptions });
+    await page.waitForTimeout(300);
+  }
   await expect.poll(() => isActionablePopconfirm(popconfirm), { timeout: 10_000 }).toBeTruthy();
   await humanClickUntil(
       popconfirmConfirmButton(popconfirm),
@@ -292,14 +295,17 @@ test('human-like records shared WAN duplicate row edit action and replays stably
       { attempts: 5, afterClickDelayMs: 500, ...strictHumanOptions },
   );
   await expect(wanDialog).toBeVisible({ timeout: 10_000 });
-  await expect(wanDialog.getByTestId('wan-transport-row')).toContainText('HS Internet');
+  const transportRow = wanDialog.getByTestId('wan-transport-row').filter({ hasText: 'HS Internet' }).first();
+  await expect(transportRow).toContainText('HS Internet');
 
   const popconfirm = deletePopconfirm(page);
-  await humanClickUntil(
-      wanDialog.getByTestId('ha-wan-transport-row-delete-action'),
-      async () => await isActionablePopconfirm(popconfirm),
-      { attempts: 5, afterClickDelayMs: 300, ...strictHumanOptions },
-  );
+  const deleteAction = wanDialog.getByTestId('ha-wan-transport-row-delete-action').first();
+  for (let attempt = 0; attempt < 8 && !await isActionablePopconfirm(popconfirm); attempt++) {
+    await transportRow.hover({ timeout: 2_000 }).catch(() => {});
+    await expect(deleteAction).toBeVisible({ timeout: 10_000 });
+    await humanClickVisible(deleteAction, { delayMs: 80, ...strictHumanOptions });
+    await page.waitForTimeout(300);
+  }
   await expect.poll(() => isActionablePopconfirm(popconfirm), { timeout: 10_000 }).toBeTruthy();
   await humanClickUntil(
       popconfirmConfirmButton(popconfirm),

@@ -2122,6 +2122,64 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'recorded exact role source with dialog scope prefers dialog scoped exact locator',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          sourceCode: `await page.getByRole('button', { name: 'Create', exact: true }).click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            scope: { dialog: { title: 'Create Environment', type: 'modal', visible: true } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]").filter({ hasText: "Create Environment" }).getByRole("button", { name: "Create", exact: true }).click();'), 'dialog scope should be stronger than preserving a global exact recorded source');
+      assert(!code.includes(`page.getByRole('button', { name: 'Create', exact: true }).click();`), 'dialog-scoped replay must not be replaced by the recorded global exact source');
+    },
+  },
+  {
+    name: 'recorded exact role source with section scope prefers section scoped exact locator',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's002',
+          order: 2,
+          kind: 'recorded',
+          action: 'click',
+          sourceCode: `await page.getByRole('button', { name: 'Create', exact: true }).click();`,
+          rawAction: { action: { name: 'click', selector: 'internal:role=button[name="Create"s]' } },
+          target: {
+            selector: 'internal:role=button[name="Create"s]',
+            role: 'button',
+            name: 'Create',
+            text: 'Create',
+            displayName: 'Create',
+            scope: { section: { testId: 'environment-toolbar', kind: 'section' } },
+          },
+          assertions: [],
+        }],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+
+      assert(code.includes('page.getByTestId("environment-toolbar").getByRole("button", { name: "Create", exact: true }).click();'), 'section scope should be stronger than preserving a global exact recorded source');
+      assert(!code.includes(`page.getByRole('button', { name: 'Create', exact: true }).click();`), 'section-scoped replay must not be replaced by the recorded global exact source');
+    },
+  },
+  {
     name: 'replay compiler omits redundant AntD select trigger and search before option workaround',
     run: () => {
       const flow: BusinessFlow = {
@@ -11950,6 +12008,62 @@ test('demo', async ({ page }) => {
       const types = enriched.steps.flatMap(step => step.assertions.map(assertion => assertion.type));
 
       assert(!types.includes('modal-closed'), 'submit-like modal button should not infer modal-closed while another dialog remains visible');
+    },
+  },
+  {
+    name: 'emitter skips modal-closed wait before captured second dialog action',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: {
+              testId: 'config-modal-confirm-button',
+              displayName: '确定',
+              scope: { dialog: { type: 'modal', title: '编辑配置', visible: true } },
+            },
+            context: {
+              eventId: 'ctx-submit',
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'modal', title: '编辑配置', visible: true },
+                target: { tag: 'button', testId: 'config-modal-confirm-button', controlType: 'button', text: '确定' },
+              },
+            },
+            assertions: [
+              createTerminalStateAssertion('modal-closed', 's001-terminal-1', { title: '编辑配置' }),
+            ],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: {
+              role: 'button',
+              text: '确定',
+              scope: { dialog: { type: 'modal', title: '二次确认', visible: true } },
+            },
+            context: {
+              eventId: 'ctx-second-confirm',
+              capturedAt: 1100,
+              before: {
+                dialog: { type: 'modal', title: '二次确认', visible: true },
+                target: { tag: 'button', role: 'button', controlType: 'button', text: '确定' },
+              },
+            },
+            assertions: [],
+          },
+        ],
+      };
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const secondStep = stepCodeBlock(code, 's002');
+
+      assert(!code.includes('filter({ hasText: "编辑配置" }).waitFor({ state: "hidden"'), 'modal-closed assertion should not block before a captured second dialog action');
+      assert(secondStep.includes('filter({ hasText: "二次确认" }).getByRole("button"'), 'second dialog action should remain scoped to the active dialog');
+      assert(secondStep.includes('.click();'), 'second dialog action should still be emitted');
     },
   },
   {

@@ -284,7 +284,7 @@ test('records a real AntD ProComponents async create-and-use flow @smoke', async
   expect(flow.artifacts.playwrightCode).toContain('antd-pro-real.html');
   expect(flow.artifacts.playwrightCode).toMatch(/real-create-item|新建条目/);
   expect(flow.artifacts.playwrightCode).toContain('real-item-a');
-  expectScopedActiveAntdOptionReplay(flow.artifacts.playwrightCode, '下方表单使用条目', 'real-item-a');
+  expectScopedActiveAntdOptionReplay(flow.artifacts.playwrightCode, '下方表单使用条目', 'real-item-a', 'real-used-item-select');
   expect(flow.artifacts.playwrightCode).not.toMatch(/getByRole\(["']combobox["'],\s*\{\s*name:\s*["']下方表单使用条目["']/);
   expect(flow.artifacts.playwrightCode).not.toContain('#rc_select_');
   expect(flow.artifacts.playwrightCode).not.toMatch(/page\.getByText\(["']real-item-a["']\)\.click\(\)/);
@@ -785,32 +785,11 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   const option = options.first();
   await expect(option).toBeVisible({ timeout: 10_000 });
   await humanClick(option).catch(async () => {
-    await dispatchAntDOptionClick(page, options, text);
+    await option.click({ timeout: 10_000 });
   });
   if (await option.isVisible().catch(() => false))
-    await dispatchAntDOptionClick(page, options, text);
-  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 5000 }).catch(async () => {
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
-  });
-}
-
-async function dispatchAntDOptionClick(page: Page, options: ReturnType<Page['locator']>, text: string) {
-  const option = options.first();
-  await option.evaluate((element, expectedText) => {
-    const normalize = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
-    const expected = normalize(expectedText);
-    const optionText = normalize((element.querySelector('.ant-select-item-option-content') as HTMLElement | null)?.textContent);
-    const text = normalize(element.textContent);
-    const title = normalize(element.getAttribute('title'));
-    if (title !== expected && optionText !== expected && text !== expected)
-      throw new Error(`AntD option not found exactly: ${expected}`);
-    element.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  }, text);
+    await option.click({ timeout: 10_000, force: true });
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 5000 });
 }
 
 function escapeRegExp(text: string) {
@@ -974,9 +953,12 @@ function expectInOrder(text: string, markers: Array<string | RegExp>) {
   }
 }
 
-function expectScopedActiveAntdOptionReplay(code: string, fieldLabel: string, optionText: string) {
+function expectScopedActiveAntdOptionReplay(code: string, fieldLabel: string, optionText: string, triggerTestId?: string) {
   const scopedTrigger = new RegExp(`page\\.locator\\(["']\\.ant-form-item["']\\)\\.filter\\(\\{\\s*hasText:\\s*["']${escapeRegExp(fieldLabel)}["']\\s*\\}\\)[\\s\\S]{0,240}\\.locator\\(["'][^"']*\\.ant-select-selector`);
-  expectTriggerOwnedAntdOptionReplay(code, scopedTrigger, optionText, `missing scoped AntD select trigger for ${fieldLabel}`);
+  const trigger = triggerTestId
+    ? new RegExp(`(?:${scopedTrigger.source}|const trigger = page\\.getByTestId\\(${escapeRegExp(JSON.stringify(triggerTestId))}\\);)`)
+    : scopedTrigger;
+  expectTriggerOwnedAntdOptionReplay(code, trigger, optionText, `missing scoped or explicit testId AntD select trigger for ${fieldLabel}`);
 }
 
 function expectTriggerOwnedAntdOptionReplay(code: string, trigger: RegExp | string, optionText: string, message = 'missing stable AntD select trigger') {
