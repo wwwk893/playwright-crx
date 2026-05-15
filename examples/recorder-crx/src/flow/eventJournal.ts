@@ -94,11 +94,46 @@ export function eventJournalStats(recorder: FlowRecorderState): EventJournalStat
 }
 
 function appendEvent(journal: RecorderEventJournal, event: RecorderEventEnvelope): boolean {
-  if (journal.eventsById[event.id])
+  const existing = journal.eventsById[event.id];
+  if (existing) {
+    if (existing.source === 'page-context' && event.source === 'page-context') {
+      const merged = mergePageContextEnvelope(existing, event);
+      if (JSON.stringify(merged.payload) !== JSON.stringify(existing.payload)) {
+        journal.eventsById[event.id] = merged;
+        return true;
+      }
+    }
     return false;
+  }
   journal.eventsById[event.id] = event;
   journal.eventOrder.push(event.id);
   return true;
+}
+
+function mergePageContextEnvelope(existing: RecorderEventEnvelope, incoming: RecorderEventEnvelope): RecorderEventEnvelope {
+  const existingPayload = existing.payload as Partial<PageContextEvent>;
+  const incomingPayload = incoming.payload as Partial<PageContextEvent>;
+  return {
+    ...existing,
+    kind: incoming.kind || existing.kind,
+    payload: {
+      ...existingPayload,
+      ...incomingPayload,
+      before: mergePageContextSnapshot(existingPayload.before, incomingPayload.before),
+      after: mergePageContextSnapshot(existingPayload.after, incomingPayload.after),
+    },
+  };
+}
+
+function mergePageContextSnapshot<T extends object | undefined>(existing: T, incoming: T): T {
+  if (!incoming)
+    return existing;
+  if (!existing)
+    return incoming;
+  return {
+    ...existing,
+    ...incoming,
+  };
 }
 
 function recorderEventCount(journal: RecorderEventJournal) {

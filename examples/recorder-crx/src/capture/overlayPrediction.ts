@@ -63,9 +63,19 @@ export const overlayPredictionSelectors = [
   '[role="tree"]',
 ].join(', ');
 
+const overlayPredictionAntdRootSelectors = [
+  '.ant-modal',
+  '.ant-drawer',
+  '.ant-popover',
+  '.ant-dropdown',
+  '.ant-select-dropdown',
+  '.ant-cascader-dropdown',
+].join(', ');
+
 export function expectedOverlayKindForTrigger(evidence: OverlayPredictionTriggerEvidence | undefined): OverlayPredictionKind | undefined {
   const controlType = evidence?.controlType || '';
   const role = evidence?.role || '';
+  const testId = normalizeOverlayPredictionText(evidence?.testId || '');
   const text = normalizeOverlayPredictionText([
     evidence?.testId,
     evidence?.text,
@@ -81,7 +91,9 @@ export function expectedOverlayKindForTrigger(evidence: OverlayPredictionTrigger
     return 'popconfirm';
   if (/(drawer|抽屉)/i.test(text))
     return 'drawer';
-  if (/(create|add|new|edit|open|新增|新建|添加|编辑|打开)/i.test(text))
+  if (/(create|add|new|edit|新增|新建|添加|编辑)/i.test(text) && hasModalTriggerEvidence({ controlType, role, testId }))
+    return 'modal';
+  if (/(open|打开)/i.test(text) && hasExplicitModalTriggerEvidence(testId))
     return 'modal';
   return undefined;
 }
@@ -140,7 +152,7 @@ export function collectOverlayPredictionCandidates(options: {
   const root = options.root || document;
   const now = options.now || defaultNow;
   const elements = Array.from(root.querySelectorAll(overlayPredictionSelectors));
-  return elements
+  return uniqueOverlayPredictionRoots(elements)
       .filter(element => (options.isVisible || defaultIsVisible)(element))
       .map(element => overlayPredictionCandidateForElement(element, {
         observedAt: now(),
@@ -203,6 +215,16 @@ export function observeOverlayPrediction(options: OverlayPredictionObserverOptio
   });
 }
 
+function hasModalTriggerEvidence(evidence: { controlType: string, role: string, testId: string }) {
+  return /^(button|table-row-action)$/.test(evidence.controlType) ||
+    evidence.role === 'button' ||
+    /(^|[-_])(button|btn|create|add|new|edit|modal|dialog)([-_]|$)/i.test(evidence.testId);
+}
+
+function hasExplicitModalTriggerEvidence(testId: string) {
+  return /(^|[-_])(open|modal|dialog)([-_]|$)/i.test(testId);
+}
+
 export function overlayPredictionSignatureCounts(candidates: OverlayPredictionCandidate[]) {
   const counts = new Map<string, number>();
   for (const candidate of candidates)
@@ -217,6 +239,23 @@ export function newOverlayPredictionCandidates(candidates: OverlayPredictionCand
     seenAfterCounts.set(candidate.signature, seenAfterCount);
     return seenAfterCount > (beforeSignatureCounts.get(candidate.signature) || 0);
   });
+}
+
+function uniqueOverlayPredictionRoots(elements: Element[]) {
+  const seen = new Set<Element>();
+  const roots: Element[] = [];
+  for (const element of elements) {
+    const root = normalizedOverlayPredictionRoot(element);
+    if (seen.has(root))
+      continue;
+    seen.add(root);
+    roots.push(root);
+  }
+  return roots;
+}
+
+function normalizedOverlayPredictionRoot(element: Element) {
+  return element.closest(overlayPredictionAntdRootSelectors) || element;
 }
 
 function overlayPredictionCandidateForElement(element: Element, options: {

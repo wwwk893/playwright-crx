@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  */
 import { buildAiIntentInput } from '../aiIntent/prompt';
-import { createOverlayPrediction, expectedOverlayKindForTrigger, newOverlayPredictionCandidates, overlayPredictionSignatureCounts, type OverlayPredictionCandidate } from '../capture/overlayPrediction';
+import { collectOverlayPredictionCandidates, createOverlayPrediction, expectedOverlayKindForTrigger, newOverlayPredictionCandidates, overlayPredictionSignatureCounts, type OverlayPredictionCandidate } from '../capture/overlayPrediction';
 import { extractTargetFromRecorderAction } from '../capture/targetFromRecorderSelector';
 import { equivalentAnchorCandidates, rankAnchorCandidates } from '../uiSemantics/anchorDiagnostics';
 import { collectAnchorGroundingEvidence, shouldCollectAnchorGroundingDiagnostics } from '../uiSemantics/anchorGrounding';
@@ -123,6 +123,10 @@ const tests: TestCase[] = [
       assertEqual(expectedOverlayKindForTrigger({ controlType: 'select', text: 'IP地址池' }), 'select-dropdown');
       assertEqual(expectedOverlayKindForTrigger({ testId: 'network-resource-create-button', text: '新增' }), 'modal');
       assertEqual(expectedOverlayKindForTrigger({ testId: 'wan-row-delete-button', text: '删除' }), 'popconfirm');
+      assertEqual(expectedOverlayKindForTrigger({ text: '打开详情' }), undefined);
+      assertEqual(expectedOverlayKindForTrigger({ role: 'link', text: '打开详情' }), undefined);
+      assertEqual(expectedOverlayKindForTrigger({ role: 'button', text: '新增' }), 'modal');
+      assertEqual(expectedOverlayKindForTrigger({ testId: 'open-user-modal-button', text: '打开' }), 'modal');
 
       const selectPrediction = createOverlayPrediction({
         expectedKind: 'select-dropdown',
@@ -148,6 +152,26 @@ const tests: TestCase[] = [
       });
       assertEqual(ambiguousPrediction.status, 'ambiguous');
       assertEqual(ambiguousPrediction.candidates?.length, 2);
+    },
+  },
+  {
+    name: 'overlay prediction resolves nested AntD select dropdown DOM as one visual overlay',
+    run: () => {
+      const listbox = testOverlayElement({ role: 'listbox' });
+      const dropdown = testOverlayElement({ class: 'ant-select-dropdown' }, [listbox]);
+      const candidates = collectOverlayPredictionCandidates({
+        root: testOverlayRoot([dropdown]),
+        isVisible: () => true,
+        now: () => 42,
+      });
+
+      assertEqual(candidates.length, 1);
+      assertEqual(candidates[0].overlayKind, 'select-dropdown');
+      assertEqual(candidates[0].signature, 'select-dropdown');
+      assertEqual(createOverlayPrediction({
+        expectedKind: 'select-dropdown',
+        candidates,
+      }).status, 'resolved');
     },
   },
   {
@@ -212,6 +236,38 @@ const tests: TestCase[] = [
       const exported = JSON.stringify(prepareBusinessFlowForExport(flow));
       assert(!exported.includes('overlayPrediction'), 'exported flow should omit internal overlay prediction diagnostics');
       assert(!toCompactFlow(flow).includes('overlayPrediction'), 'compact flow should omit internal overlay prediction diagnostics');
+    },
+  },
+  {
+    name: 'event journal upgrades same-id page context overlay prediction updates',
+    run: () => {
+      const baseEvent = pageClickEvent('ctx-overlay-update', 1100, '新增');
+      const baseFlow = mergePageContextIntoFlow(createNamedFlow(), [baseEvent]);
+      const baseRecorder = baseFlow.artifacts?.recorder;
+      assert(baseRecorder?.eventJournal, 'base page context event should be journaled');
+      assertEqual(eventJournalStats(baseRecorder).pageContextEventCount, 1);
+      assertEqual(eventJournalStats(baseRecorder).overlayPredictionCount, 0);
+
+      const prediction = createOverlayPrediction({
+        expectedKind: 'modal',
+        candidates: [overlayPredictionCandidate('modal', '新建网络资源')],
+        elapsedMs: 96,
+      });
+      const updatedEvent = pageClickEvent('ctx-overlay-update', 1100, '新增');
+      updatedEvent.after = {
+        dialog: { type: 'modal', title: '新建网络资源', visible: true },
+        overlayPrediction: prediction,
+      };
+      const updatedFlow = mergePageContextIntoFlow(baseFlow, [updatedEvent]);
+      const updatedRecorder = updatedFlow.artifacts?.recorder;
+      assert(updatedRecorder?.eventJournal, 'same-id overlay prediction update should be stored');
+      const stats = eventJournalStats(updatedRecorder);
+      assertEqual(stats.pageContextEventCount, 1);
+      assertEqual(stats.overlayPredictionCount, 1);
+      assertEqual(stats.overlayPredictionResolvedCount, 1);
+      assertEqual(updatedRecorder.eventJournal.eventOrder, ['page-context:ctx-overlay-update']);
+      const envelope = updatedRecorder.eventJournal.eventsById['page-context:ctx-overlay-update'];
+      assertEqual((envelope.payload as PageContextEvent).after?.overlayPrediction?.status, 'resolved');
     },
   },
   {
@@ -12429,6 +12485,66 @@ function overlayPredictionCandidate(kind: OverlayPredictionCandidate['overlayKin
     visible: true,
     signature: [kind, testId, title].filter(Boolean).join(':'),
   };
+}
+
+type TestOverlayElement = Element & {
+  __attrs: Record<string, string>;
+  __children: TestOverlayElement[];
+  __parent?: TestOverlayElement;
+};
+
+function testOverlayRoot(children: TestOverlayElement[]): ParentNode {
+  return {
+    querySelectorAll: (selector: string) => collectTestOverlayDescendants(children).filter(element => testOverlayMatches(element, selector)),
+  } as unknown as ParentNode;
+}
+
+function testOverlayElement(attrs: Record<string, string>, children: TestOverlayElement[] = []): TestOverlayElement {
+  const element = {
+    tagName: 'DIV',
+    __attrs: attrs,
+    __children: children,
+    getAttribute: (name: string) => element.__attrs[name] ?? null,
+    querySelector: (selector: string) => collectTestOverlayDescendants(element.__children).find(child => testOverlayMatches(child, selector)) ?? null,
+    querySelectorAll: (selector: string) => collectTestOverlayDescendants(element.__children).filter(child => testOverlayMatches(child, selector)),
+    closest: (selector: string) => {
+      let current: TestOverlayElement | undefined = element;
+      while (current) {
+        if (testOverlayMatches(current, selector))
+          return current;
+        current = current.__parent;
+      }
+      return null;
+    },
+    getBoundingClientRect: () => ({ width: 100, height: 20 }) as DOMRect,
+  } as unknown as TestOverlayElement;
+  for (const child of children)
+    child.__parent = element;
+  return element;
+}
+
+function collectTestOverlayDescendants(elements: TestOverlayElement[]): TestOverlayElement[] {
+  const result: TestOverlayElement[] = [];
+  for (const element of elements) {
+    result.push(element);
+    result.push(...collectTestOverlayDescendants(element.__children));
+  }
+  return result;
+}
+
+function testOverlayMatches(element: TestOverlayElement, selector: string) {
+  return selector.split(',').some(part => testOverlayMatchesSimpleSelector(element, part.trim()));
+}
+
+function testOverlayMatchesSimpleSelector(element: TestOverlayElement, selector: string) {
+  if (!selector)
+    return false;
+  if (selector.startsWith('.'))
+    return (element.getAttribute('class') || '').split(/\s+/).includes(selector.slice(1));
+  const role = selector.match(/^\[role="([^"]+)"\]$/);
+  if (role)
+    return element.getAttribute('role') === role[1];
+  return false;
 }
 
 function assert(value: unknown, message: string): asserts value {
