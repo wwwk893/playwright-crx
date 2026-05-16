@@ -65,12 +65,12 @@ export interface LocatorCandidate {
   risk: LocatorRiskSeverity;
   reasons: string[];
   risks: LocatorRisk[];
-  diagnosticsOnly: true;
+  diagnosticsOnly: boolean;
 }
 
 export interface LocatorContract {
   version: 1;
-  diagnosticsOnly: true;
+  diagnosticsOnly: boolean;
   primaryDiagnostic?: LocatorCandidate;
   primaryExecutable?: LocatorCandidate;
   primary?: LocatorCandidate;

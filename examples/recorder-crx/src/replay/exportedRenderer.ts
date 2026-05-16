@@ -54,7 +54,12 @@ export function generateBusinessFlowPlaywrightCode(flow: BusinessFlow) {
       continue;
     if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
       continue;
-    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
+    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) ||
+      isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) ||
+      isRedundantExplicitPopoverConfirmStep(step, previousEmittedStep) ||
+      isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) ||
+      isRedundantExplicitDialogConfirmStep(step, previousEmittedStep) ||
+      isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
       continue;
     const dropdownOptionIdentity = dropdownOptionEmitIdentity(step);
     const dropdownOptionCompact = dropdownOptionEmitCompactIdentity(step);

@@ -31,15 +31,88 @@ export function buildLocatorContract(recipe: UiActionRecipe, step?: FlowStep): L
   ].filter((candidate): candidate is LocatorCandidate => !!candidate));
   const risks = aggregateLocatorRisks(candidates, rawRiskScanValues(step));
   const primaryDiagnostic = candidates.find(candidate => candidate.risk !== 'critical') || candidates[0];
+  const primaryExecutable = executablePrimaryCandidate(candidates, recipe, step);
   return {
     version: 1,
-    diagnosticsOnly: true,
-    primary: primaryDiagnostic,
+    diagnosticsOnly: !primaryExecutable,
+    primary: primaryExecutable || primaryDiagnostic,
     primaryDiagnostic,
-    primaryExecutable: undefined,
+    primaryExecutable,
     candidates,
     risks,
   };
+}
+
+function executablePrimaryCandidate(candidates: LocatorCandidate[], recipe: UiActionRecipe, step?: FlowStep) {
+  const candidate = candidates.find(candidate => isExecutableCandidate(candidate, recipe, step));
+  return candidate ? { ...candidate, diagnosticsOnly: false } : undefined;
+}
+
+function isExecutableCandidate(candidate: LocatorCandidate, recipe: UiActionRecipe, step?: FlowStep) {
+  if (candidate.risk === 'critical' || candidate.risk === 'high')
+    return false;
+  switch (candidate.kind) {
+    case 'row-scoped-testid':
+      return !!candidate.payload?.tableTestId && !!candidate.payload?.rowKey && !!candidate.payload?.testId;
+    case 'row-scoped-role':
+      return !!candidate.payload?.tableTestId && !!candidate.payload?.rowKey && !!candidate.payload?.role && !!(candidate.payload?.name || candidate.payload?.text);
+    case 'dialog-scoped-testid': {
+      const testId = candidate.payload?.testId;
+      return candidate.payload?.dialogType !== 'dropdown' && !!testId && !looksLikeStructuralDialogTargetTestId(testId, candidate.payload?.dialogTestId, step) && !!(candidate.payload?.dialogTestId || candidate.payload?.dialogTitle);
+    }
+    case 'dialog-scoped-role':
+      return candidate.payload?.dialogType !== 'dropdown' && !!candidate.payload?.role && !!(candidate.payload?.name || candidate.payload?.text) && !!(candidate.payload?.dialogTestId || candidate.payload?.dialogTitle);
+    case 'active-popup-option':
+      return !!candidate.payload?.optionText && hasAntdPopupOptionEvidence(recipe, step);
+    case 'visible-popconfirm-confirm':
+      return !!(candidate.payload?.name || candidate.payload?.text);
+    case 'testid': {
+      const testId = candidate.payload?.testId;
+      return !!testId && !looksLikeStructuralDialogTargetTestId(testId, undefined, step);
+    }
+    default:
+      return false;
+  }
+}
+
+function hasAntdPopupOptionEvidence(recipe: UiActionRecipe, step?: FlowStep) {
+  if (recipe.replay?.runtimeFallback === 'active-antd-popup-option')
+    return true;
+  const framework = recipe.framework;
+  const component = recipe.component;
+  const recipeSelectComponent = component === 'Select' || component === 'TreeSelect' || component === 'Cascader';
+  if ((framework === 'antd' || framework === 'procomponents') && recipeSelectComponent)
+    return true;
+  const controlType = step?.context?.before.target?.controlType || String((step?.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
+  if (/^(select-option|tree-select-option|cascader-option)$/.test(controlType))
+    return true;
+  const uiComponent = step?.context?.before.ui?.component || step?.uiRecipe?.component;
+  if (uiComponent === 'select' || uiComponent === 'tree-select' || uiComponent === 'cascader' || uiComponent === 'Select' || uiComponent === 'TreeSelect' || uiComponent === 'Cascader')
+    return true;
+  return step?.context?.before.dialog?.type === 'dropdown';
+}
+
+function looksLikeStructuralDialogTargetTestId(testId: string, dialogTestId?: string, step?: FlowStep) {
+  if (dialogTestId && testId === dialogTestId)
+    return true;
+  if (step && isDialogOpenerTestIdClick(step, testId))
+    return false;
+  return /(^|[-_])(modal|dialog|drawer|form|container|wrapper|root)$/i.test(testId) ||
+    /(^|[-_])(section|card|content|region)$/i.test(testId);
+}
+
+function isDialogOpenerTestIdClick(step: FlowStep, testId: string) {
+  if (step.action !== 'click' || !looksLikeDialogOpenerTestId(testId))
+    return false;
+  const opened = step.context?.after?.openedDialog || step.context?.after?.dialog;
+  if (!opened || opened.type === 'dropdown' || opened.type === 'popover' || opened.visible === false)
+    return false;
+  const before = step.context?.before.dialog;
+  return !(before?.type === opened.type && before?.title === opened.title && before?.testId === opened.testId);
+}
+
+function looksLikeDialogOpenerTestId(testId: string) {
+  return /(^|[-_])(create|add|new|open|edit)([-_]|$)|新建|创建|添加|新增|打开|编辑/i.test(testId);
 }
 
 function stableBusinessCandidates(recipe: UiActionRecipe, step?: FlowStep) {
