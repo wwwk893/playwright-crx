@@ -3527,6 +3527,47 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'pending input focus is cleared by non-input next-action boundaries before weak fill',
+    run: () => {
+      const staleFocus = proComponentsRangeInputFocusEvent('ctx-range-start-focus', 1000, {
+        testId: 'site-ip-address-pool-range-field',
+        label: '开始地址，例如：192.168.1.1',
+        placeholder: '开始地址，例如：192.168.1.1',
+        fieldName: 'pool.start',
+      });
+      const weakFill = weakTextboxFillAction('开始地址，例如：', '1.1.1.1', 1300);
+      const cases = [
+        {
+          name: 'page-context non-input click',
+          actions: [weakFill],
+          pageEvents: [staleFocus, pageClickEvent('ctx-search-after-focus', 1100, '查询')],
+        },
+        {
+          name: 'page-context select trigger',
+          actions: [weakFill],
+          pageEvents: [staleFocus, pageSelectTriggerEvent('ctx-vrf-select-after-focus', 1100, '关联VRF')],
+        },
+        {
+          name: 'recorder select-like action',
+          actions: [selectSearchFillAction('关联VRF', 'default', 1100), weakFill],
+          pageEvents: [staleFocus],
+        },
+      ];
+
+      for (const testCase of cases) {
+        const withRecorder = mergeActionsIntoFlow(createNamedFlow(), testCase.actions, [], {});
+        const flow = mergePageContextIntoFlow(withRecorder, testCase.pageEvents);
+        const composition = composeInputTransactionsFromJournal(flow.artifacts?.recorder?.eventJournal, { commitOpen: true });
+        const transaction = composition.inputTransactions.find(transaction => transaction.finalValue === '1.1.1.1');
+
+        assert(transaction, `${testCase.name}: weak fill should still become an input transaction`);
+        assertEqual(transaction?.targetKey, 'label:开始地址，例如：');
+        assert(!transaction?.contextEventId, `${testCase.name}: stale focus event should not be attached to the later weak fill`);
+        assert(!JSON.stringify(transaction).includes('site-ip-address-pool-range-field'), `${testCase.name}: stale wrapper field identity should not be inherited`);
+      }
+    },
+  },
+  {
     name: 'ProComponents range inputs sharing wrapper test id stay separate by field identity',
     run: () => {
       const withRecorder = mergeActionsIntoFlow(createNamedFlow(), [

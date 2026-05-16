@@ -139,6 +139,11 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
     commitOpenTransaction(transaction, reason, at);
   };
 
+  const commitNextActionBoundary = (at: number) => {
+    clearPendingInputFocusesForNextAction(pendingInputFocuses);
+    commitMatching(undefined, 'next-action', at);
+  };
+
   const orderedEvents = journal.eventOrder
       .map((id, index) => ({ event: journal.eventsById[id], index }))
       .filter(({ event }) => !!event)
@@ -154,7 +159,7 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
       at = latestAction?.wallTime ?? at;
       const identity = scopedIdentity(inputTargetIdentityFromRecorderAction(action), dialogScopeFromSource(sourceCode));
       if (isSelectLikeRecorderAction(action, sourceCode)) {
-        commitMatching(undefined, 'next-action', at);
+        commitNextActionBoundary(at);
         continue;
       }
       if (isInputLikeRecorderAction(action)) {
@@ -176,20 +181,20 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
           commitMatching(identity, 'blur', at);
         continue;
       }
-      commitMatching(undefined, 'next-action', at);
+      commitNextActionBoundary(at);
       continue;
     }
 
     if (event.source === 'page-context') {
       const payload = event.payload as PageContextPayload;
       if (isSelectLikePageContext(payload)) {
-        commitMatching(undefined, 'next-action', at);
+        commitNextActionBoundary(at);
         continue;
       }
       const identity = scopedIdentity(inputTargetIdentityFromPageContext(payload.before), pageContextDialogScope(payload.before));
       if (!identity) {
         if (payload.kind !== 'keydown')
-          commitMatching(undefined, 'next-action', at);
+          commitNextActionBoundary(at);
         continue;
       }
       if (payload.kind === 'click' && isInputFocusContext(payload)) {
@@ -233,7 +238,7 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
         // emitted an input/change event; they must never create standalone steps.
         continue;
       }
-      commitMatching(undefined, 'next-action', at);
+      commitNextActionBoundary(at);
     }
   }
 
@@ -432,6 +437,10 @@ function removePendingInputFocus(pendingInputFocuses: PendingInputFocus[], focus
   const index = pendingInputFocuses.indexOf(focus);
   if (index !== -1)
     pendingInputFocuses.splice(index, 1);
+}
+
+function clearPendingInputFocusesForNextAction(pendingInputFocuses: PendingInputFocus[]) {
+  pendingInputFocuses.length = 0;
 }
 
 function pruneOldPendingInputFocuses(pendingInputFocuses: PendingInputFocus[], at: number) {
