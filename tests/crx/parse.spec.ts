@@ -74,6 +74,19 @@ test('test', async ({ page }) => {
   ]);
 });
 
+test('should preserve exact role selector when parsing exact role locators', async ({ testParse }) => {
+  const code = `import { test, expect } from '@playwright/test';
+
+test('test', async ({ page }) => {
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+});`;
+  const { actions } = await testParse(code);
+  expect(actions).toMatchObject([
+    { name: 'openPage' },
+    { name: 'click', selector: 'internal:role=button[name="Create"s]' },
+  ]);
+});
+
 test('should parse selectOption', async ({ testParse }) => {
   const code = `import { test, expect } from '@playwright/test';
 

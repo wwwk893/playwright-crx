@@ -60,7 +60,7 @@ export function suggestTerminalStateAssertions(step: FlowStep, stepIndex = 0, pr
   if (toast && isSubmitLikeStep(step) && isStableTerminalToast(toast))
     suggestions.push(createTerminalStateAssertion('toast-visible', terminalAssertionId(step.id, suggestions.length, stepIndex), { message: toast }));
 
-  if (beforeDialog && afterDialog && beforeDialog.type === afterDialog.type && beforeDialog.visible && afterDialog.visible === false) {
+  if (isTerminalOverlayCommitAction(step) && beforeDialog && afterDialog && beforeDialog.type === afterDialog.type && beforeDialog.visible && afterDialog.visible === false) {
     const type = dialogClosedType(beforeDialog.type);
     if (type)
       suggestions.push(createTerminalStateAssertion(type, terminalAssertionId(step.id, suggestions.length, stepIndex), compactParams({ title: beforeDialog.title, testId: beforeDialog.testId })));
@@ -194,6 +194,8 @@ function isSubmitLikeStep(step: FlowStep) {
 }
 
 function inferClosedOverlayAssertion(step: FlowStep, stepIndex: number, offset: number): FlowAssertion | undefined {
+  if (!isTerminalOverlayCommitAction(step))
+    return undefined;
   const text = targetText(step);
   const testId = step.target?.testId;
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
@@ -223,6 +225,10 @@ function inferClosedOverlayAssertion(step: FlowStep, stepIndex: number, offset: 
   if (!dialog && /(popover|popconfirm|delete-confirm|remove-confirm)/i.test(testId || '') && /ok|confirm|delete|remove|确 定|确定|确认|删除|移除/i.test(joined))
     return createTerminalStateAssertion('popover-closed', terminalAssertionId(step.id, offset, stepIndex), compactParams({ testId }));
   return undefined;
+}
+
+function isTerminalOverlayCommitAction(step: FlowStep) {
+  return step.action === 'click' || step.action === 'press';
 }
 
 function isMeaningfulSelectedValue(value: string, step: FlowStep) {

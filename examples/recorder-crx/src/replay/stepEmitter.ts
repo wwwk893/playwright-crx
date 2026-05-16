@@ -1132,7 +1132,23 @@ function stepAssertionsForEmission(step: FlowStep, options: EmitStepOptions = {}
   return step.assertions.filter(assertion => assertion.enabled &&
     (!options.suppressRowExistsAssertions || assertion.type !== 'row-exists') &&
     (!options.parserSafe || !isTerminalAssertionParserUnsafe(assertion)) &&
+    !isOverlayClosedAssertionSupersededByNextDialog(assertion, options.nextStep) &&
     !isNoisyDropdownOptionSelectedValueAssertion(step, assertion));
+}
+
+function isOverlayClosedAssertionSupersededByNextDialog(assertion: FlowAssertion, nextStep?: FlowStep) {
+  if (assertion.type !== 'modal-closed' && assertion.type !== 'drawer-closed')
+    return false;
+  const nextDialog = nextStep?.target?.scope?.dialog || nextStep?.context?.before.dialog;
+  if (!isPersistentDialog(nextDialog))
+    return false;
+  const assertionDialog: FlowDialogScope = {
+    type: assertion.type === 'drawer-closed' ? 'drawer' : 'modal',
+    visible: false,
+    title: stringParam(assertion.params?.title),
+    testId: stringParam(assertion.params?.testId),
+  };
+  return !sameDialogScope(nextDialog, assertionDialog);
 }
 
 function isNoisyDropdownOptionSelectedValueAssertion(step: FlowStep, assertion: FlowAssertion) {
@@ -1178,6 +1194,8 @@ function sourceCodeForStep(step: FlowStep, options: EmitStepOptions = {}) {
   if (isRedundantSelectedValueDisplayClick(step, options.previousStep))
     return undefined;
   const sourceCode = normalizeActionSource(step.sourceCode);
+  if (sourceCode && sourceMatchesStep(sourceCode, step) && shouldPreserveRecordedDisambiguatedSource(sourceCode, step))
+    return appendSyntheticFollowUpSource(sourceCode, step, options);
   if (sourceCode && sourceMatchesStep(sourceCode, step) && shouldPreserveRecordedOpenerTestIdSource(sourceCode, step))
     return appendSyntheticFollowUpSource(sourceCode, step, options);
   const fallback = renderRawActionSource(step, options);
@@ -1188,6 +1206,56 @@ function sourceCodeForStep(step: FlowStep, options: EmitStepOptions = {}) {
   if (sourceCode && sourceMatchesStep(sourceCode, step))
     return appendSyntheticFollowUpSource(sourceCode, step, options);
   return sourceCode;
+}
+
+function shouldPreserveRecordedDisambiguatedSource(sourceCode: string[], step: FlowStep) {
+  if (step.action !== 'click')
+    return false;
+  const testId = step.target?.testId || step.context?.before.target?.testId;
+  if (testId)
+    return false;
+  if (isAntdSelectFieldStep(step))
+    return false;
+  if (isDropdownOptionLikeClick(step))
+    return false;
+  if (hasStrongerStructuredRoleScope(step))
+    return false;
+  const role = step.target?.role || step.context?.before.target?.role || '';
+  if (role === 'tooltip')
+    return false;
+  const targetLabel = normalizeGeneratedText(targetNameForLocator(step) || step.context?.before.target?.text || step.context?.before.target?.normalizedText || '')
+      ?.replace(/^(button|link)\s+/i, '')
+      .trim() || '';
+  if (targetLabel && (isLikelyDialogConfirmButton(targetLabel) || /(?:^|\b)(delete|remove)(?:\b|$)|删除|移除/i.test(targetLabel)))
+    return false;
+  const joined = sourceCode.join('\n');
+  if (/internal:role=tooltip|ant-popover|popconfirm/i.test(joined))
+    return false;
+  if (/getByRole\(/.test(joined) && /exact\s*:\s*true/.test(joined))
+    return true;
+  if (/getByRole\(/.test(joined) && /\.(?:nth|first|last)\s*\(/.test(joined))
+    return true;
+  if (/(?:getByTestId|locator)\([^)]*\)\.getBy(?:Role|Text|Label)\(/.test(joined) || /\.filter\([^)]*\)\.getBy(?:Role|Text|Label)\(/.test(joined))
+    return true;
+  return false;
+}
+
+function hasStrongerStructuredRoleScope(step: FlowStep) {
+  const role = step.target?.role || step.context?.before.target?.role;
+  const targetName = targetNameForLocator(step);
+  if (!role || !targetName)
+    return false;
+
+  const table = step.target?.scope?.table || step.context?.before.table;
+  if (table?.testId && (table.rowKey || table.rowIdentity?.stable || table.rowText))
+    return true;
+
+  const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
+  if (dialog && (dialog.testId || dialog.title) && dialog.visible !== false)
+    return true;
+
+  const section = step.target?.scope?.section || step.context?.before.section;
+  return !!section?.testId;
 }
 
 function shouldPreserveRecordedOpenerTestIdSource(sourceCode: string[], step: FlowStep) {
@@ -1648,6 +1716,7 @@ function preferredTargetLocator(step: FlowStep, options: EmitStepOptions = {}) {
     visibleDialogConfirmButtonLocator(step) ||
     sectionScopedLocator(step) ||
     modalConfirmButtonLocator(step) ||
+    duplicateRoleLocator(step) ||
     globalRoleLocator(step) ||
     (options.parserSafe ? undefined : fallbackTextLocator(step));
 }
@@ -1661,7 +1730,7 @@ function visibleDialogConfirmButtonLocator(step: FlowStep) {
   const role = step.target?.role || step.context?.before.target?.role || '';
   if (role && role !== 'button')
     return undefined;
-  const name = normalizeGeneratedText(targetNameForLocator(step) || '') || '';
+  const name = dialogConfirmLabel(step) || '';
   const compactName = name.replace(/\s+/g, '');
   if (!/^(确定|确认|OK|YES)$/i.test(compactName))
     return undefined;
@@ -2664,7 +2733,10 @@ function duplicateRoleLocator(step: FlowStep) {
   const name = generatedTextCandidate(step.target?.name, step.target?.text, step.target?.displayName, step.context?.before.target?.ariaLabel, step.context?.before.target?.text);
   if (!name)
     return undefined;
-  return `page.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(name)} }).nth(${pageIndex})`;
+  const actionName = normalizeGeneratedText(name)?.replace(/^(button|link)\s+/i, '').trim() || name;
+  if (isLikelyDialogConfirmButton(actionName) || /(?:^|\b)(delete|remove)(?:\b|$)|删除|移除/i.test(actionName))
+    return undefined;
+  return `page.getByRole(${stringLiteral(role)}, ${roleNameOptionsSource(step, role, name)}).nth(${pageIndex})`;
 }
 
 function shouldPreferParserSafeDuplicateRole(step: FlowStep) {
@@ -2721,10 +2793,11 @@ function tableScopedLocator(step: FlowStep) {
     const rowLocator = `page.getByTestId(${stringLiteral(table.testId)}).locator(${stringLiteral(rowSelector)})`;
     if (role === 'row' || role === 'cell' || role === 'gridcell' || isRowContainerClick(step, targetName, table))
       return `${rowLocator}.first()`;
+    const roleNameOptions = roleNameOptionsSource(step, role, targetName);
     return rowLocator +
-      `.filter({ has: page.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} }) })` +
+      `.filter({ has: page.getByRole(${stringLiteral(role)}, ${roleNameOptions}) })` +
       `.first()` +
-      `.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+      `.getByRole(${stringLiteral(role)}, ${roleNameOptions})`;
   }
 
   const fallbackRowText = rowIdentity?.value || table.rowText;
@@ -2734,7 +2807,7 @@ function tableScopedLocator(step: FlowStep) {
       `.filter({ hasText: ${stringLiteral(fallbackRowText)} })`;
     if (role === 'row')
       return `${rowLocator}.first()`;
-    return `${rowLocator}.getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+    return `${rowLocator}.getByRole(${stringLiteral(role)}, ${roleNameOptionsSource(step, role, targetName)})`;
   }
   return undefined;
 }
@@ -2754,20 +2827,53 @@ function dialogScopedLocator(step: FlowStep) {
   if (!dialog || !targetName)
     return undefined;
   const role = dialog.type === 'popover' && step.target?.role === 'tooltip' ? 'button' : step.target?.role || 'button';
-  const nameSource = roleNameSource(role, targetName);
+  const nameOptions = roleNameOptionsSource(step, role, targetName);
   if (dialog.testId)
-    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, { name: ${nameSource} })`;
+    return `page.getByTestId(${stringLiteral(dialog.testId)}).getByRole(${stringLiteral(role)}, ${nameOptions})`;
   if (dialog.type === 'popover')
-    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).last().getByRole(${stringLiteral(role)}, { name: ${nameSource} })`;
+    return `page.locator(${stringLiteral(dialogRootSelector(dialog))}).last().getByRole(${stringLiteral(role)}, ${nameOptions})`;
   if (!dialog.title)
     return undefined;
   return `page.locator(${stringLiteral(dialogRootSelector(dialog))})` +
     `.filter({ hasText: ${stringLiteral(dialog.title)} })` +
-    `.getByRole(${stringLiteral(role)}, { name: ${nameSource} })`;
+    `.getByRole(${stringLiteral(role)}, ${nameOptions})`;
+}
+
+function roleNameOptionsSource(step: FlowStep, role: string, targetName: string) {
+  const nameSource = roleNameSource(role, targetName);
+  if (!isRegexSource(nameSource) && hasExactRoleNameEvidence(step, role, targetName))
+    return `{ name: ${nameSource}, exact: true }`;
+  return `{ name: ${nameSource} }`;
+}
+
+function hasExactRoleNameEvidence(step: FlowStep, role: string, targetName: string) {
+  const evidence = roleNameEvidenceText(step);
+  if (!evidence)
+    return false;
+  const rolePattern = escapeRegExp(role);
+  const targetPattern = escapeRegExp(targetName);
+  const exactRoleSource = new RegExp(`getByRole\\(\\s*['"]${rolePattern}['"]\\s*,\\s*\\{(?=[^}]*name\\s*:\\s*['"]${targetPattern}['"])(?=[^}]*exact\\s*:\\s*true)[^}]*\\}`, 'i');
+  if (exactRoleSource.test(evidence))
+    return true;
+  const exactInternalRole = new RegExp(`internal:role=${rolePattern}\\[[^\\]]*name\\s*=\\s*(?:\\\\?["'])?${targetPattern}(?:\\\\?["'])?s\\]`, 'i');
+  return exactInternalRole.test(evidence);
+}
+
+function roleNameEvidenceText(step: FlowStep) {
+  return [
+    step.sourceCode,
+    step.target?.selector,
+    step.target?.locator,
+    rawAction(step.rawAction).selector,
+  ].filter(Boolean).join('\n');
 }
 
 function roleNameSource(role: string, targetName: string) {
   return role === 'button' ? buttonNameSource(targetName) : stringLiteral(targetName);
+}
+
+function isRegexSource(value: string) {
+  return /^\/.*\/[a-z]*$/i.test(value);
 }
 
 function buttonNameSource(targetName: string) {
@@ -2801,7 +2907,7 @@ function sectionScopedLocator(step: FlowStep) {
   if (!section?.testId || !targetName)
     return undefined;
   const role = step.target?.role || 'button';
-  return `page.getByTestId(${stringLiteral(section.testId)}).getByRole(${stringLiteral(role)}, { name: ${stringLiteral(targetName)} })`;
+  return `page.getByTestId(${stringLiteral(section.testId)}).getByRole(${stringLiteral(role)}, ${roleNameOptionsSource(step, role, targetName)})`;
 }
 
 function choiceControlLocator(step: FlowStep) {
@@ -2895,11 +3001,12 @@ function fieldLocator(step: FlowStep, options: { allowSelectLike?: boolean } = {
 
 function globalRoleLocator(step: FlowStep) {
   const targetName = targetNameForLocator(step);
+  const role = step.target?.role || step.context?.before.target?.role;
   const pageCount = step.target?.locatorHint?.pageCount ?? step.context?.before.target?.uniqueness?.pageCount;
   if (pageCount && pageCount > 1)
     return undefined;
-  if (step.target?.role && targetName)
-    return `page.getByRole(${stringLiteral(step.target.role)}, { name: ${stringLiteral(targetName)} })`;
+  if (role && targetName)
+    return `page.getByRole(${stringLiteral(role)}, ${roleNameOptionsSource(step, role, targetName)})`;
   return undefined;
 }
 
