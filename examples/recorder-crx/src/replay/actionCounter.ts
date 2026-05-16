@@ -40,7 +40,16 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
         let previousSegmentStep: FlowStep | undefined;
         for (const [stepIndex, segmentStep] of segmentSteps.entries()) {
           const nextEffectiveSegmentStep = nextEffectiveStepForRedundantAction(segmentSteps, stepIndex, 'parserSafe');
-          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) || isPlaceholderSelectOptionClick(segmentStep) || isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) || isRedundantParserSafeSelectFieldAction(segmentStep, nextEffectiveSegmentStep) || isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) || isHiddenDialogContainerClickAfterConfirm(segmentStep, segmentSteps[stepIndex - 1]))
+          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) ||
+            isPlaceholderSelectOptionClick(segmentStep) ||
+            isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) ||
+            isRedundantParserSafeSelectFieldAction(segmentStep, nextEffectiveSegmentStep) ||
+            isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) ||
+            isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) ||
+            isRedundantExplicitPopoverConfirmStep(segmentStep, previousSegmentStep) ||
+            isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) ||
+            isRedundantExplicitDialogConfirmStep(segmentStep, previousSegmentStep) ||
+            isHiddenDialogContainerClickAfterConfirm(segmentStep, segmentSteps[stepIndex - 1]))
             continue;
           if (isTruncatedSelectedValueDisplayEchoClick(segmentStep, previousSegmentStep))
             continue;
@@ -60,7 +69,12 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
       continue;
     if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
       continue;
-    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) || isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) || isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
+    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) ||
+      isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) ||
+      isRedundantExplicitPopoverConfirmStep(step, previousEmittedStep) ||
+      isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) ||
+      isRedundantExplicitDialogConfirmStep(step, previousEmittedStep) ||
+      isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
       continue;
     const dropdownOptionIdentity = dropdownOptionEmitIdentity(step);
     const dropdownOptionCompact = dropdownOptionEmitCompactIdentity(step);

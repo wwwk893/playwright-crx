@@ -1392,15 +1392,232 @@ const tests: TestCase[] = [
       assert(rowRecipe?.locatorContract?.primary?.value.includes('rowKey=user-42'), 'row-scoped locator should keep row key evidence');
       assertEqual(rowRecipe?.locatorContract?.primary?.payload?.rowKey, 'user-42');
       assertEqual(rowRecipe?.locatorContract?.primaryDiagnostic?.kind, rowRecipe?.locatorContract?.primary?.kind);
-      assertEqual(rowRecipe?.locatorContract?.primaryExecutable, undefined);
+      assertEqual(rowRecipe?.locatorContract?.primaryExecutable?.kind, 'row-scoped-testid');
+      assertEqual(rowRecipe?.locatorContract?.primaryExecutable?.diagnosticsOnly, false);
       assertEqual(selectRecipe?.locatorContract?.primary?.kind, 'active-popup-option');
+      assertEqual(selectRecipe?.locatorContract?.primaryExecutable?.kind, 'active-popup-option');
       assert(selectRecipe?.locatorContract?.primary?.value.includes('option=edge-lab:WAN-extra-18'), 'select candidate should keep option text');
       assertEqual(selectRecipe?.locatorContract?.primary?.payload?.optionText, 'edge-lab:WAN-extra-18');
       assertEqual(modalRecipe?.locatorContract?.primary?.kind, 'dialog-scoped-testid');
+      assertEqual(modalRecipe?.locatorContract?.primaryExecutable?.kind, 'dialog-scoped-testid');
       assert(modalRecipe?.locatorContract?.primary?.value.includes('dialogTitle=新建网络资源'), 'modal candidate should keep dialog scope');
       assertEqual(modalRecipe?.locatorContract?.primary?.payload?.dialogTitle, '新建网络资源');
       assertEqual(popconfirmRecipe?.locatorContract?.primary?.kind, 'visible-popconfirm-confirm');
+      assertEqual(popconfirmRecipe?.locatorContract?.primaryExecutable?.kind, 'visible-popconfirm-confirm');
       assert(popconfirmRecipe?.locatorContract?.primary?.value.includes('title=删除此行？'), 'popconfirm candidate should keep visible popconfirm scope');
+    },
+  },
+  {
+    name: 'locator contract primary drives row scoped renderer output in exported and parser-safe replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-delete-action',
+            role: 'button',
+            name: '删除',
+            text: '删除',
+            scope: {
+              table: {
+                title: 'WAN传输网络',
+                testId: 'wan-transport-table',
+                rowKey: 'wan-42',
+                rowText: 'wan-42 default 删除',
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-row-contract-delete',
+            capturedAt: 1000,
+            before: {
+              target: { tag: 'button', role: 'button', testId: 'wan-transport-row-delete-action', text: '删除', controlType: 'button' },
+              table: { title: 'WAN传输网络', testId: 'wan-transport-table', rowKey: 'wan-42', rowText: 'wan-42 default 删除', columnName: '操作' },
+            } as any,
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-transport-row-delete-action"s]' } },
+          sourceCode: 'await page.getByTestId("wan-transport-row-delete-action").nth(3).click();',
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.locatorContract?.primaryExecutable?.kind, 'row-scoped-testid');
+      for (const code of [exported, parserSafe]) {
+        assert(code.includes('page.getByTestId("wan-transport-table")'), 'renderer should scope row action to the table contract primary');
+        assert(code.includes('tr[data-row-key=\\"wan-42\\"]'), 'renderer should use the contract row key');
+        assert(code.includes('.getByTestId("wan-transport-row-delete-action").click();'), 'renderer should click the row-scoped action test id');
+        assert(!code.includes('getByTestId("wan-transport-row-delete-action").nth'), 'row action must not replay through global nth');
+        assert(!code.includes('page.getByText("删除")'), 'delete row action must not replay through global text');
+      }
+    },
+  },
+  {
+    name: 'locator contract active-popup-option keeps parser-safe select bridge and exported owned dispatch',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            text: 'edge-lab:WAN-extra-18',
+            displayName: 'edge-lab:WAN-extra-18',
+            label: 'WAN口',
+          },
+          context: {
+            eventId: 'ctx-select-contract-option',
+            capturedAt: 1000,
+            before: {
+              form: { label: 'WAN口', name: 'wan' },
+              dialog: { type: 'dropdown', visible: true },
+              target: {
+                tag: 'div',
+                role: 'option',
+                framework: 'procomponents',
+                controlType: 'select-option',
+                text: 'edge-lab:WAN-extra-18',
+                normalizedText: 'edge-lab:WAN-extra-18',
+              },
+              ui: { library: 'pro-components', component: 'select', form: { label: 'WAN口', name: 'wan' } },
+            } as any,
+          },
+          rawAction: { action: { name: 'legacyRecordedSource', searchText: 'WAN-extra-18' } },
+          sourceCode: 'await page.getByText("edge-lab:WAN-extra-18").click();',
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.locatorContract?.primaryExecutable?.kind, 'active-popup-option');
+      assert(exported.includes('selectOwnedOption(true)'), 'exported renderer should keep the trigger-owned AntD dispatch workaround');
+      assert(parserSafe.includes('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'), 'parser-safe renderer should keep the explicit active-popup-option bridge');
+      for (const code of [exported, parserSafe]) {
+        assert(code.includes('edge-lab:WAN-extra-18'), 'renderers should use the contract option text');
+        assert(!code.includes('page.getByText("edge-lab:WAN-extra-18")'), 'select option must not replay through global page text');
+        assert(!code.includes('rc_select_'), 'select option replay must not use dynamic rc_select ids');
+      }
+      assertEqual(countBusinessFlowPlaybackActions(flow), runnableLineCount(parserSafe));
+    },
+  },
+  {
+    name: 'locator contract does not execute structural dialog test ids as button clicks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'real-create-item-modal',
+            text: '保存',
+            name: '保存',
+            scope: { dialog: { type: 'modal', title: '新建条目', visible: true } },
+          },
+          context: {
+            eventId: 'ctx-dialog-save-structural-testid',
+            capturedAt: 1000,
+            before: {
+              dialog: { type: 'modal', title: '新建条目', visible: true },
+              target: { tag: 'button', role: 'button', text: '保 存', normalizedText: '保 存', controlType: 'button', framework: 'antd' },
+            } as any,
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="real-create-item-modal"s]' } },
+          sourceCode: 'await page.getByTestId("real-create-item-modal").click();',
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(recipe?.locatorContract?.primaryExecutable?.kind !== 'testid', 'structural dialog root test id should not be an executable primary');
+      assert(recipe?.locatorContract?.primaryExecutable?.kind !== 'dialog-scoped-testid', 'structural dialog root test id should not be an executable dialog primary');
+      assert(code.includes('filter({ hasText: "新建条目" })'), 'dialog save should keep dialog title scope');
+      assert(code.includes('getByRole("button"'), 'dialog save should click the button inside the dialog');
+      assert(!code.includes('getByTestId("real-create-item-modal").click()'), 'dialog root test id must not become the action target');
+    },
+  },
+  {
+    name: 'locator contract keeps native selectOption out of active popup replay',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'select',
+          target: {
+            label: 'Country',
+            selector: 'select[name="country"]',
+          },
+          value: 'CN',
+          rawAction: { action: { name: 'selectOption', selector: 'select[name="country"]', options: ['CN'] } },
+          sourceCode: 'await page.locator("select[name=\\"country\\"]").selectOption("CN");',
+          assertions: [],
+        }],
+      };
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual(recipe?.operation, 'selectOption');
+      assertEqual(recipe?.framework, 'generic');
+      assertEqual(recipe?.locatorContract?.primaryExecutable, undefined);
+      for (const code of [exported, parserSafe]) {
+        assert(code.includes('.selectOption("CN")'), 'native select should keep Playwright selectOption replay');
+        assert(!code.includes('.ant-select-dropdown'), 'native select must not use AntD active popup replay');
+        assert(!code.includes('active popup option'), 'native select must not emit active popup bridge comments');
+      }
+    },
+  },
+  {
+    name: 'recorded opener test id ending with modal keeps page-level test id source',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          action: 'click',
+          target: {
+            testId: 'open-user-modal',
+            text: '新建用户',
+            displayName: '新建用户',
+          },
+          context: {
+            eventId: 'ctx-open-user-modal',
+            capturedAt: 1000,
+            before: {
+              target: { tag: 'button', role: 'button', testId: 'open-user-modal', text: '新建用户', normalizedText: '新建用户', controlType: 'button' },
+            } as any,
+            after: {
+              openedDialog: { type: 'modal', title: '新建用户', visible: true },
+            },
+          },
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="open-user-modal"s]' } },
+          sourceCode: 'await page.getByTestId("open-user-modal").click();',
+          assertions: [],
+        }],
+      };
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+      assert(code.includes('await page.getByTestId("open-user-modal").click();'), 'recorded opener test id should stay page-level');
+      assert(!code.includes('filter({ hasText: "新建用户" }).getByTestId("open-user-modal")'), 'opener test id should not be scoped into the dialog it opens');
+      assert(!code.includes('page.getByRole("button"') && !code.includes("page.getByRole('button'"), 'opener test id should not be widened to role/text');
     },
   },
   {
@@ -1434,6 +1651,7 @@ const tests: TestCase[] = [
 
       assertEqual(contract?.primary?.kind, 'row-scoped-testid');
       assertEqual(contract?.primary?.risk, 'high');
+      assertEqual(contract?.primaryExecutable, undefined);
       assert(contract?.primary?.value.includes('rowText=NAT集群A 编辑'), 'row action without rowKey should keep row text as diagnostic evidence');
       assert(riskCodes.has('row-action-without-row-key'), 'row action without rowKey should carry a semantic high-risk diagnostic');
       assertEqual(globalTestIdCandidate?.risk, 'high');
@@ -1564,7 +1782,7 @@ const tests: TestCase[] = [
     },
   },
   {
-    name: 'safety guard blocks unsafe emitted source even when locator contract primary is stable',
+    name: 'locator contract primary replaces unsafe recorded source before safety guard',
     run: () => {
       const flow: BusinessFlow = {
         ...createNamedFlow(),
@@ -1604,10 +1822,13 @@ const tests: TestCase[] = [
       const firstRecipe = buildRecipeForStep(flow.steps[0]);
       const code = generateBusinessFlowPlaywrightCode(flow);
 
-      assertEqual(firstRecipe?.locatorContract?.primaryDiagnostic?.kind, 'testid');
-      assert(code.includes('critical-action-emitted-text-fallback'), 'critical actions should inspect actual emitted source text fallbacks');
-      assert(code.includes('critical-action-emitted-ordinal-locator'), 'critical actions should inspect actual emitted source ordinal locators');
-      assert(code.includes('critical-action-emitted-dynamic-rc-select-id'), 'critical actions should inspect actual emitted source dynamic rc_select ids');
+      assertEqual(firstRecipe?.locatorContract?.primaryExecutable?.kind, 'testid');
+      assert(code.includes('page.getByTestId("userDeleteButton").click();'), 'stable contract test id should replace unsafe recorded text fallback');
+      assert(code.includes('page.getByTestId("removeUserButton").click();'), 'stable contract test id should replace unsafe recorded ordinal source');
+      assert(code.includes('page.getByTestId("confirmDeleteButton").click();'), 'stable contract test id should replace unsafe recorded rc_select source');
+      assert(!code.includes('critical-action-emitted-text-fallback'), 'contract-driven renderer should not emit unsafe text fallback for stable targets');
+      assert(!code.includes('critical-action-emitted-ordinal-locator'), 'contract-driven renderer should not emit unsafe ordinal source for stable targets');
+      assert(!code.includes('critical-action-emitted-dynamic-rc-select-id'), 'contract-driven renderer should not emit unsafe rc_select source for stable targets');
       assert(!code.includes('page.getByText("删除").click()'), 'unsafe emitted text fallback should be blocked');
       assert(!code.includes('page.getByTestId("removeUserButton").nth(1).click()'), 'unsafe emitted ordinal source should be blocked');
       assert(!code.includes('aria-activedescendant=rc_select_14_list_0'), 'unsafe emitted rc_select source should be blocked');
@@ -1624,7 +1845,7 @@ const tests: TestCase[] = [
           order: 1,
           kind: 'recorded',
           action: 'click',
-          target: { testId: 'deleteButton', role: 'button', name: '删除' },
+          target: { role: 'button', name: 'wan-transport-row-delete-action', displayName: '删除' },
           rawAction: { action: { name: 'legacyRecordedSource' } },
           sourceCode: scopedRowTextSource,
           assertions: [],
@@ -1648,7 +1869,12 @@ const tests: TestCase[] = [
           order: 1,
           kind: 'recorded',
           action: 'click',
-          target: { testId: 'deleteButton', role: 'button', name: '删除' },
+          target: { role: 'button', name: '.ant-btn' },
+          context: {
+            eventId: 'ctx-bare-row-text-ordinal',
+            capturedAt: 1000,
+            before: { target: { tag: 'button', role: 'button', text: '删除' } } as any,
+          },
           rawAction: { action: { name: 'legacyRecordedSource' } },
           sourceCode: bareLocatorSource,
           assertions: [],
@@ -1743,7 +1969,9 @@ const tests: TestCase[] = [
       assert(code.includes(modalPreflight), 'modal actions should preflight one visible dialog root');
       assert(code.includes('filter({ hasText: "新建用户" })'), 'modal preflight should keep dialog title scope');
       assert(code.includes(popconfirmPreflight), 'Popconfirm confirms should preflight one visible Popconfirm root');
-      assert(code.indexOf(popconfirmPreflight) < code.indexOf('getByRole("button", { name: /^(确定|确 定)$/ })'), 'Popconfirm preflight should run before the confirm click');
+      const popconfirmPreflightIndex = code.indexOf(popconfirmPreflight);
+      const popconfirmClickIndex = code.indexOf('getByRole("button"', popconfirmPreflightIndex);
+      assert(popconfirmPreflightIndex >= 0 && popconfirmClickIndex > popconfirmPreflightIndex, 'Popconfirm preflight should run before the confirm click');
     },
   },
   {
@@ -5208,7 +5436,7 @@ test('demo', async ({ page }) => {
 
       assert(firstStep.includes('page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)")'), 'popconfirm should start from visible AntD popover scope');
       assert(firstStep.includes('filter({ hasText: "删除此行？" })'), 'popconfirm should filter explicit popover buttons by title');
-      assert(firstStep.includes('getByRole("button", { name: /^(确定|确 定)$/ })') || firstStep.includes('getByRole("button", { name: "确定" })') || firstStep.includes('getByRole("button", { name: "确 定" })'), 'popconfirm should click the confirm button');
+      assert(firstStep.includes('getByRole("button", { name: /^(确定|确 定)$/ })') || firstStep.includes('getByRole("button", { name: /^(确定|确\\s*定)$/ })') || firstStep.includes('getByRole("button", { name: "确定" })') || firstStep.includes('getByRole("button", { name: "确 定" })'), 'popconfirm should click the confirm button');
       assert(!firstStep.includes('page.locator(".ant-modal, .ant-drawer, [role=\\"dialog\\"]")'), 'popconfirm should not be scoped to modal/drawer');
     },
   },
@@ -5362,6 +5590,113 @@ test('demo', async ({ page }) => {
       assert(runtimeWaitIndex >= 0, 'runtime playback should give the AntD Popconfirm animation a parser-safe boundary');
       assert(runtimePopoverConfirmIndex > runtimeWaitIndex, 'runtime playback should confirm a visible AntD Popconfirm root with buttons after the parser-safe boundary');
       assert(!playbackCode.includes('.catch('), 'runtime playback should not include unsupported catch continuations');
+    },
+  },
+  {
+    name: 'AntD delete test id skips explicit popconfirm confirm after repeated opener echo clicks',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [
+          {
+            id: 's001',
+            order: 1,
+            action: 'click',
+            target: {
+              testId: 'ha-wan-transport-row-delete-action',
+              displayName: 'HS Internet default',
+            },
+            context: {
+              eventId: 'ctx-delete',
+              capturedAt: 1000,
+              before: {
+                dialog: { type: 'modal', title: '编辑 WAN1 共享 WAN', visible: true },
+                target: {
+                  tag: 'a',
+                  testId: 'ha-wan-transport-row-delete-action',
+                  framework: 'antd',
+                  controlType: 'link',
+                },
+              },
+              after: { openedDialog: { type: 'popover', title: '删除此行？', visible: true } },
+            },
+            assertions: [],
+          },
+          {
+            id: 's002',
+            order: 2,
+            action: 'click',
+            target: {
+              testId: 'ha-wan-transport-row-delete-action',
+              displayName: 'testId ha-wan-transport-row-delete-action',
+            },
+            context: {
+              eventId: 'ctx-delete-echo-1',
+              capturedAt: 1100,
+              before: {
+                dialog: { type: 'modal', title: '编辑 WAN1 共享 WAN', visible: true },
+                target: {
+                  tag: 'a',
+                  testId: 'ha-wan-transport-row-delete-action',
+                  framework: 'antd',
+                  controlType: 'link',
+                },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's003',
+            order: 3,
+            action: 'click',
+            target: {
+              testId: 'ha-wan-transport-row-delete-action',
+              displayName: 'testId ha-wan-transport-row-delete-action',
+            },
+            context: {
+              eventId: 'ctx-delete-echo-2',
+              capturedAt: 1200,
+              before: {
+                dialog: { type: 'modal', title: '编辑 WAN1 共享 WAN', visible: true },
+                target: {
+                  tag: 'a',
+                  testId: 'ha-wan-transport-row-delete-action',
+                  framework: 'antd',
+                  controlType: 'link',
+                },
+              },
+            },
+            assertions: [],
+          },
+          {
+            id: 's004',
+            order: 4,
+            action: 'click',
+            target: {
+              role: 'tooltip',
+              displayName: 'tooltip 确 定',
+              name: 'tooltip 确 定',
+            },
+            sourceCode: 'await page.locator(".ant-popover:not(.ant-popover-hidden):not(.ant-zoom-big-leave):not(.ant-zoom-big-leave-active)").last().getByRole("button", { name: /^(确定|确 定)$/ }).click();',
+            context: {
+              eventId: 'ctx-popconfirm-ok',
+              capturedAt: 1300,
+              before: {
+                dialog: { type: 'popover', title: '删除此行？', visible: true },
+                target: { tag: 'div', role: 'tooltip', framework: 'antd', controlType: 'button', text: '确 定' },
+              },
+            },
+            assertions: [],
+          },
+        ],
+      };
+
+      const code = generateBusinessFlowPlaywrightCode(flow);
+      const playbackCode = generateBusinessFlowPlaybackCode(flow);
+
+      assertEqual((code.match(/ant-popover[^\n]+getByRole\("button", \{ name: \/\^\(确定\|确 定\)\$\/ \}\)\.click\(\);/g) || []).length, 1);
+      assertEqual((playbackCode.match(/ant-popover[^\n]+getByRole\("button", \{ name: \/\^\(确定\|确 定\)\$\/ \}\)\.click\(\);/g) || []).length, 1);
+      assertEqual(countParserSafeBusinessFlowActions(flow), countParserSafeBusinessFlowActions({ ...flow, steps: [flow.steps[0]] }));
     },
   },
   {
