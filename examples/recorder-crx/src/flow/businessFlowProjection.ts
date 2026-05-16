@@ -4,7 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { composeInputTransactionsFromFlow, isInputTransactionForAliases } from '../interactions/inputTransactions';
+import { composeInputTransactionsFromFlow, isInputTransactionForIdentity } from '../interactions/inputTransactions';
 import { projectSelectTransactionsIntoFlow } from '../interactions/selectTransactions';
 import type { InputTransaction } from '../interactions/types';
 import { inputTargetIdentityFromFlowTarget } from '../interactions/targetIdentity';
@@ -136,7 +136,7 @@ function stepMatchesTransaction(step: FlowStep, transaction: InputTransaction) {
   if (at !== undefined && (at < transaction.startedAt - 50 || at > transaction.endedAt + 50))
     return false;
   const identity = inputTargetIdentityFromFlowTarget(step.target);
-  return isInputTransactionForAliases(transaction, identity?.aliases);
+  return isInputTransactionForIdentity(transaction, identity);
 }
 
 function inputTransactionIdForStep(step: FlowStep) {
@@ -171,23 +171,37 @@ function stepWallTime(step: FlowStep) {
 }
 
 function mergeTarget(current: FlowTarget | undefined, transaction: InputTransaction): FlowTarget | undefined {
-  const fromTransaction = transaction.target ?? targetFromTransaction(transaction);
+  const fromTransaction = targetWithFieldEvidence(transaction.target, transaction.field) ?? targetFromTransaction(transaction);
   if (!current)
     return fromTransaction;
   if (!fromTransaction)
     return current;
   return {
     ...current,
-    testId: current.testId || fromTransaction.testId,
-    label: current.label || fromTransaction.label,
-    name: current.name || fromTransaction.name,
-    placeholder: current.placeholder || fromTransaction.placeholder,
-    displayName: current.displayName || fromTransaction.displayName,
-    scope: mergeScope(current.scope, fromTransaction.scope),
+    testId: fromTransaction.testId || current.testId,
+    label: strongerText(current.label, fromTransaction.label),
+    name: fromTransaction.name || current.name,
+    placeholder: strongerText(current.placeholder, fromTransaction.placeholder),
+    displayName: strongerText(current.displayName, fromTransaction.displayName),
+    scope: mergeScope(fromTransaction.scope, current.scope),
     raw: {
       recorder: current.raw,
       inputTransaction: transaction,
+      pageContext: rawPageContextFromTarget(fromTransaction),
     },
+  };
+}
+
+function targetWithFieldEvidence(target: FlowTarget | undefined, field: InputTransaction['field']): FlowTarget | undefined {
+  if (!target)
+    return undefined;
+  return {
+    ...target,
+    testId: target.testId || field.testId,
+    label: strongerText(target.label, field.label),
+    name: target.name || field.name,
+    placeholder: strongerText(target.placeholder, field.placeholder),
+    displayName: strongestDisplayName(target.displayName, field.label, field.name, field.placeholder, field.testId),
   };
 }
 
@@ -214,7 +228,7 @@ function targetFromTransaction(transaction: InputTransaction): FlowTarget | unde
     label: field.label,
     name: field.name,
     placeholder: field.placeholder,
-    displayName: field.label || field.name || field.placeholder || field.testId,
+    displayName: strongestDisplayName(field.label, field.name, field.placeholder, field.testId),
     scope: field.label || field.name || field.testId ? {
       form: {
         label: field.label,
@@ -246,10 +260,12 @@ function inputRawAction(previous: unknown, transaction: InputTransaction, target
 function selectorFromTarget(target: FlowTarget | undefined) {
   if (target?.testId)
     return `internal:testid=[data-testid="${escapeSelectorValue(target.testId)}"s]`;
-  if (target?.label)
-    return `internal:label="${escapeSelectorValue(target.label)}"i`;
   if (target?.placeholder)
     return `internal:attr=[placeholder="${escapeSelectorValue(target.placeholder)}"i]`;
+  if (target?.name)
+    return `input[name="${escapeSelectorValue(target.name)}"]`;
+  if (target?.label)
+    return `internal:label="${escapeSelectorValue(target.label)}"i`;
   return target?.selector || target?.locator;
 }
 
@@ -309,6 +325,8 @@ function fillSourceCode(target: FlowTarget | undefined, value: string) {
 }
 
 function sourceCodeForProjectedStep(step: FlowStep, transaction: InputTransaction, target: FlowTarget | undefined) {
+  if (shouldRegenerateFillSource(step, target))
+    return fillSourceCode(target, transaction.finalValue);
   return replaceFillValue(step.sourceCode, transaction.finalValue) || step.sourceCode || fillSourceCode(target, transaction.finalValue);
 }
 
@@ -325,17 +343,159 @@ function quotedString(value: string, quote: string) {
 }
 
 function fillLocator(target: FlowTarget | undefined) {
-  if (target?.label)
-    return `page.getByLabel(${stringLiteral(target.label)})`;
-  if (target?.placeholder)
-    return `page.getByPlaceholder(${stringLiteral(target.placeholder)})`;
+  if (target?.testId && isLikelyFieldWrapperTarget(target) && target.placeholder)
+    return `page.getByTestId(${stringLiteral(target.testId)}).getByPlaceholder(${stringLiteral(target.placeholder)})`;
+  if (target?.testId && isLikelyFieldWrapperTarget(target) && target.name)
+    return `page.getByTestId(${stringLiteral(target.testId)}).locator(${stringLiteral(fieldNameInputSelector(target.name))}).first()`;
+  if (target?.testId && isLikelyFieldWrapperTarget(target))
+    return `page.getByTestId(${stringLiteral(target.testId)}).locator(${stringLiteral('input:visible, textarea:visible, [contenteditable="true"]')}).first()`;
   if (target?.testId)
     return `page.getByTestId(${stringLiteral(target.testId)})`;
+  if (target?.placeholder)
+    return `page.getByPlaceholder(${stringLiteral(target.placeholder)})`;
+  if (target?.name)
+    return `page.locator(${stringLiteral(fieldNameInputSelector(target.name))}).first()`;
+  if (target?.label)
+    return `page.getByLabel(${stringLiteral(target.label)})`;
   if (target?.selector)
     return `page.locator(${stringLiteral(target.selector)})`;
   if (target?.locator)
     return `page.locator(${stringLiteral(target.locator)})`;
   return `page.getByRole('textbox', { name: ${stringLiteral(target?.displayName || target?.name || '输入框')} })`;
+}
+
+function shouldRegenerateFillSource(step: FlowStep, target: FlowTarget | undefined) {
+  if (!step.sourceCode || !target)
+    return false;
+  if (!/getByLabel|getByRole\(["']textbox|internal:label|internal:role=textbox/.test(step.sourceCode))
+    return false;
+  const sourceName = weakFillSourceName(step.sourceCode);
+  if (!sourceName)
+    return !!(target.testId && (target.placeholder || target.name));
+  const normalizedSource = normalizeComparableText(sourceName);
+  const targetTexts = [target.placeholder, target.name, target.testId ? target.label : undefined].filter(Boolean) as string[];
+  if (targetTexts.some(text => normalizeComparableText(text) === normalizedSource))
+    return false;
+  return targetTexts.some(text => {
+    const normalizedTarget = normalizeComparableText(text);
+    return normalizedTarget.startsWith(normalizedSource) || normalizedSource.startsWith(normalizedTarget);
+  });
+}
+
+function weakFillSourceName(sourceCode: string) {
+  const getByLabel = sourceCode.match(/getByLabel\((["'`])((?:\\.|(?!\1)[\s\S])*)\1\)/);
+  if (getByLabel)
+    return unescapeSourceString(getByLabel[2]);
+  const getByTextbox = sourceCode.match(/getByRole\((["'`])textbox\1,\s*\{\s*name:\s*(["'`])((?:\\.|(?!\2)[\s\S])*)\2/);
+  if (getByTextbox)
+    return unescapeSourceString(getByTextbox[3]);
+  const internalLabel = sourceCode.match(/internal:label=(?:\\"|")([^\\"]+)(?:\\"|")/);
+  if (internalLabel)
+    return unescapeSourceString(internalLabel[1]);
+  const internalTextbox = sourceCode.match(/internal:role=textbox\[name=(?:\\"|")([^\\"]+)(?:\\"|")(?:i|s)?\]/);
+  return internalTextbox ? unescapeSourceString(internalTextbox[1]) : undefined;
+}
+
+function unescapeSourceString(value: string) {
+  return value.replace(/\\(["'`])/g, '$1');
+}
+
+function strongestDisplayName(...values: Array<string | undefined>) {
+  return values.reduce<string | undefined>((current, value) => strongerText(current, value), undefined);
+}
+
+function strongerText(previous?: string, incoming?: string) {
+  if (!previous)
+    return incoming;
+  if (!incoming)
+    return previous;
+  const normalizedPrevious = normalizeComparableText(previous);
+  const normalizedIncoming = normalizeComparableText(incoming);
+  if (normalizedIncoming.startsWith(normalizedPrevious) && normalizedIncoming.length > normalizedPrevious.length)
+    return incoming;
+  if (normalizedPrevious.startsWith(normalizedIncoming) && normalizedPrevious.length > normalizedIncoming.length)
+    return previous;
+  return previous;
+}
+
+function fieldNameInputSelector(name: string) {
+  const escaped = cssAttributeValue(name);
+  return `input[name="${escaped}"], textarea[name="${escaped}"]`;
+}
+
+function isLikelyFieldWrapperTarget(target: FlowTarget) {
+  if (!target.testId)
+    return false;
+  if (looksLikeStructuralFormTestId(target.testId))
+    return false;
+  if (looksLikeActualControlTestId(target.testId))
+    return false;
+  if (targetHasActualControlTestId(target))
+    return false;
+  const raw = recordFromUnknown(target.raw);
+  const pageContext = recordFromUnknown(rawPageContextFromTargetRaw(raw));
+  const form = recordFromUnknown(pageContext.form);
+  const ui = recordFromUnknown(pageContext.ui);
+  const uiForm = recordFromUnknown(ui.form);
+  return !!Object.keys(pageContext).length && target.scope?.form?.testId === target.testId ||
+    form.testId === target.testId ||
+    uiForm.testId === target.testId;
+}
+
+function targetHasActualControlTestId(target: FlowTarget) {
+  const pageContext = recordFromUnknown(rawPageContextFromTargetRaw(target.raw));
+  const contextTarget = recordFromUnknown(pageContext.target);
+  if (contextTarget.testId === target.testId)
+    return isActualTextControl(contextTarget, target.role);
+  const hasObservedWrapper = pageContextFormTestId(pageContext) === target.testId;
+  if (hasObservedWrapper || !target.testId)
+    return false;
+  return isActualTextControl(target);
+}
+
+function rawPageContextFromTargetRaw(raw: unknown, depth = 0): unknown {
+  if (!raw || typeof raw !== 'object' || depth > 4)
+    return undefined;
+  const record = raw as { pageContext?: unknown; incoming?: unknown; previous?: unknown; inputTransaction?: { target?: { raw?: unknown } } };
+  return record.pageContext ||
+    rawPageContextFromTargetRaw(record.inputTransaction?.target?.raw, depth + 1) ||
+    rawPageContextFromTargetRaw(record.incoming, depth + 1) ||
+    rawPageContextFromTargetRaw(record.previous, depth + 1);
+}
+
+function pageContextFormTestId(pageContext: Record<string, unknown>) {
+  const form = recordFromUnknown(pageContext.form);
+  const ui = recordFromUnknown(pageContext.ui);
+  const uiForm = recordFromUnknown(ui.form);
+  return form.testId || uiForm.testId;
+}
+
+function isActualTextControl(target: { role?: unknown; controlType?: unknown; tag?: unknown }, fallbackRole?: string) {
+  const role = String(target.role || fallbackRole || '');
+  const controlType = String(target.controlType || '');
+  const tag = String(target.tag || '').toLowerCase();
+  return role === 'textbox' || /^(input|textarea)$/.test(tag) || /^(input|textarea|text|number|password)$/.test(controlType);
+}
+
+function looksLikeActualControlTestId(testId: string) {
+  return /(^|[-_])(input|textarea|textbox|digit|number|password)([-_]|$)/i.test(testId);
+}
+
+function looksLikeStructuralFormTestId(testId: string) {
+  return /(^|[-_])(modal|dialog|drawer|form|container|wrapper|root)([-_]|$)/i.test(testId);
+}
+
+function rawPageContextFromTarget(target: FlowTarget | undefined) {
+  const raw = recordFromUnknown(target?.raw);
+  return raw.pageContext;
+}
+
+function cssAttributeValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function normalizeComparableText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim().toLowerCase() || '';
 }
 
 function shallowStepEqual(left: FlowStep, right: FlowStep) {

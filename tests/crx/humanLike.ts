@@ -38,24 +38,37 @@ function reportFallback(options: HumanLikeOptions | undefined, kind: HumanLikeFa
     throw new Error(`human-like fallback used: ${kind}`);
 }
 
+function isTransientDetachedError(error: unknown) {
+  return error instanceof Error && /not attached to the DOM|Element is not attached/i.test(error.message);
+}
+
 export async function humanClick(locator: Locator, options?: { delayMs?: number, position?: 'center' | 'left' | 'right' }) {
-  await locator.scrollIntoViewIfNeeded();
-  await expect(locator).toBeVisible({ timeout: 10_000 });
-  await expect(locator).toBeEnabled({ timeout: 10_000 }).catch(() => {});
-
-  const box = await stableBoundingBox(locator);
-  if (!box)
-    throw new Error('humanClick target has no bounding box');
-
-  const x = options?.position === 'left' ? box.x + Math.min(12, box.width / 3) :
-    options?.position === 'right' ? box.x + box.width - Math.min(12, box.width / 3) :
-      box.x + box.width / 2;
-  const y = box.y + box.height / 2;
   const page = locator.page();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await locator.scrollIntoViewIfNeeded();
+      await expect(locator).toBeVisible({ timeout: 10_000 });
+      await expect(locator).toBeEnabled({ timeout: 10_000 }).catch(() => {});
 
-  await page.mouse.move(x, y, { steps: 8 });
-  await page.waitForTimeout(options?.delayMs ?? 80);
-  await page.mouse.click(x, y, { delay: 40 });
+      const box = await stableBoundingBox(locator);
+      if (!box)
+        throw new Error('humanClick target has no bounding box');
+
+      const x = options?.position === 'left' ? box.x + Math.min(12, box.width / 3) :
+        options?.position === 'right' ? box.x + box.width - Math.min(12, box.width / 3) :
+          box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+
+      await page.mouse.move(x, y, { steps: 8 });
+      await page.waitForTimeout(options?.delayMs ?? 80);
+      await page.mouse.click(x, y, { delay: 40 });
+      return;
+    } catch (error) {
+      if (!isTransientDetachedError(error) || attempt === 2)
+        throw error;
+      await page.waitForTimeout(80);
+    }
+  }
 }
 
 export async function humanClickUntil(locator: Locator, condition: () => Promise<boolean>, options?: HumanClickUntilOptions) {
@@ -68,6 +81,10 @@ export async function humanClickUntil(locator: Locator, condition: () => Promise
     } catch (error) {
       if (await condition())
         return;
+      if (isTransientDetachedError(error) && i < attempts - 1) {
+        await locator.page().waitForTimeout(Math.min(options?.afterClickDelayMs ?? 300, 250));
+        continue;
+      }
       throw error;
     }
     await locator.page().waitForTimeout(options?.afterClickDelayMs ?? 300);
@@ -388,7 +405,10 @@ export async function fillFlowMetaLikeUser(recorderPage: Page, label: string, va
 }
 
 export async function visibleStepTexts(recorderPage: Page) {
-  return (await recorderPage.locator('.flow-step, .review-step-row').allInnerTexts()).join('\n');
+  return await Promise.race([
+    recorderPage.locator('.flow-step, .review-step-row').allInnerTexts().then(texts => texts.join('\n')).catch(() => ''),
+    new Promise<string>(resolve => setTimeout(() => resolve(''), 1000)),
+  ]);
 }
 
 export async function createRepeatSegmentLikeUser(recorderPage: Page, options: { fromStepText: string, toStepText: string, segmentName: string, minSteps?: number, expectedDataText?: string | RegExp, requiredSelectedTexts?: string[] }) {

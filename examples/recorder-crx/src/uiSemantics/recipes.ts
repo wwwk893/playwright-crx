@@ -57,6 +57,9 @@ export type LegacyUiActionRecipeKind =
 export type UiActionRecipeTarget = {
   testId?: string;
   label?: string;
+  name?: string;
+  placeholder?: string;
+  fieldName?: string;
   role?: string;
   text?: string;
   dialog?: unknown;

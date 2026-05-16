@@ -7,7 +7,7 @@
 import type { RecorderEventEnvelope, RecorderEventJournal } from '../capture/eventEnvelope';
 import type { PageContextAfterSnapshot, PageContextSnapshot, StepContextSnapshot } from '../flow/pageContextTypes';
 import type { BusinessFlow, FlowTarget } from '../flow/types';
-import { inputTargetIdentityFromPageContext, inputTargetIdentityFromRecorderAction, normalizeKeys, targetAliasesOverlap } from './targetIdentity';
+import { inputTargetIdentitiesCompatible, inputTargetIdentityFromPageContext, inputTargetIdentityFromRecorderAction, normalizeKeys, targetAliasesOverlap, type TargetIdentity } from './targetIdentity';
 import type { InputTransaction, InputTransactionCommitReason, InputTransactionComposition } from './types';
 
 type ActionLike = {
@@ -50,6 +50,14 @@ type OpenInputTransaction = Omit<InputTransaction, 'commitReason'> & {
   commitReason?: InputTransactionCommitReason;
 };
 
+type PendingInputFocus = {
+  identity: TargetIdentity;
+  target?: InputTransaction['target'];
+  context?: StepContextSnapshot;
+  contextEventId?: string;
+  at: number;
+};
+
 export function composeInputTransactionsFromFlow(flow: BusinessFlow, options: { commitOpen?: boolean; commitReason?: InputTransactionCommitReason } = {}): InputTransactionComposition {
   const recorder = flow.artifacts?.recorder;
   const latestRecorderActions = new Map((recorder?.actionLog ?? []).map(entry => [entry.id, entry]));
@@ -62,9 +70,10 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
 
   const committed: InputTransaction[] = [];
   const openByTarget = new Map<string, OpenInputTransaction>();
+  const pendingInputFocuses: PendingInputFocus[] = [];
 
-  const openOrUpdate = (identity: NonNullable<ReturnType<typeof inputTargetIdentityFromPageContext>>, value: string | undefined, at: number, source: { eventId?: string; actionId?: string; contextEventId?: string; context?: StepContextSnapshot; target?: InputTransaction['target'] }) => {
-    let transaction = findOpen(openByTarget, identity.aliases);
+  const openOrUpdate = (identity: TargetIdentity, value: string | undefined, at: number, source: { eventId?: string; actionId?: string; contextEventId?: string; context?: StepContextSnapshot; target?: InputTransaction['target'] }) => {
+    let transaction = findOpen(openByTarget, identity);
     if (!transaction) {
       if (value === undefined)
         return;
@@ -86,9 +95,14 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
       };
       openByTarget.set(transaction.targetKey, transaction);
     }
+    if (shouldPromoteTransactionIdentity(transaction, identity)) {
+      openByTarget.delete(transaction.targetKey);
+      transaction.targetKey = identity.targetKey;
+      openByTarget.set(transaction.targetKey, transaction);
+    }
     transaction.targetAliases = normalizeKeys([...(transaction.targetAliases ?? []), ...identity.aliases]);
-    transaction.field = { ...identity.field, ...transaction.field, ...compactField(transaction.field, identity.field) };
-    transaction.target = transaction.target ?? source.target;
+    transaction.field = mergeInputFieldEvidence(transaction.field, identity.field);
+    transaction.target = mergeInputTargetEvidence(transaction.target, source.target);
     transaction.context = source.context ?? transaction.context;
     transaction.contextEventId = source.contextEventId ?? transaction.contextEventId;
     transaction.endedAt = Math.max(transaction.endedAt, at);
@@ -105,21 +119,21 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
     commitTransaction(openByTarget, committed, transaction, reason);
   };
 
-  const commitUnrelatedOpenTransactions = (identity: { aliases: string[] }, reason: InputTransactionCommitReason, at: number) => {
+  const commitUnrelatedOpenTransactions = (identity: TargetIdentity, reason: InputTransactionCommitReason, at: number) => {
     for (const transaction of Array.from(openByTarget.values())) {
-      if (isInputTransactionForAliases(transaction, identity.aliases))
+      if (isInputTransactionForIdentity(transaction, identity))
         continue;
       commitOpenTransaction(transaction, reason, at);
     }
   };
 
-  const commitMatching = (identity: { aliases: string[] } | undefined, reason: InputTransactionCommitReason, at: number) => {
+  const commitMatching = (identity: TargetIdentity | undefined, reason: InputTransactionCommitReason, at: number) => {
     if (!identity) {
       for (const transaction of Array.from(openByTarget.values()))
         commitOpenTransaction(transaction, reason, at);
       return;
     }
-    const transaction = findOpen(openByTarget, identity.aliases);
+    const transaction = findOpen(openByTarget, identity);
     if (!transaction)
       return;
     commitOpenTransaction(transaction, reason, at);
@@ -146,7 +160,16 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
       if (isInputLikeRecorderAction(action)) {
         if (!identity)
           continue;
-        openOrUpdate(identity, recorderActionValue(action), at, { actionId: payload.actionId });
+        const focus = action.name === 'fill' ? findCompatiblePendingInputFocus(pendingInputFocuses, identity, at) : undefined;
+        if (focus)
+          removePendingInputFocus(pendingInputFocuses, focus);
+        const mergedIdentity = mergeInputIdentities(focus?.identity, identity);
+        openOrUpdate(mergedIdentity, recorderActionValue(action), at, {
+          actionId: payload.actionId,
+          contextEventId: focus?.contextEventId,
+          context: focus?.context,
+          target: focus?.target,
+        });
         if (action.name === 'fill')
           continue;
         if (action.name === 'press' && isCommitKey(action.key))
@@ -164,8 +187,31 @@ export function composeInputTransactionsFromJournal(journal: RecorderEventJourna
         continue;
       }
       const identity = scopedIdentity(inputTargetIdentityFromPageContext(payload.before), pageContextDialogScope(payload.before));
-      if (!identity)
+      if (!identity) {
+        if (payload.kind !== 'keydown')
+          commitMatching(undefined, 'next-action', at);
         continue;
+      }
+      if (payload.kind === 'click' && isInputFocusContext(payload)) {
+        const existing = findOpenForFocus(openByTarget, identity);
+        if (existing) {
+          openOrUpdate(identity, undefined, at, {
+            contextEventId: payload.id,
+            context: pageContextStepContext(payload, at),
+            target: pageContextTarget(payload.before),
+          });
+          continue;
+        }
+        pendingInputFocuses.push({
+          identity,
+          target: pageContextTarget(payload.before),
+          context: pageContextStepContext(payload, at),
+          contextEventId: payload.id,
+          at,
+        });
+        pruneOldPendingInputFocuses(pendingInputFocuses, at);
+        continue;
+      }
       if (payload.kind === 'input' || payload.kind === 'change') {
         const value = pageContextInputValue(payload);
         if (value !== undefined) {
@@ -204,8 +250,29 @@ export function isInputTransactionForAliases(transaction: Pick<InputTransaction,
   return transaction.targetKey && aliases?.includes(transaction.targetKey) || targetAliasesOverlap(transaction.targetAliases, aliases);
 }
 
-function findOpen(openByTarget: Map<string, OpenInputTransaction>, aliases: string[]) {
-  return Array.from(openByTarget.values()).find(transaction => isInputTransactionForAliases(transaction, aliases));
+export function isInputTransactionForIdentity(transaction: Pick<InputTransaction, 'targetKey' | 'targetAliases' | 'field'>, identity: TargetIdentity | undefined) {
+  return inputTargetIdentitiesCompatible({
+    targetKey: transaction.targetKey,
+    aliases: transaction.targetAliases,
+    field: transaction.field,
+  }, identity);
+}
+
+function findOpen(openByTarget: Map<string, OpenInputTransaction>, identity: TargetIdentity) {
+  return Array.from(openByTarget.values()).find(transaction => isInputTransactionForIdentity(transaction, identity));
+}
+
+function findOpenForFocus(openByTarget: Map<string, OpenInputTransaction>, identity: TargetIdentity) {
+  return Array.from(openByTarget.values()).find(transaction => isInputTransactionForIdentity(transaction, identity) ||
+    singleFocusFallbackCompatible(identity, transactionIdentity(transaction)));
+}
+
+function transactionIdentity(transaction: Pick<InputTransaction, 'targetKey' | 'targetAliases' | 'field'>): TargetIdentity {
+  return {
+    targetKey: transaction.targetKey,
+    aliases: transaction.targetAliases ?? [],
+    field: transaction.field,
+  };
 }
 
 function transactionId(identity: { targetKey: string }, at: number, source: { eventId?: string; actionId?: string }) {
@@ -225,13 +292,107 @@ function commitTransaction(openByTarget: Map<string, OpenInputTransaction>, comm
   });
 }
 
-function compactField(previous: InputTransaction['field'], incoming: InputTransaction['field']) {
+function shouldPromoteTransactionIdentity(transaction: OpenInputTransaction, identity: TargetIdentity) {
+  if (transaction.targetKey === identity.targetKey)
+    return false;
+  if (!isInputTransactionForIdentity(transaction, identity))
+    return false;
+  return identityHasStrongerFieldEvidence(identity.field, transaction.field);
+}
+
+function identityHasStrongerFieldEvidence(incoming: InputTransaction['field'], previous: InputTransaction['field']) {
+  return !!(
+    incoming.testId && incoming.testId !== previous.testId ||
+    incoming.name && incoming.name !== previous.name ||
+    strongerText(previous.placeholder, incoming.placeholder) !== previous.placeholder ||
+    strongerText(previous.label, incoming.label) !== previous.label
+  );
+}
+
+function mergeInputFieldEvidence(previous: InputTransaction['field'], incoming: InputTransaction['field']) {
   return {
-    testId: previous.testId || incoming.testId,
-    label: previous.label || incoming.label,
-    name: previous.name || incoming.name,
-    placeholder: previous.placeholder || incoming.placeholder,
+    testId: incoming.testId || previous.testId,
+    label: strongerText(previous.label, incoming.label),
+    name: incoming.name || previous.name,
+    placeholder: strongerText(previous.placeholder, incoming.placeholder),
   };
+}
+
+function mergeInputTargetEvidence(previous: InputTransaction['target'], incoming: InputTransaction['target']) {
+  if (!previous)
+    return incoming;
+  if (!incoming)
+    return previous;
+  return {
+    ...previous,
+    testId: incoming.testId || previous.testId,
+    label: strongerText(previous.label, incoming.label),
+    name: incoming.name || previous.name,
+    placeholder: strongerText(previous.placeholder, incoming.placeholder),
+    displayName: strongerText(previous.displayName, incoming.displayName),
+    scope: mergeTargetScope(previous.scope, incoming.scope),
+    raw: mergeInputTargetRaw(previous.raw, incoming.raw),
+  };
+}
+
+function mergeInputTargetRaw(previous: unknown, incoming: unknown) {
+  const pageContext = rawPageContext(incoming) ?? rawPageContext(previous);
+  return {
+    ...rawRecord(previous),
+    ...rawRecord(incoming),
+    ...(pageContext ? { pageContext } : {}),
+    previous,
+    incoming,
+  };
+}
+
+function rawPageContext(raw: unknown, depth = 0): unknown {
+  if (!raw || typeof raw !== 'object' || depth > 4)
+    return undefined;
+  const record = raw as { pageContext?: unknown; incoming?: unknown; previous?: unknown };
+  return record.pageContext ?? rawPageContext(record.incoming, depth + 1) ?? rawPageContext(record.previous, depth + 1);
+}
+
+function rawRecord(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+}
+
+function mergeTargetScope(previous: FlowTarget['scope'] | undefined, incoming: FlowTarget['scope'] | undefined): FlowTarget['scope'] | undefined {
+  if (!previous)
+    return incoming;
+  if (!incoming)
+    return previous;
+  return {
+    ...previous,
+    dialog: incoming.dialog ?? previous.dialog,
+    section: incoming.section ?? previous.section,
+    table: incoming.table ?? previous.table,
+    form: incoming.form ?? previous.form,
+  };
+}
+
+function mergeInputIdentities(focus: TargetIdentity | undefined, recorder: TargetIdentity): TargetIdentity {
+  if (!focus)
+    return recorder;
+  return {
+    targetKey: focus.targetKey,
+    aliases: normalizeKeys([...focus.aliases, ...recorder.aliases]),
+    field: mergeInputFieldEvidence(recorder.field, focus.field),
+  };
+}
+
+function strongerText(previous?: string, incoming?: string) {
+  if (!previous)
+    return incoming;
+  if (!incoming)
+    return previous;
+  const normalizedPrevious = normalizeComparableText(previous);
+  const normalizedIncoming = normalizeComparableText(incoming);
+  if (normalizedIncoming.startsWith(normalizedPrevious) && normalizedIncoming.length > normalizedPrevious.length)
+    return incoming;
+  if (normalizedPrevious.startsWith(normalizedIncoming) && normalizedPrevious.length > normalizedIncoming.length)
+    return previous;
+  return previous;
 }
 
 function scopedIdentity<T extends { targetKey: string; aliases: string[] } | undefined>(identity: T, scope?: string): T {
@@ -253,6 +414,80 @@ function dialogScopeFromSource(sourceCode?: string) {
 function pageContextDialogScope(before?: PageContextPayload['before']) {
   const dialog = (before as { dialog?: { title?: string } } | undefined)?.dialog;
   return dialog?.title;
+}
+
+function findCompatiblePendingInputFocus(pendingInputFocuses: PendingInputFocus[], identity: TargetIdentity, at: number): PendingInputFocus | undefined {
+  const candidates = pendingInputFocuses
+      .filter(focus => at >= focus.at - 100 && at - focus.at <= 2000)
+      .sort((left, right) => right.at - left.at);
+  const compatible = candidates.find(focus => inputTargetIdentitiesCompatible(focus.identity, identity));
+  if (compatible)
+    return compatible;
+  if (candidates.length === 1 && singleFocusFallbackCompatible(candidates[0].identity, identity))
+    return candidates[0];
+  return undefined;
+}
+
+function removePendingInputFocus(pendingInputFocuses: PendingInputFocus[], focus: PendingInputFocus) {
+  const index = pendingInputFocuses.indexOf(focus);
+  if (index !== -1)
+    pendingInputFocuses.splice(index, 1);
+}
+
+function pruneOldPendingInputFocuses(pendingInputFocuses: PendingInputFocus[], at: number) {
+  for (let index = pendingInputFocuses.length - 1; index >= 0; index--) {
+    if (at - pendingInputFocuses[index].at > 2000)
+      pendingInputFocuses.splice(index, 1);
+  }
+}
+
+function singleFocusFallbackCompatible(focus: TargetIdentity, recorder: TargetIdentity) {
+  if (!sameScopedDialog(focus, recorder))
+    return false;
+  if (!hasStrongFieldEvidence(focus.field))
+    return false;
+  if (recorder.field.testId || recorder.field.name || recorder.field.placeholder)
+    return false;
+  const recorderLabel = recorder.field.label;
+  if (!recorderLabel)
+    return true;
+  const focusTexts = [focus.field.placeholder, focus.field.label].filter(Boolean) as string[];
+  return focusTexts.some(text => prefixCompatibleText(text, recorderLabel));
+}
+
+function sameScopedDialog(left: TargetIdentity, right: TargetIdentity) {
+  const leftScope = dialogScopeFromAliases(left.aliases);
+  const rightScope = dialogScopeFromAliases(right.aliases);
+  return !leftScope || !rightScope || leftScope === rightScope;
+}
+
+function dialogScopeFromAliases(aliases: string[]) {
+  for (const alias of aliases) {
+    const match = alias.match(/\|dialog:(.+)$/);
+    if (match)
+      return match[1];
+  }
+  return undefined;
+}
+
+function hasStrongFieldEvidence(field: TargetIdentity['field']) {
+  return !!(field.name || field.placeholder || field.testId);
+}
+
+function prefixCompatibleText(left: string, right: string) {
+  const normalizedLeft = normalizeComparableText(left);
+  const normalizedRight = normalizeComparableText(right);
+  return !!normalizedLeft && !!normalizedRight && (normalizedLeft === normalizedRight || normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft));
+}
+
+function isInputFocusContext(payload: PageContextPayload) {
+  const target = payload.before?.target;
+  const ui = payload.before?.ui;
+  const role = target?.role || '';
+  const controlType = target?.controlType || ui?.form?.fieldKind || '';
+  return role === 'textbox' ||
+    /^(input|textarea|text|number|password)$/.test(controlType) ||
+    ui?.recipe?.kind === 'fill-form-field';
 }
 
 function isInputLikeRecorderAction(action: ActionLike) {
@@ -323,6 +558,12 @@ function pageContextTarget(before?: PageContextPayload['before']): FlowTarget | 
   const name = before.ui?.form?.name || before.ui?.form?.dataIndex || before.form?.namePath?.join('.') || before.form?.name;
   const placeholder = before.ui?.form?.placeholder || before.target?.placeholder;
   const displayName = label || name || placeholder || before.target?.text || before.target?.normalizedText || testId;
+  const formScope = before.form || before.ui?.form ? {
+    title: before.form?.title,
+    label,
+    name,
+    testId: before.form?.testId || before.ui?.form?.testId,
+  } : undefined;
   if (!testId && !label && !name && !placeholder && !displayName)
     return undefined;
   return {
@@ -335,12 +576,7 @@ function pageContextTarget(before?: PageContextPayload['before']): FlowTarget | 
       dialog: before.dialog,
       section: before.section,
       table: before.table,
-      form: before.form ? {
-        title: before.form.title,
-        label: before.form.label,
-        name: before.form.name,
-        testId: before.form.testId,
-      } : undefined,
+      form: formScope,
     },
     raw: {
       pageContext: {
@@ -360,4 +596,8 @@ function normalizeAction(rawAction: unknown): ActionLike {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function normalizeComparableText(value?: string) {
+  return value?.replace(/\s+/g, ' ').trim().toLowerCase() || '';
 }

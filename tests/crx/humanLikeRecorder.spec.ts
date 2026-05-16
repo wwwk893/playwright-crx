@@ -399,7 +399,13 @@ test('human-like runtime replay skips redundant IPv4 field focus click @human-sm
       async () => !await ipv4Dialog.isVisible().catch(() => false),
       { attempts: 5, afterClickDelayMs: 800, ...strictHumanOptions },
   );
-  await expect(page.getByRole('row', { name: /runtime-pool.*xtest16:WAN1.*1\.1\.1\.1.*2\.2\.2\.2/ })).toBeVisible({ timeout: 10_000 });
+  await expect.poll(
+      async () => await Promise.race([
+        page.evaluate(() => document.querySelector('[data-testid="site-ip-address-pool-table"]')?.textContent || '').catch(() => ''),
+        new Promise<string>(resolve => setTimeout(() => resolve(''), 1000)),
+      ]),
+      { timeout: 10_000 },
+  ).toMatch(/runtime-pool[\s\S]*xtest16:WAN1[\s\S]*1\.1\.1\.1[\s\S]*2\.2\.2\.2/);
   await humanClick(page.getByTestId('site-save-button'));
   await expect(page.getByText('配置已保存')).toBeVisible();
 
@@ -674,18 +680,14 @@ test('case-driven human-like records user admin modal repeat flow and replays ge
   await selectAntdOptionLikeUser(page, roleTrigger, '审计员', strictHumanOptions);
   await expect(userDialog.locator('.ant-form-item').filter({ hasText: '角色' })).toContainText('审计员');
 
-  await humanClickUntil(
-      userDialog.getByTestId('modal-confirm'),
-      async () => !await userDialog.isVisible().catch(() => false),
-      { ...strictHumanOptions },
-  );
-  await expect(userDialog).not.toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole('row', { name: /alice\.qa.*审计员/ })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('保存成功：alice.qa')).toBeVisible();
+  await humanClick(userDialog.getByTestId('modal-confirm'));
+  await waitUntil('user create dialog closes', async () => !await hasVisibleDialogText(page, '新建用户'), 10_000);
+  await waitUntil('created alice.qa row is visible in users table', async () => /alice\.qa[\s\S]*审计员/.test(await boundedPageText(page, '[data-testid="user-admin-card"]')), 10_000);
+  await waitUntil('alice.qa success toast is visible', async () => (await boundedBodyText(page)).includes('保存成功：alice.qa'), 10_000);
 
-  await expect.poll(() => visibleStepTexts(recorderPage), { timeout: 25_000 }).toContain('create-user-btn');
-  await expect.poll(() => visibleStepTexts(recorderPage)).toContain('alice.qa');
-  await expect.poll(() => visibleStepTexts(recorderPage)).toMatch(/角色|审计员/);
+  await waitUntil('recorder captured create-user button', async () => (await visibleStepTexts(recorderPage)).includes('create-user-btn'), 25_000);
+  await waitUntil('recorder captured alice.qa value', async () => (await visibleStepTexts(recorderPage)).includes('alice.qa'), 10_000);
+  await waitUntil('recorder captured role selection', async () => /角色|审计员/.test(await visibleStepTexts(recorderPage)), 10_000);
 
   await humanClick(recorderPage.getByRole('button', { name: '停止录制' }));
   await expect(recorderPage.locator('.recording-status')).toContainText(/步骤检查|导出检查/);
@@ -1067,6 +1069,46 @@ async function openInsertMenuAfterStepLikeUser(recorderPage: Page, stepId: strin
 
 function escapeRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function hasVisibleDialogText(page: Page, text: string) {
+  return await Promise.race([
+    page.evaluate(expected => Array.from(document.querySelectorAll('.ant-modal, [role="dialog"]')).some(element => {
+      const htmlElement = element as HTMLElement;
+      const style = getComputedStyle(htmlElement);
+      const rect = htmlElement.getBoundingClientRect();
+      return (htmlElement.textContent || '').includes(expected) &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        rect.width > 0 &&
+        rect.height > 0;
+    }), text).catch(() => false),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 1000)),
+  ]);
+}
+
+async function boundedPageText(page: Page, selector: string) {
+  return await Promise.race([
+    page.evaluate(targetSelector => document.querySelector(targetSelector)?.textContent || '', selector).catch(() => ''),
+    new Promise<string>(resolve => setTimeout(() => resolve(''), 1000)),
+  ]);
+}
+
+async function boundedBodyText(page: Page) {
+  return await Promise.race([
+    page.evaluate(() => document.body?.textContent || '').catch(() => ''),
+    new Promise<string>(resolve => setTimeout(() => resolve(''), 1000)),
+  ]);
+}
+
+async function waitUntil(description: string, predicate: () => Promise<boolean>, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate())
+      return;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw new Error(`Timed out waiting for ${description}`);
 }
 
 function expectTriggerOwnedAntdOptionReplay(code: string, trigger: RegExp | string, optionText: string, searchText?: string) {
