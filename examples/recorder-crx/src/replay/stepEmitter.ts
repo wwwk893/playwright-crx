@@ -1399,6 +1399,11 @@ function contractTestIdLocator(candidate: LocatorCandidate, step: FlowStep) {
     return undefined;
   if (looksLikeStructuralFormTestId(testId) || looksLikeStructuralContainerTestId(testId))
     return undefined;
+  const rowScoped = rowScopedActionTestIdLocator(step, testId);
+  if (rowScoped)
+    return rowScoped;
+  if (isReusableRowActionTestId(testId))
+    return undefined;
   const source = step.target?.testId === testId ? 'target' : 'context';
   if (duplicatePageIndex(step, testId, source) !== undefined)
     return undefined;

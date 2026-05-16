@@ -900,6 +900,7 @@ test('human-like records real WAN transport terminal states and replays terminal
   await expect(recorderPage.locator('.recording-status')).toContainText('录制中');
 
   await page.goto(`${baseURL}/antd-wan-transport-real.html`);
+  await attachRecorder(page, { mode: 'business-flow' });
   const transportTable = page.getByTestId('wan-transport-table');
   await expect(transportTable).toContainText('Nova 公网', { timeout: 10_000 });
 
@@ -966,7 +967,10 @@ test('human-like records real WAN transport terminal states and replays terminal
   expect(JSON.stringify(flow)).not.toContain('sourceCode');
   expect(flow.artifacts.playwrightCode).toContain('wan-transport-add-button');
   expect(flow.artifacts.playwrightCode).toContain('Nova 私网');
+  expect(flow.artifacts.playwrightCode).toContain('wan-transport-table');
+  expect(flow.artifacts.playwrightCode).toMatch(/data-row-key=\\"nova_private\\"|filter\(\{\s*hasText:\s*\/Nova\[\\s\\S\]\*私网\[\\s\\S\]\*business/);
   expect(flow.artifacts.playwrightCode).toContain('wan-transport-row-delete-action');
+  expect(flow.artifacts.playwrightCode).not.toContain('await page.getByTestId("wan-transport-row-delete-action").click();');
 
   const terminalVerificationLines = [
     `const transportTable = page.getByTestId("wan-transport-table");`,

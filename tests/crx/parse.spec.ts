@@ -87,6 +87,26 @@ test('test', async ({ page }) => {
   ]);
 });
 
+test('should preserve field-context fill selector when parsing chained test id and placeholder locators', async ({ testParse }) => {
+  const code = `import { test, expect } from '@playwright/test';
+
+test('test', async ({ page }) => {
+  await page.getByTestId('site-ip-address-pool-range-field').getByPlaceholder('开始地址，例如：192.168.1.1').fill('1.1.1.1');
+});`;
+  const { actions } = await testParse(code);
+  expect(actions).toMatchObject([
+    { name: 'openPage' },
+    {
+      name: 'fill',
+      selector: 'internal:testid=[data-testid="site-ip-address-pool-range-field"s] >> internal:attr=[placeholder="开始地址，例如：192.168.1.1"i]',
+      text: '1.1.1.1',
+    },
+  ]);
+  const fillAction = actions.find(action => action.name === 'fill');
+  expect(fillAction?.selector).not.toContain('internal:label="开始地址，例如："');
+  expect(fillAction?.selector).not.toContain('internal:role=textbox[name="开始地址，例如："i]');
+});
+
 test('should parse selectOption', async ({ testParse }) => {
   const code = `import { test, expect } from '@playwright/test';
 
