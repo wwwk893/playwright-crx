@@ -11046,6 +11046,35 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'contract test id renderer keeps reusable row action scoped by row text fallback',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          kind: 'recorded',
+          sourceActionIds: ['a001'],
+          action: 'click',
+          target: {
+            testId: 'wan-transport-row-delete-action',
+            name: 'Nova 私网 business 编辑删除',
+            text: 'Nova 私网 business 编辑删除',
+            displayName: 'Nova 私网 business 编辑删除',
+          },
+          sourceCode: 'await page.getByTestId("wan-transport-row-delete-action").click();',
+          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="wan-transport-row-delete-action"s]' } },
+          assertions: [],
+        }],
+      };
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      assert(code.includes('filter({ hasText: /Nova[\\s\\S]*私网[\\s\\S]*business[\\s\\S]*编辑删除/ })'), 'reusable row action should keep row text scope when rowKey context is late or unavailable');
+      assert(code.includes('.getByTestId("wan-transport-row-delete-action").first().click();'), 'row text scoped action should still click the row action test id');
+      assert(!code.includes('await page.getByTestId("wan-transport-row-delete-action").click();'), 'contract test id primary must not bypass row-scoped replay for reusable row actions');
+    },
+  },
+  {
     name: 'indexed WAN edit test id keeps ordinal instead of forcing table row key',
     run: () => {
       const flow: BusinessFlow = {
