@@ -787,7 +787,8 @@ async function clickVisibleAntDOption(page: Page, text: string) {
   await humanClick(option).catch(async () => {
     await option.click({ timeout: 10_000 });
   });
-  if (await option.isVisible().catch(() => false))
+  const closedAfterHumanClick = await dropdown.waitFor({ state: 'hidden', timeout: 1500 }).then(() => true).catch(() => false);
+  if (!closedAfterHumanClick && await option.isVisible().catch(() => false))
     await option.click({ timeout: 10_000, force: true });
   await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').first().waitFor({ state: 'hidden', timeout: 5000 });
 }
