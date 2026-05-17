@@ -99,6 +99,12 @@ function sanitizePageContext(snapshot: StepContextSnapshot['before']): StepConte
     breadcrumb: snapshot.breadcrumb,
     activeTab: snapshot.activeTab,
     dialog: snapshot.dialog,
+    ancestor: snapshot.ancestor ? compactObject({
+      title: snapshot.ancestor.title,
+      kind: snapshot.ancestor.kind,
+      testId: snapshot.ancestor.testId,
+      attributes: sanitizeAncestorAttributes(snapshot.ancestor.attributes),
+    }) as StepContextSnapshot['before']['ancestor'] : undefined,
     section: snapshot.section,
     table: snapshot.table ? compactObject({
       title: snapshot.table.title,
@@ -152,6 +158,20 @@ function sanitizeElementContext(target?: StepContextSnapshot['before']['target']
     optionPath: target.optionPath,
     uniqueness: target.uniqueness,
   }) as StepContextSnapshot['before']['target'];
+}
+
+function sanitizeAncestorAttributes(attributes?: Record<string, string>) {
+  if (!attributes)
+    return undefined;
+  const allowed: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (!/^data-[\w-]+$/.test(key))
+      continue;
+    if (/password|passwd|pwd|token|cookie|authorization|auth|secret|session/i.test(key) || /password|passwd|pwd|token|cookie|authorization|auth|secret|session/i.test(value))
+      continue;
+    allowed[key] = value;
+  }
+  return Object.keys(allowed).length ? allowed : undefined;
 }
 
 function sanitizeUnknownElementTarget(target: Record<string, unknown>) {

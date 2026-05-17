@@ -11311,6 +11311,63 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'duplicate test id target preserves nearest semantic ancestor scope',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('wan-controller-priority-create-button', wallTime),
+      ], [], {});
+      const event = pageClickEventWithTarget('ctx-primary-controller-create', wallTime + 120, {
+        tag: 'button',
+        role: 'button',
+        testId: 'wan-controller-priority-create-button',
+        text: '新建',
+        normalizedText: '新建',
+        framework: 'antd',
+        controlType: 'button',
+        locatorQuality: 'testid',
+        uniqueness: { pageCount: 2, pageIndex: 0 },
+      } as ElementContext);
+      event.before.ancestor = {
+        title: '主设备',
+        kind: 'section',
+        testId: 'wan-device-section',
+        attributes: { 'data-device-role': 'primary' },
+      };
+      event.before.section = {
+        title: '控制器优先级',
+        kind: 'section',
+        testId: 'wan-controller-priority-section',
+      };
+      event.before.table = {
+        title: '控制器优先级',
+        testId: 'wan-controller-priority-table',
+      };
+
+      const merged = mergePageContextIntoFlow(recorded, [event]);
+      const step = merged.steps[0];
+      assertEqual(step.target?.scope?.ancestor?.testId, 'wan-device-section');
+      assertEqual(step.target?.scope?.ancestor?.attributes?.['data-device-role'], 'primary');
+      assertEqual(step.target?.locatorHint?.strategy, 'ancestor-scoped-testid');
+      assertEqual(step.target?.locatorHint?.pageCount, 2);
+      assertEqual(step.target?.locatorHint?.pageIndex, 0);
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(merged), 's001');
+      const playback = stepCodeBlock(generateBusinessFlowPlaybackCode(merged), 's001');
+      for (const source of [code, playback]) {
+        assert(source.includes('data-device-role=\\"primary\\"'), `duplicate test id replay should scope by semantic ancestor attribute: ${source}`);
+        assert(source.includes('.getByTestId("wan-controller-priority-create-button").click();'), 'scoped replay should still target the recorded button test id');
+        assert(!source.includes('.nth(0)'), 'semantic ancestor scope should replace page-level ordinal replay');
+      }
+
+      const exported = prepareBusinessFlowForExport(merged);
+      const exportedJson = JSON.stringify(exported);
+      const compact = toCompactFlow(exported);
+      assert(exportedJson.includes('"ancestor"') && exportedJson.includes('"data-device-role":"primary"'), 'business-flow export should retain semantic ancestor scope');
+      assert(compact.includes('wan-device-section[data-device-role=primary]'), 'compact flow should surface semantic ancestor scope to reviewers');
+    },
+  },
+  {
     name: 'parser-safe action-like test id without button semantics does not infer button role fallback',
     run: () => {
       const flow: BusinessFlow = {

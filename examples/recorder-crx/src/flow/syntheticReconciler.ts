@@ -8,7 +8,7 @@ import { migrateFlowToStableStepModel } from './flowMigration';
 import type { ElementContext, PageContextEvent } from './pageContextTypes';
 import { cloneRecorderState, withRecorderState } from './recorderState';
 import { nextStableStepId, recomputeOrders } from './stableIds';
-import type { BusinessFlow, FlowRecorderState, FlowStep, FlowTarget, RecordedActionEntry } from './types';
+import type { BusinessFlow, FlowRecorderState, FlowStep, FlowTarget, FlowTargetScope, RecordedActionEntry } from './types';
 import type { UiSemanticContext } from '../uiSemantics/types';
 
 type ActionLike = {
@@ -147,7 +147,7 @@ function dropdownRecordedOptionStepIndexForEvent(steps: FlowStep[], event: PageC
 }
 
 function upgradeRecordedDropdownOptionStep(step: FlowStep, event: PageContextEvent): FlowStep {
-  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label, event.before.ui);
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label, event.before.ui, scopeFromPageContextEvent(event));
   const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
   return {
     ...step,
@@ -592,7 +592,7 @@ function isWeakPageContextClickTarget(target?: ElementContext) {
 }
 
 function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContextEvent): FlowStep {
-  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label, event.before.ui);
+  const target = flowTargetFromPageContext(event.before.target, event.before.form?.label, event.before.ui, scopeFromPageContextEvent(event));
   const subject = target?.testId || target?.text || target?.name || target?.label || target?.placeholder || event.before.dialog?.title || '页面元素';
   return {
     id: nextStableStepId(recorder),
@@ -620,7 +620,7 @@ function buildSyntheticClickStep(recorder: FlowRecorderState, event: PageContext
   };
 }
 
-function flowTargetFromPageContext(target?: ElementContext, formLabel?: string, ui?: UiSemanticContext): FlowTarget | undefined {
+function flowTargetFromPageContext(target?: ElementContext, formLabel?: string, ui?: UiSemanticContext, scope?: FlowTargetScope): FlowTarget | undefined {
   if (!target && !ui)
     return undefined;
   const contextText = target ? stableElementText(target) : undefined;
@@ -633,8 +633,25 @@ function flowTargetFromPageContext(target?: ElementContext, formLabel?: string, 
     label: ui?.form?.label || formLabel,
     placeholder: ui?.form?.placeholder || target?.placeholder,
     text: ui?.option?.text || ui?.targetText || contextText,
+    scope,
     raw: { target, ui },
   };
+}
+
+function scopeFromPageContextEvent(event: PageContextEvent): FlowTargetScope | undefined {
+  const { dialog, ancestor, section, table, form } = event.before;
+  const scope: FlowTargetScope = {};
+  if (dialog)
+    scope.dialog = dialog;
+  if (ancestor)
+    scope.ancestor = ancestor;
+  if (section)
+    scope.section = section;
+  if (table)
+    scope.table = table;
+  if (form)
+    scope.form = form;
+  return Object.keys(scope).length ? scope : undefined;
 }
 
 function stableElementText(target: ElementContext) {

@@ -30,6 +30,20 @@ const maxAncestorDepth = 10;
 const maxNearbyText = 8;
 const maxTextLength = 60;
 const sensitivePattern = /(password|passwd|pwd|token|cookie|authorization|auth|secret|session)/i;
+const semanticAncestorAttributeNames = [
+  'data-device-role',
+  'data-role',
+  'data-scope',
+  'data-region',
+  'data-zone',
+  'data-site',
+  'data-tenant',
+  'data-module',
+  'data-context',
+  'data-e2e-scope',
+  'data-e2e-section',
+  'data-e2e-device-role',
+];
 const antdActionSelectors = [
   '[data-testid]',
   '[data-test-id]',
@@ -284,11 +298,12 @@ function collectPageContext(target: Element, event?: Event) {
   const section = collectSection(target, anchor);
   const directDialog = collectDialog(target, anchor);
   const dialog = directDialog ?? (isDropdownLikeTarget(anchor, target) ? collectTopVisibleOverlay() : undefined);
+  const contextTarget = collectElement(target, anchor);
   if (form?.label && !isDropdownOptionTarget(target, anchor)) {
     rememberDropdownContext({
       fieldLabel: form.label,
       fieldName: form.name,
-      fieldTestId: collectElement(target, anchor).testId,
+      fieldTestId: contextTarget.testId,
       dialogTitle: dialog?.title,
       sectionTitle: section?.title,
       dropdownType: dropdownTypeForAnchor(anchor),
@@ -306,10 +321,11 @@ function collectPageContext(target: Element, event?: Event) {
     breadcrumb: collectBreadcrumb(),
     activeTab: collectActiveTab(),
     dialog,
+    ancestor: collectSemanticAncestor(target, anchor, contextTarget),
     section,
     table: collectTable(target, anchor),
     form: form?.label ? form : formFromDropdownContext(dropdownField),
-    target: collectElement(target, anchor),
+    target: contextTarget,
     ui,
     grounding,
     nearbyText: collectNearbyText(target),
@@ -564,6 +580,46 @@ function collectSection(target: Element, anchor = actionAnchorForElement(target)
     kind: className.includes('card') ? 'card' : className.includes('collapse') ? 'panel' : section.tagName.toLowerCase() === 'fieldset' ? 'fieldset' : 'section',
     testId: testIdOf(section),
   });
+}
+
+function collectSemanticAncestor(target: Element, anchor: Element, targetContext?: ReturnType<typeof collectElement>) {
+  if (!targetContext?.testId || (targetContext.uniqueness?.pageCount ?? 0) <= 1)
+    return undefined;
+  for (let current: Element | null = anchor.parentElement, depth = 0; current && depth < maxAncestorDepth; current = current.parentElement, depth++) {
+    if (current === target || current === anchor)
+      continue;
+    const testId = testIdOf(current);
+    const attributes = stableSemanticAncestorAttributes(current);
+    if (!testId || !Object.keys(attributes).length)
+      continue;
+    if (isPotentialActionAnchor(current) && !hasStructuralSectionContent(current))
+      continue;
+    if (!current.querySelector(testIdSelector(targetContext.testId)))
+      continue;
+    const className = current.getAttribute('class') || '';
+    return compactObject({
+      title: textFromFirst('.ant-pro-card-title, .ant-card-head-title, .ant-collapse-header, legend, h1, h2, h3, h4, [class*="title"]', current) || headingText(current),
+      kind: className.includes('card') ? 'card' : className.includes('collapse') ? 'panel' : current.matches('section, [role="region"]') ? 'region' : hasStructuralSectionContent(current) ? 'section' : 'container',
+      testId,
+      attributes,
+    });
+  }
+  return undefined;
+}
+
+function stableSemanticAncestorAttributes(element: Element) {
+  const attributes: Record<string, string> = {};
+  for (const name of semanticAncestorAttributeNames) {
+    const value = safeText(element.getAttribute(name), 80);
+    if (value)
+      attributes[name] = value;
+  }
+  return attributes;
+}
+
+function testIdSelector(testId: string) {
+  const value = cssAttributeValue(testId);
+  return `[data-testid="${value}"], [data-test-id="${value}"], [data-e2e="${value}"]`;
 }
 
 function closestStructuralSection(target: Element) {
@@ -826,6 +882,10 @@ function normalizeText(value?: string) {
 
 function testIdOf(element: Element) {
   return safeText(element.getAttribute('data-testid') || element.getAttribute('data-test-id') || element.getAttribute('data-e2e') || undefined);
+}
+
+function cssAttributeValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 function inferredRole(element: Element, controlType?: string) {

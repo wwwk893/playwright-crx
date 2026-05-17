@@ -31,6 +31,7 @@ export interface PageContextSnapshot {
   breadcrumb?: string[];
   activeTab?: TabContext;
   dialog?: DialogContext;
+  ancestor?: AncestorContext;
   section?: SectionContext;
   table?: TableContext;
   form?: FormContext;
@@ -98,7 +99,7 @@ export interface LocatorUniqueness {
   pageCount?: number;
   pageIndex?: number;
   scopeCount?: number;
-  scopeKind?: 'dialog' | 'section' | 'table' | 'form';
+  scopeKind?: 'dialog' | 'ancestor' | 'section' | 'table' | 'form';
 }
 
 export interface DialogContext {
@@ -112,6 +113,13 @@ export interface SectionContext {
   title?: string;
   kind?: 'card' | 'panel' | 'section' | 'fieldset' | 'page';
   testId?: string;
+}
+
+export interface AncestorContext {
+  title?: string;
+  kind?: 'card' | 'panel' | 'section' | 'region' | 'container';
+  testId?: string;
+  attributes?: Record<string, string>;
 }
 
 export interface RowIdentity {

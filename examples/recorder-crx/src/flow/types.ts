@@ -21,6 +21,7 @@ import type {
   FormContext,
   IntentSource,
   IntentSuggestion,
+  AncestorContext,
   RowIdentity,
   SectionContext,
   StepContextSnapshot,
@@ -103,6 +104,7 @@ export interface FlowTestDataItem {
 
 export interface FlowTargetScope {
   dialog?: Pick<DialogContext, 'title' | 'testId' | 'type' | 'visible'>;
+  ancestor?: Pick<AncestorContext, 'title' | 'testId' | 'kind' | 'attributes'>;
   section?: Pick<SectionContext, 'title' | 'testId' | 'kind'>;
   table?: {
     title?: string;
@@ -121,6 +123,7 @@ export interface FlowTargetScope {
 export interface LocatorHint {
   strategy:
     | 'global-testid'
+    | 'ancestor-scoped-testid'
     | 'global-role'
     | 'dialog-scoped-role'
     | 'section-scoped-role'
