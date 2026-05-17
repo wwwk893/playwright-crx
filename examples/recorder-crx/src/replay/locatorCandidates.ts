@@ -6,6 +6,7 @@
 import type { FlowStep } from '../flow/types';
 import type { UiActionRecipe } from './types';
 import type { LocatorCandidate, LocatorCandidateKind, LocatorContract, LocatorRisk } from './locatorTypes';
+import { looksLikeDialogOpenerTestId, looksLikeStructuralDialogTargetTestId } from './dialogLocatorGuards';
 import { aggregateLocatorRisks, createLocatorCandidate, rankLocatorCandidates } from './locatorRobustnessScorer';
 
 type TargetScope = {
@@ -58,7 +59,7 @@ function isExecutableCandidate(candidate: LocatorCandidate, recipe: UiActionReci
       return !!candidate.payload?.tableTestId && !!candidate.payload?.rowKey && !!candidate.payload?.role && !!(candidate.payload?.name || candidate.payload?.text);
     case 'dialog-scoped-testid': {
       const testId = candidate.payload?.testId;
-      return candidate.payload?.dialogType !== 'dropdown' && !!testId && !looksLikeStructuralDialogTargetTestId(testId, candidate.payload?.dialogTestId, step) && !!(candidate.payload?.dialogTestId || candidate.payload?.dialogTitle);
+      return candidate.payload?.dialogType !== 'dropdown' && !!testId && !looksLikeStructuralDialogTargetTestId(testId, candidate.payload?.dialogTestId, { isDialogOpener: !!step && isDialogOpenerTestIdClick(step, testId) }) && !!(candidate.payload?.dialogTestId || candidate.payload?.dialogTitle);
     }
     case 'dialog-scoped-role':
       return candidate.payload?.dialogType !== 'dropdown' && !!candidate.payload?.role && !!(candidate.payload?.name || candidate.payload?.text) && !!(candidate.payload?.dialogTestId || candidate.payload?.dialogTitle);
@@ -68,7 +69,7 @@ function isExecutableCandidate(candidate: LocatorCandidate, recipe: UiActionReci
       return !!(candidate.payload?.name || candidate.payload?.text);
     case 'testid': {
       const testId = candidate.payload?.testId;
-      return !!testId && !looksLikeStructuralDialogTargetTestId(testId, undefined, step);
+      return !!testId && !looksLikeStructuralDialogTargetTestId(testId, undefined, { isDialogOpener: !!step && isDialogOpenerTestIdClick(step, testId) });
     }
     default:
       return false;
@@ -80,8 +81,14 @@ function hasAntdPopupOptionEvidence(recipe: UiActionRecipe, step?: FlowStep) {
     return true;
   const framework = recipe.framework;
   const component = recipe.component;
+  const hasAntdFrameworkEvidence = isAntdOrProFramework(framework) ||
+    isAntdOrProFramework(step?.context?.before.target?.framework) ||
+    isAntdOrProFramework(step?.context?.before.ui?.library) ||
+    isAntdOrProFramework(step?.uiRecipe?.library);
+  if (!hasAntdFrameworkEvidence)
+    return false;
   const recipeSelectComponent = component === 'Select' || component === 'TreeSelect' || component === 'Cascader';
-  if ((framework === 'antd' || framework === 'procomponents') && recipeSelectComponent)
+  if (recipeSelectComponent)
     return true;
   const controlType = step?.context?.before.target?.controlType || String((step?.target?.raw as { controlType?: unknown } | undefined)?.controlType || '');
   if (/^(select-option|tree-select-option|cascader-option)$/.test(controlType))
@@ -89,16 +96,11 @@ function hasAntdPopupOptionEvidence(recipe: UiActionRecipe, step?: FlowStep) {
   const uiComponent = step?.context?.before.ui?.component || step?.uiRecipe?.component;
   if (uiComponent === 'select' || uiComponent === 'tree-select' || uiComponent === 'cascader' || uiComponent === 'Select' || uiComponent === 'TreeSelect' || uiComponent === 'Cascader')
     return true;
-  return step?.context?.before.dialog?.type === 'dropdown';
+  return false;
 }
 
-function looksLikeStructuralDialogTargetTestId(testId: string, dialogTestId?: string, step?: FlowStep) {
-  if (dialogTestId && testId === dialogTestId)
-    return true;
-  if (step && isDialogOpenerTestIdClick(step, testId))
-    return false;
-  return /(^|[-_])(modal|dialog|drawer|form|container|wrapper|root)$/i.test(testId) ||
-    /(^|[-_])(section|card|content|region)$/i.test(testId);
+function isAntdOrProFramework(value?: string) {
+  return /^(antd|procomponents|pro-components)$/i.test(value || '');
 }
 
 function isDialogOpenerTestIdClick(step: FlowStep, testId: string) {
@@ -109,10 +111,6 @@ function isDialogOpenerTestIdClick(step: FlowStep, testId: string) {
     return false;
   const before = step.context?.before.dialog;
   return !(before?.type === opened.type && before?.title === opened.title && before?.testId === opened.testId);
-}
-
-function looksLikeDialogOpenerTestId(testId: string) {
-  return /(^|[-_])(create|add|new|open|edit)([-_]|$)|新建|创建|添加|新增|打开|编辑/i.test(testId);
 }
 
 function stableBusinessCandidates(recipe: UiActionRecipe, step?: FlowStep) {
