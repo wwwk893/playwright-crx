@@ -11311,6 +11311,208 @@ test('demo', async ({ page }) => {
     },
   },
   {
+    name: 'duplicate test id target preserves nearest semantic ancestor scope',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('wan-controller-priority-create-button', wallTime),
+      ], [], {});
+      const event = pageClickEventWithTarget('ctx-primary-controller-create', wallTime + 120, {
+        tag: 'button',
+        role: 'button',
+        testId: 'wan-controller-priority-create-button',
+        text: '新建',
+        normalizedText: '新建',
+        framework: 'antd',
+        controlType: 'button',
+        locatorQuality: 'testid',
+        uniqueness: { pageCount: 2, pageIndex: 0 },
+      } as ElementContext);
+      event.before.ancestor = {
+        title: '主设备',
+        kind: 'section',
+        testId: 'wan-device-section',
+        attributes: { 'data-device-role': 'primary' },
+      };
+      event.before.section = {
+        title: '控制器优先级',
+        kind: 'section',
+        testId: 'wan-controller-priority-section',
+      };
+      event.before.table = {
+        title: '控制器优先级',
+        testId: 'wan-controller-priority-table',
+      };
+
+      const merged = mergePageContextIntoFlow(recorded, [event]);
+      const step = merged.steps[0];
+      assertEqual(step.target?.scope?.ancestor?.testId, 'wan-device-section');
+      assertEqual(step.target?.scope?.ancestor?.attributes?.['data-device-role'], 'primary');
+      assertEqual(step.target?.locatorHint?.strategy, 'ancestor-scoped-testid');
+      assertEqual(step.target?.locatorHint?.pageCount, 2);
+      assertEqual(step.target?.locatorHint?.pageIndex, 0);
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(merged), 's001');
+      const playback = stepCodeBlock(generateBusinessFlowPlaybackCode(merged), 's001');
+      for (const source of [code, playback]) {
+        assert(source.includes('data-device-role=\\"primary\\"'), `duplicate test id replay should scope by semantic ancestor attribute: ${source}`);
+        assert(source.includes('.getByTestId("wan-controller-priority-create-button").click();'), 'scoped replay should still target the recorded button test id');
+        assert(!source.includes('.nth(0)'), 'semantic ancestor scope should replace page-level ordinal replay');
+      }
+
+      const exported = prepareBusinessFlowForExport(merged);
+      const exportedJson = JSON.stringify(exported);
+      const compact = toCompactFlow(exported);
+      assert(exportedJson.includes('"ancestor"') && exportedJson.includes('"data-device-role":"primary"'), 'business-flow export should retain semantic ancestor scope');
+      assert(compact.includes('wan-device-section[data-device-role=primary]'), 'compact flow should surface semantic ancestor scope to reviewers');
+    },
+  },
+  {
+    name: 'duplicate test id with ui testid hint still prefers ancestor scoped locator hint',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('wan-controller-priority-create-button', wallTime),
+      ], [], {});
+      const event = pageClickEventWithTarget('ctx-primary-controller-create-ui', wallTime + 120, {
+        tag: 'button',
+        role: 'button',
+        testId: 'wan-controller-priority-create-button',
+        text: '新建',
+        normalizedText: '新建',
+        framework: 'antd',
+        controlType: 'button',
+        locatorQuality: 'testid',
+        uniqueness: { pageCount: 2, pageIndex: 0 },
+      } as ElementContext);
+      event.before.ancestor = {
+        title: '主设备',
+        kind: 'section',
+        testId: 'wan-device-section',
+        attributes: { 'data-device-role': 'primary' },
+      };
+      event.before.ui = {
+        ...semanticUi({
+          library: 'antd',
+          component: 'button',
+          recipe: 'click-button',
+          targetText: '新建',
+        }),
+        targetTestId: 'wan-controller-priority-create-button',
+        locatorHints: [{ kind: 'testid', value: 'wan-controller-priority-create-button', score: 0.95, reason: 'test fixture' }],
+      };
+
+      const merged = mergePageContextIntoFlow(recorded, [event]);
+      assertEqual(merged.steps[0].target?.locatorHint?.strategy, 'ancestor-scoped-testid');
+      assertEqual(merged.steps[0].target?.locatorHint?.pageCount, 2);
+      assertEqual(merged.steps[0].target?.scope?.ancestor?.attributes?.['data-device-role'], 'primary');
+    },
+  },
+  {
+    name: 'existing global duplicate test id locator hint is promoted when ancestor scope arrives',
+    run: () => {
+      const wallTime = Date.now();
+      const recorded = mergeActionsIntoFlow(undefined, [
+        testIdClickAction('wan-controller-priority-create-button', wallTime),
+      ], [], {});
+      const withGlobalHint: BusinessFlow = {
+        ...recorded,
+        steps: recorded.steps.map(step => ({
+          ...step,
+          target: {
+            ...step.target,
+            testId: 'wan-controller-priority-create-button',
+            locatorHint: { strategy: 'global-testid', confidence: 0.9, pageCount: 2, pageIndex: 1 },
+          },
+        })),
+      };
+      const event = pageClickEventWithTarget('ctx-standby-controller-create', wallTime + 120, {
+        tag: 'button',
+        role: 'button',
+        testId: 'wan-controller-priority-create-button',
+        text: '新建',
+        normalizedText: '新建',
+        framework: 'antd',
+        controlType: 'button',
+        locatorQuality: 'testid',
+        uniqueness: { pageCount: 2, pageIndex: 1 },
+      } as ElementContext);
+      event.before.ancestor = {
+        title: '备设备',
+        kind: 'section',
+        testId: 'wan-device-section',
+        attributes: { 'data-device-role': 'standby' },
+      };
+
+      const merged = mergePageContextIntoFlow(withGlobalHint, [event]);
+      const step = merged.steps[0];
+      assertEqual(step.target?.locatorHint?.strategy, 'ancestor-scoped-testid');
+      assertEqual(step.target?.locatorHint?.pageIndex, 1);
+      assertEqual(step.target?.scope?.ancestor?.attributes?.['data-device-role'], 'standby');
+
+      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(merged), 's001');
+      assert(code.includes('data-device-role=\\"standby\\"'), 'promoted locator hint should replay through standby ancestor scope');
+      assert(!code.includes('.nth(1)'), 'promoted ancestor-scoped hint should replace old global ordinal');
+    },
+  },
+  {
+    name: 'export sanitizer redacts target scope ancestor attributes consistently',
+    run: () => {
+      const flow: BusinessFlow = {
+        ...createNamedFlow(),
+        steps: [{
+          id: 's001',
+          order: 1,
+          action: 'click',
+          target: {
+            testId: 'wan-controller-priority-create-button',
+            scope: {
+              ancestor: {
+                title: '主设备',
+                kind: 'section',
+                testId: 'wan-device-section',
+                attributes: {
+                  'data-device-role': 'primary',
+                  'data-token': 'secret',
+                },
+              },
+            },
+          },
+          context: {
+            eventId: 'ctx-redact-ancestor-scope',
+            capturedAt: 1000,
+            before: {
+              ancestor: {
+                title: '主设备',
+                kind: 'section',
+                testId: 'wan-device-section',
+                attributes: {
+                  'data-device-role': 'primary',
+                  'data-token': 'secret',
+                },
+              },
+              target: {
+                tag: 'button',
+                testId: 'wan-controller-priority-create-button',
+                text: '新建',
+              },
+            },
+          },
+          assertions: [],
+        }],
+      };
+
+      const exported = prepareBusinessFlowForExport(flow);
+      const targetAttributes = exported.steps[0].target?.scope?.ancestor?.attributes;
+      const contextAttributes = exported.steps[0].context?.before.ancestor?.attributes;
+      assertEqual(targetAttributes?.['data-device-role'], 'primary');
+      assertEqual(contextAttributes?.['data-device-role'], 'primary');
+      assert(!targetAttributes?.['data-token'], 'target scope ancestor should redact sensitive data-* attributes');
+      assert(!contextAttributes?.['data-token'], 'context ancestor should redact sensitive data-* attributes');
+      assert(!JSON.stringify(exported).includes('secret'), 'exported flow should not leak sensitive ancestor attribute values');
+    },
+  },
+  {
     name: 'parser-safe action-like test id without button semantics does not infer button role fallback',
     run: () => {
       const flow: BusinessFlow = {

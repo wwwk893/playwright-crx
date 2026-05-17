@@ -15,7 +15,7 @@
  */
 import { compactUiSemanticContext } from '../uiSemantics';
 import type { BusinessFlow, FlowNetworkEvent, FlowStep } from './types';
-import type { StepContextSnapshot } from './pageContextTypes';
+import type { AncestorContext, StepContextSnapshot } from './pageContextTypes';
 
 type CompactValue = string | number | boolean | null | CompactValue[] | { [key: string]: CompactValue | undefined };
 
@@ -94,6 +94,7 @@ function compactContext(context?: StepContextSnapshot) {
   return {
     page: firstText(context.before.title, context.after?.title),
     tab: firstText(context.before.activeTab?.title, context.after?.activeTab?.title),
+    ancestor: summarizeAncestor(context.before.ancestor),
     section: context.before.section?.title,
     table: context.before.table?.title,
     row: context.before.table?.rowKey,
@@ -120,13 +121,25 @@ function compactNetworkEvent(event: FlowNetworkEvent) {
 function summarizeTarget(target: FlowStep['target']) {
   if (!target)
     return undefined;
-  return target.testId ||
+  const base = target.testId ||
     [target.role, target.name].filter(Boolean).join(' ') ||
     target.label ||
     target.placeholder ||
     target.text ||
     target.locator ||
     target.selector;
+  const ancestor = summarizeAncestor(target.scope?.ancestor);
+  return base && ancestor ? `${base} @ ${ancestor}` : base;
+}
+
+function summarizeAncestor(ancestor?: Pick<AncestorContext, 'title' | 'testId' | 'attributes'>) {
+  if (!ancestor)
+    return undefined;
+  const attributes = Object.entries(ancestor.attributes || {})
+      .map(([key, value]) => `${key}=${value}`)
+      .join(', ');
+  const identity = [ancestor.testId, attributes ? `[${attributes}]` : undefined].filter(Boolean).join('');
+  return identity || ancestor.title;
 }
 
 function firstText(...values: Array<string | undefined>) {

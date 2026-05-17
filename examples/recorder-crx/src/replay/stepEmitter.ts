@@ -244,6 +244,7 @@ function dropdownOptionContextScore(step: FlowStep) {
 
 type FlowDialogScope = NonNullable<NonNullable<NonNullable<FlowStep['target']>['scope']>['dialog']>;
 type FlowTableScope = NonNullable<NonNullable<FlowStep['target']>['scope']>['table'];
+type FlowAncestorScope = NonNullable<NonNullable<NonNullable<FlowStep['target']>['scope']>['ancestor']>;
 
 function withInheritedTableRowContext(flow: BusinessFlow): BusinessFlow {
   let previousTableRow: { table: FlowTableScope; rowText?: string; stepText?: string } | undefined;
@@ -1398,7 +1399,7 @@ function contractTestIdLocator(candidate: LocatorCandidate, step: FlowStep) {
     return rowScoped;
   if (isReusableRowActionTestId(testId))
     return undefined;
-  const source = step.target?.testId === testId ? 'target' : 'context';
+  const source = testIdSourceForStep(step, testId);
   if (duplicatePageIndex(step, testId, source) !== undefined)
     return undefined;
   return `page.getByTestId(${stringLiteral(testId)})`;
@@ -1460,6 +1461,8 @@ function shouldPreserveRecordedOpenerTestIdSource(sourceCode: string[], step: Fl
   const testId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || testIdFromSource(sourceCode.join('\n')) || '';
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
   if (looksLikeStructuralDialogTargetTestId(testId, dialog?.testId, { isDialogOpener: isDialogOpenerTestIdClick(step, testId) }))
+    return false;
+  if (testId && ancestorScopedTestIdLocator(step, testId, testIdSourceForStep(step, testId)))
     return false;
   if (!looksLikeDialogOpenerTestId(testId))
     return false;
@@ -1609,7 +1612,7 @@ function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
         const popconfirmSource = antdPopoverConfirmAfterClickSource(step, options);
         if (popconfirmSource)
           return `${clickSource}\n${popconfirmSource}`;
-        const parserSafeDuplicateLocator = options.parserSafe && shouldPreferParserSafeDuplicateRole(step) ? duplicateRoleLocator(step) : undefined;
+        const parserSafeDuplicateLocator = options.parserSafe && /\.nth\(/.test(testIdLocator) && shouldPreferParserSafeDuplicateRole(step) ? duplicateRoleLocator(step) : undefined;
         if (parserSafeDuplicateLocator)
           return `await page.waitForTimeout(300);\nawait ${parserSafeDuplicateLocator}.click({ force: true });`;
         return options.parserSafe && duplicatePageIndex(step) !== undefined ? `await page.waitForTimeout(300);\n${clickSource}` : clickSource;
@@ -2788,7 +2791,43 @@ function scopedOrGlobalTestIdLocator(step: FlowStep, testId: string, source: 'ta
   const dialog = step.action === 'click' ? testIdDialogScope(step) : undefined;
   if (dialog && !looksLikeDialogOwnedTestId(testId))
     return `${dialogRootLocator(dialog)}.getByTestId(${stringLiteral(testId)})`;
+  const ancestorScoped = ancestorScopedTestIdLocator(step, testId, source);
+  if (ancestorScoped)
+    return ancestorScoped;
   return testIdLocatorWithOrdinal(step, testId, source);
+}
+
+function testIdSourceForStep(step: FlowStep, testId: string): 'target' | 'context' {
+  return step.target?.testId === testId ? 'target' : 'context';
+}
+
+function ancestorScopedTestIdLocator(step: FlowStep, testId: string, source: 'target' | 'context') {
+  if (duplicatePageIndex(step, testId, source) === undefined)
+    return undefined;
+  const ancestor = step.target?.scope?.ancestor || step.context?.before.ancestor;
+  if (!ancestor?.testId || ancestor.testId === testId)
+    return undefined;
+  const root = ancestorRootLocator(ancestor);
+  if (!root)
+    return undefined;
+  return `${root}.getByTestId(${stringLiteral(testId)})`;
+}
+
+function ancestorRootLocator(ancestor: FlowAncestorScope) {
+  if (!ancestor.testId)
+    return undefined;
+  const attributes = Object.entries(ancestor.attributes || {}).filter(([key, value]) => /^data-[\w-]+$/.test(key) && !!value);
+  if (!attributes.length)
+    return undefined;
+  const attributeSelector = attributes
+      .map(([key, value]) => `[${key}="${cssAttributeValue(value)}"]`)
+      .join('');
+  const testId = cssAttributeValue(ancestor.testId);
+  return `page.locator(${stringLiteral([
+    `[data-testid="${testId}"]${attributeSelector}`,
+    `[data-test-id="${testId}"]${attributeSelector}`,
+    `[data-e2e="${testId}"]${attributeSelector}`,
+  ].join(', '))})`;
 }
 
 function looksLikeOverlayRootClickTestId(step: FlowStep, testId: string) {

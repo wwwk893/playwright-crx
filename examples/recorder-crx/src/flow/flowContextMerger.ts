@@ -127,7 +127,7 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
   const hasBetterPlaceholder = !target.placeholder && contextTarget.placeholder;
   const hasBetterLabel = !target.label && contextScope?.form?.label;
   const hasBetterScope = hasRicherScope(target.scope, contextScope);
-  const hasBetterLocatorHint = !!locatorHint && !target.locatorHint;
+  const hasBetterLocatorHint = shouldPromoteLocatorHint(target.locatorHint, locatorHint);
 
   const preferredContextText = preferContextOptionText(contextTarget, target.text || target.name || target.displayName);
   const hasBetterOptionText = !!preferredContextText;
@@ -145,7 +145,7 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
     placeholder: target.placeholder || ui?.form?.placeholder || contextTarget.placeholder,
     text: target.text && !preferredContextText && !uiText ? target.text : preferredContextText || uiText || contextText,
     scope: mergeScope(target.scope, contextScope),
-    locatorHint: target.locatorHint || locatorHint,
+    locatorHint: hasBetterLocatorHint ? locatorHint : target.locatorHint || locatorHint,
     raw: {
       recorder: target.raw,
       pageContext: contextTarget,
@@ -154,12 +154,23 @@ function mergeTargetWithContext(target: FlowTarget | undefined, contextTarget: E
   };
 }
 
+function shouldPromoteLocatorHint(current?: LocatorHint, incoming?: LocatorHint) {
+  if (!incoming)
+    return false;
+  if (!current)
+    return true;
+  return incoming.strategy === 'ancestor-scoped-testid' &&
+    current.strategy === 'global-testid' &&
+    (incoming.pageCount ?? current.pageCount ?? 0) > 1;
+}
+
 function hasRicherScope(current?: FlowTargetScope, context?: FlowTargetScope) {
   if (!context)
     return false;
   if (!current)
     return true;
   return (!!context.dialog && !current.dialog) ||
+    (!!context.ancestor && !current.ancestor) ||
     (!!context.section && !current.section) ||
     (!!context.table && (!current.table || (!!context.table.rowKey && !current.table.rowKey) || (!!context.table.rowText && !current.table.rowText))) ||
     (!!context.form && !current.form);
@@ -173,6 +184,7 @@ function mergeScope(current?: FlowTargetScope, context?: FlowTargetScope): FlowT
   return {
     ...current,
     dialog: current.dialog ?? context.dialog,
+    ancestor: current.ancestor ?? context.ancestor,
     section: current.section ?? context.section,
     table: mergeTableScope(current.table, context.table),
     form: current.form ?? context.form,
@@ -242,7 +254,7 @@ function isOptionLikeElement(target: ElementContext) {
 }
 
 function scopeFromContext(context: StepContextSnapshot): FlowTargetScope | undefined {
-  const { dialog, section, table, form } = context.before;
+  const { dialog, ancestor, section, table, form } = context.before;
   const scope: FlowTargetScope = {};
   if (dialog) {
     scope.dialog = {
@@ -250,6 +262,14 @@ function scopeFromContext(context: StepContextSnapshot): FlowTargetScope | undef
       title: dialog.title,
       testId: dialog.testId,
       visible: dialog.visible,
+    };
+  }
+  if (ancestor) {
+    scope.ancestor = {
+      title: ancestor.title,
+      testId: ancestor.testId,
+      kind: ancestor.kind,
+      attributes: ancestor.attributes,
     };
   }
   if (section) {
@@ -284,15 +304,40 @@ function scopeFromContext(context: StepContextSnapshot): FlowTargetScope | undef
 }
 
 function locatorHintFromContext(contextTarget: ElementContext, scope?: FlowTargetScope, ui?: UiSemanticContext): LocatorHint | undefined {
+  const hasDuplicateAncestorScope = !!contextTarget.testId && !!scope?.ancestor?.testId && (contextTarget.uniqueness?.pageCount ?? 0) > 1;
+  if (hasDuplicateAncestorScope) {
+    return {
+      strategy: 'ancestor-scoped-testid',
+      confidence: 0.99,
+      pageCount: contextTarget.uniqueness?.pageCount,
+      pageIndex: contextTarget.uniqueness?.pageIndex,
+      scopeCount: contextTarget.uniqueness?.scopeCount,
+      reason: 'duplicate test id scoped by semantic ancestor',
+    };
+  }
   const uiBest = ui?.locatorHints?.slice().sort((a, b) => b.score - a.score)[0];
   if (uiBest?.kind === 'testid')
-    return { strategy: 'global-testid', confidence: uiBest.score, reason: uiBest.reason };
+    return {
+      strategy: 'global-testid',
+      confidence: uiBest.score,
+      reason: uiBest.reason,
+      pageCount: contextTarget.uniqueness?.pageCount,
+      pageIndex: contextTarget.uniqueness?.pageIndex,
+      scopeCount: contextTarget.uniqueness?.scopeCount,
+    };
   if (uiBest?.kind === 'label')
     return { strategy: 'field-scoped', confidence: uiBest.score, reason: uiBest.reason };
   if (uiBest?.kind === 'role')
     return { strategy: scope?.dialog?.title ? 'dialog-scoped-role' : 'global-role', confidence: uiBest.score, reason: uiBest.reason };
-  if (contextTarget.testId)
-    return { strategy: 'global-testid', confidence: 0.98, pageCount: contextTarget.uniqueness?.pageCount, pageIndex: contextTarget.uniqueness?.pageIndex, scopeCount: contextTarget.uniqueness?.scopeCount };
+  if (contextTarget.testId) {
+    return {
+      strategy: 'global-testid',
+      confidence: 0.98,
+      pageCount: contextTarget.uniqueness?.pageCount,
+      pageIndex: contextTarget.uniqueness?.pageIndex,
+      scopeCount: contextTarget.uniqueness?.scopeCount,
+    };
+  }
   const tableScope = scope?.table;
   if (tableScope?.testId && (tableScope.rowKey || tableScope.rowIdentity?.value || tableScope.rowText))
     return { strategy: tableScope.rowKey || tableScope.rowIdentity?.stable ? 'table-row-testid' : 'table-row-text', confidence: tableScope.rowKey || tableScope.rowIdentity?.stable ? 0.9 : 0.72 };
