@@ -69,8 +69,23 @@ function sanitizeFlowTarget(target?: FlowTarget): FlowTarget | undefined {
     return undefined;
   return {
     ...target,
+    scope: sanitizeFlowTargetScope(target.scope),
     raw: sanitizeRawTarget(target.raw),
   };
+}
+
+function sanitizeFlowTargetScope(scope?: FlowTarget['scope']): FlowTarget['scope'] | undefined {
+  if (!scope)
+    return undefined;
+  return compactObject({
+    ...scope,
+    ancestor: scope.ancestor ? compactObject({
+      title: scope.ancestor.title,
+      kind: scope.ancestor.kind,
+      testId: scope.ancestor.testId,
+      attributes: sanitizeAncestorAttributes(scope.ancestor.attributes),
+    }) : undefined,
+  }) as FlowTarget['scope'];
 }
 
 function sanitizeRawTarget(raw: unknown): unknown {
