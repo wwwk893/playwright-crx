@@ -132,14 +132,8 @@ function antdOwnedSelectOptionClickSource(triggerLocator: string, optionName: st
     `      }`,
     `      if (!payload.dispatch)`,
     `        return true;`,
-    `      if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled"))`,
-    `        throw new Error(\`AntD option is disabled: \${expected}\`);`,
-    `      element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
-    `      element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
-    `      element.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));`,
-    `      element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
-    `      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
-    `      element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+    ...popupOptionDisabledGuardLines('      ', 'AntD option', ['ant-select-item-option-disabled']),
+    ...popupOptionDispatchLines('      ', { includeHoverEvents: true, includeMouseEnter: true }),
     `      return true;`,
     `    }, { expectedText, dispatch }, { timeout: dispatch ? 10000 : 1000 }).catch(error => {`,
     `      if (dispatch)`,
@@ -165,18 +159,11 @@ export function antdPopupOptionDispatchSource(locator: string, optionName?: stri
 }
 
 export function antdSelectOptionDispatchSource(locator: string, optionName?: string, options: { includeHoverEvents?: boolean; clickFirstMatch?: boolean } = {}) {
-  const hoverLines = options.includeHoverEvents ? [
-    `  element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));`,
-  ] : [];
+  const dispatchLines = popupOptionDispatchLines('  ', { includeHoverEvents: options.includeHoverEvents, includeMouseEnter: options.includeHoverEvents });
   if (!optionName) {
     return [
       `await ${locator}.last().evaluate(element => {`,
-      ...hoverLines,
-      `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
-      `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
-      `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+      ...dispatchLines,
       `});`,
     ].join('\n');
   }
@@ -188,14 +175,9 @@ export function antdSelectOptionDispatchSource(locator: string, optionName?: str
       `  const expected = normalize(expectedText);`,
       `  const text = normalize(element.textContent);`,
       `  const title = normalize(element.getAttribute("title"));`,
-      `  if (!text.includes(expected) && title !== expected)`,
-      `    throw new Error(\`AntD option text mismatch: expected \${expected}, got \${text}\`);`,
-      `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled"))`,
-      `    throw new Error(\`AntD option is disabled: \${expected}\`);`,
-      ...hoverLines,
-      `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
-      `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
-      `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+      ...popupOptionTextMismatchGuardLines('  ', 'AntD option'),
+      ...popupOptionDisabledGuardLines('  ', 'AntD option', ['ant-select-item-option-disabled']),
+      ...dispatchLines,
       `}, ${stringLiteral(optionName)});`,
     ].join('\n');
   }
@@ -225,12 +207,8 @@ export function antdSelectOptionDispatchSource(locator: string, optionName?: str
     `  const text = normalize(element.textContent);`,
     `  if (!matchesExpected(text) && !matchesExpected(element.getAttribute("title")))`,
     `    throw new Error(\`AntD option text mismatch: expected \${expected}, got \${text}\`);`,
-    `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled"))`,
-    `    throw new Error(\`AntD option is disabled: \${expected}\`);`,
-    ...hoverLines,
-    `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+    ...popupOptionDisabledGuardLines('  ', 'AntD option', ['ant-select-item-option-disabled']),
+    ...dispatchLines,
     `}, ${stringLiteral(optionName)});`,
   ].join('\n');
 }
@@ -244,15 +222,35 @@ export function activePopupOptionDispatchSource(locator: string, expectedExpress
     `  const expected = normalize(expectedText);`,
     `  const text = normalize(element.textContent);`,
     `  const title = normalize(element.getAttribute("title"));`,
-    `  if (!text.includes(expected) && title !== expected)`,
-    `    throw new Error(\`AntD popup option text mismatch: expected \${expected}, got \${text}\`);`,
-    `  if (element.getAttribute("aria-disabled") === "true" || element.classList.contains("ant-select-item-option-disabled") || element.classList.contains("ant-cascader-menu-item-disabled"))`,
-    `    throw new Error(\`AntD popup option is disabled: \${expected}\`);`,
-    `  element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
-    `  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+    ...popupOptionTextMismatchGuardLines('  ', 'AntD popup option'),
+    ...popupOptionDisabledGuardLines('  ', 'AntD popup option', ['ant-select-item-option-disabled', 'ant-cascader-menu-item-disabled']),
+    ...popupOptionDispatchLines('  ', { includeHoverEvents: true }),
     `}, ${expectedExpression});`,
   ].join('\n');
+}
+
+function popupOptionTextMismatchGuardLines(indent: string, errorLabel: string) {
+  return [
+    `${indent}if (!text.includes(expected) && title !== expected)`,
+    `${indent}  throw new Error(\`${errorLabel} text mismatch: expected \${expected}, got \${text}\`);`,
+  ];
+}
+
+function popupOptionDisabledGuardLines(indent: string, errorLabel: string, disabledClassNames: string[]) {
+  const classChecks = disabledClassNames.map(className => `element.classList.contains(${stringLiteral(className)})`);
+  return [
+    `${indent}if (element.getAttribute("aria-disabled") === "true" || ${classChecks.join(' || ')})`,
+    `${indent}  throw new Error(\`${errorLabel} is disabled: \${expected}\`);`,
+  ];
+}
+
+function popupOptionDispatchLines(indent: string, options: { includeHoverEvents?: boolean; includeMouseEnter?: boolean } = {}) {
+  return [
+    options.includeHoverEvents ? `${indent}element.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, view: window }));` : undefined,
+    options.includeHoverEvents ? `${indent}element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));` : undefined,
+    options.includeMouseEnter ? `${indent}element.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true, view: window }));` : undefined,
+    `${indent}element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));`,
+    `${indent}element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));`,
+    `${indent}element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));`,
+  ].filter(Boolean) as string[];
 }
