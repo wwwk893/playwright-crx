@@ -7,29 +7,16 @@ import type { BusinessFlow, FlowStep } from '../flow/types';
 import {
   countStepActions,
   createEffectiveReplayFlow,
-  dropdownOptionEmitCompactIdentity,
-  dropdownOptionEmitIdentity,
+  createStepReplaySkipPolicy,
   firstSegmentStepId,
-  isDuplicateSyntheticEchoClick,
-  isHiddenDialogContainerClickAfterConfirm,
-  isIntermediateSameFieldFill,
-  isPlaceholderSelectOptionClick,
-  isRedundantDropdownEscape,
-  isRedundantExplicitDialogConfirmStep,
-  isRedundantExplicitPopoverConfirmStep,
-  isRedundantFieldFocusClick,
-  isRedundantParserSafeSelectFieldAction,
-  isRedundantSelectSearchClear,
-  isTruncatedSelectedValueDisplayEchoClick,
-  nextEffectiveStepForRedundantAction,
 } from './stepEmitter';
 
 export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
   const effectiveFlow = createEffectiveReplayFlow(flow);
   let count = 0;
   const emittedRepeatStepIds = new Set<string>();
-  let lastDropdownOptionIdentity = '';
-  let lastDropdownOptionCompact = '';
+  const skipPolicy = createStepReplaySkipPolicy('parserSafe');
+  const dropdownState = skipPolicy.createDropdownDedupeState();
   let previousEmittedStep: FlowStep | undefined;
   for (const [index, step] of effectiveFlow.steps.entries()) {
     const segment = (effectiveFlow.repeatSegments ?? []).find(segment => firstSegmentStepId(effectiveFlow, segment) === step.id);
@@ -39,19 +26,7 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
       for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         let previousSegmentStep: FlowStep | undefined;
         for (const [stepIndex, segmentStep] of segmentSteps.entries()) {
-          const nextEffectiveSegmentStep = nextEffectiveStepForRedundantAction(segmentSteps, stepIndex, 'parserSafe');
-          if (isIntermediateSameFieldFill(segmentStep, segmentSteps, stepIndex) ||
-            isPlaceholderSelectOptionClick(segmentStep) ||
-            isRedundantFieldFocusClick(segmentStep, segmentSteps[stepIndex + 1]) ||
-            isRedundantParserSafeSelectFieldAction(segmentStep, nextEffectiveSegmentStep) ||
-            isRedundantSelectSearchClear(segmentStep, segmentSteps[stepIndex - 1]) ||
-            isRedundantExplicitPopoverConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) ||
-            isRedundantExplicitPopoverConfirmStep(segmentStep, previousSegmentStep) ||
-            isRedundantExplicitDialogConfirmStep(segmentStep, segmentSteps[stepIndex - 1]) ||
-            isRedundantExplicitDialogConfirmStep(segmentStep, previousSegmentStep) ||
-            isHiddenDialogContainerClickAfterConfirm(segmentStep, segmentSteps[stepIndex - 1]))
-            continue;
-          if (isTruncatedSelectedValueDisplayEchoClick(segmentStep, previousSegmentStep))
+          if (skipPolicy.shouldSkipRepeatStep({ step: segmentStep, steps: segmentSteps, index: stepIndex, previousEmittedStep: previousSegmentStep, skipPlaceholderSelectOption: true }))
             continue;
           count += countStepActions(segmentStep, { parserSafe: true, previousStep: previousSegmentStep, nextStep: segmentSteps[stepIndex + 1], suppressRowExistsAssertions: !!segment.assertionTemplate });
           previousSegmentStep = segmentStep;
@@ -62,31 +37,8 @@ export function countBusinessFlowPlaybackActions(flow: BusinessFlow) {
     }
     if (emittedRepeatStepIds.has(step.id))
       continue;
-    if (isIntermediateSameFieldFill(step, effectiveFlow.steps, index) || isPlaceholderSelectOptionClick(step))
+    if (skipPolicy.shouldSkipTopLevelStep({ step, steps: effectiveFlow.steps, index, previousEmittedStep, dropdownState }))
       continue;
-    const nextEffectiveStep = nextEffectiveStepForRedundantAction(effectiveFlow.steps, index, 'parserSafe');
-    if (isRedundantFieldFocusClick(step, effectiveFlow.steps[index + 1]) || isRedundantParserSafeSelectFieldAction(step, nextEffectiveStep) || isRedundantSelectSearchClear(step, effectiveFlow.steps[index - 1]) || isRedundantDropdownEscape(step, effectiveFlow.steps[index - 1]))
-      continue;
-    if (isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
-      continue;
-    if (isDuplicateSyntheticEchoClick(step, effectiveFlow.steps[index - 1]) ||
-      isRedundantExplicitPopoverConfirmStep(step, effectiveFlow.steps[index - 1]) ||
-      isRedundantExplicitPopoverConfirmStep(step, previousEmittedStep) ||
-      isRedundantExplicitDialogConfirmStep(step, effectiveFlow.steps[index - 1]) ||
-      isRedundantExplicitDialogConfirmStep(step, previousEmittedStep) ||
-      isHiddenDialogContainerClickAfterConfirm(step, effectiveFlow.steps[index - 1]))
-      continue;
-    const dropdownOptionIdentity = dropdownOptionEmitIdentity(step);
-    const dropdownOptionCompact = dropdownOptionEmitCompactIdentity(step);
-    if (dropdownOptionIdentity && (dropdownOptionIdentity === lastDropdownOptionIdentity || dropdownOptionCompact === lastDropdownOptionCompact))
-      continue;
-    if (dropdownOptionIdentity) {
-      lastDropdownOptionIdentity = dropdownOptionIdentity;
-      lastDropdownOptionCompact = dropdownOptionCompact;
-    } else if (step.action !== 'fill') {
-      lastDropdownOptionIdentity = '';
-      lastDropdownOptionCompact = '';
-    }
 
     count += countStepActions(step, { parserSafe: true, previousStep: previousEmittedStep, nextStep: effectiveFlow.steps[index + 1] });
     previousEmittedStep = step;

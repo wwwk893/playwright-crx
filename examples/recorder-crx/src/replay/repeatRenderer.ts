@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import type { BusinessFlow, FlowRepeatSegment, FlowStep } from '../flow/types';
+import { createReplaySkipPolicy, type ReplaySkipPolicyHooks } from './replaySkipPolicy';
 import { stringLiteral } from './stepEmitterUtils';
 
 type RepeatEmitStepOptions = {
@@ -14,21 +15,8 @@ type RepeatEmitStepOptions = {
   suppressRowExistsAssertions?: boolean;
 };
 
-type RedundantLookaheadMode = 'exported' | 'parserSafe';
-
-export type RepeatRendererHooks = {
+export type RepeatRendererHooks = ReplaySkipPolicyHooks & {
   emitStep: (lines: string[], step: FlowStep, indent: string, segment?: FlowRepeatSegment, rowValues?: Record<string, string>, options?: RepeatEmitStepOptions) => void;
-  isPlaceholderSelectOptionClick: (step: FlowStep) => boolean;
-  nextEffectiveStepForRedundantAction: (steps: FlowStep[], index: number, mode: RedundantLookaheadMode) => FlowStep | undefined;
-  isIntermediateSameFieldFill: (step: FlowStep, steps: FlowStep[], index: number) => boolean;
-  isRedundantFieldFocusClick: (step: FlowStep, nextStep?: FlowStep) => boolean;
-  isRedundantExportedSelectFieldAction: (step: FlowStep, nextStep?: FlowStep) => boolean;
-  isRedundantParserSafeSelectFieldAction: (step: FlowStep, nextStep?: FlowStep) => boolean;
-  isRedundantSelectSearchClear: (step: FlowStep, previousStep?: FlowStep) => boolean;
-  isRedundantExplicitPopoverConfirmStep: (step: FlowStep, previous?: FlowStep) => boolean;
-  isRedundantExplicitDialogConfirmStep: (step: FlowStep, previous?: FlowStep) => boolean;
-  isHiddenDialogContainerClickAfterConfirm: (step: FlowStep, previous?: FlowStep) => boolean;
-  isTruncatedSelectedValueDisplayEchoClick: (step: FlowStep, previousStep?: FlowStep) => boolean;
   renderRepeatAssertionTemplate: (segment: FlowRepeatSegment) => string | undefined;
   activePopupOptionDispatchSource: (locator: string, expectedExpression: string) => string;
 };
@@ -44,20 +32,10 @@ export function emitRepeatSegment(lines: string[], flow: BusinessFlow, segment: 
   lines.push(`  for (const row of ${segmentDataName(segment)}) {`);
   const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
   const segmentHasNonPlaceholderStep = segmentSteps.some(step => !hooks.isPlaceholderSelectOptionClick(step));
+  const skipPolicy = createReplaySkipPolicy('exported', hooks);
   let previousEmittedStep: FlowStep | undefined;
   for (const [index, step] of segmentSteps.entries()) {
-    const nextEffectiveStep = hooks.nextEffectiveStepForRedundantAction(segmentSteps, index, 'exported');
-    if (hooks.isIntermediateSameFieldFill(step, segmentSteps, index) ||
-      hooks.isRedundantFieldFocusClick(step, segmentSteps[index + 1]) ||
-      hooks.isRedundantExportedSelectFieldAction(step, nextEffectiveStep) ||
-      hooks.isRedundantSelectSearchClear(step, segmentSteps[index - 1]) ||
-      hooks.isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) ||
-      hooks.isRedundantExplicitPopoverConfirmStep(step, previousEmittedStep) ||
-      hooks.isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]) ||
-      hooks.isRedundantExplicitDialogConfirmStep(step, previousEmittedStep) ||
-      hooks.isHiddenDialogContainerClickAfterConfirm(step, segmentSteps[index - 1]))
-      continue;
-    if (hooks.isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
+    if (skipPolicy.shouldSkipRepeatStep({ step, steps: segmentSteps, index, previousEmittedStep }))
       continue;
     if (hooks.isPlaceholderSelectOptionClick(step)) {
       if (!segmentHasNonPlaceholderStep)
@@ -83,20 +61,10 @@ export function emitExpandedRepeatSegment(lines: string[], flow: BusinessFlow, s
     lines.push(`  // 循环片段 ${segment.name}: 第 ${rowIndex + 1} 行`);
     const segmentSteps = flow.steps.filter(step => segment.stepIds.includes(step.id));
     const segmentHasNonPlaceholderStep = segmentSteps.some(step => !hooks.isPlaceholderSelectOptionClick(step));
+    const skipPolicy = createReplaySkipPolicy('parserSafe', hooks);
     let previousEmittedStep: FlowStep | undefined;
     for (const [index, step] of segmentSteps.entries()) {
-      const nextEffectiveStep = hooks.nextEffectiveStepForRedundantAction(segmentSteps, index, 'parserSafe');
-      if (hooks.isIntermediateSameFieldFill(step, segmentSteps, index) ||
-        hooks.isRedundantFieldFocusClick(step, segmentSteps[index + 1]) ||
-        hooks.isRedundantParserSafeSelectFieldAction(step, nextEffectiveStep) ||
-        hooks.isRedundantSelectSearchClear(step, segmentSteps[index - 1]) ||
-        hooks.isRedundantExplicitPopoverConfirmStep(step, segmentSteps[index - 1]) ||
-        hooks.isRedundantExplicitPopoverConfirmStep(step, previousEmittedStep) ||
-        hooks.isRedundantExplicitDialogConfirmStep(step, segmentSteps[index - 1]) ||
-        hooks.isRedundantExplicitDialogConfirmStep(step, previousEmittedStep) ||
-        hooks.isHiddenDialogContainerClickAfterConfirm(step, segmentSteps[index - 1]))
-        continue;
-      if (hooks.isTruncatedSelectedValueDisplayEchoClick(step, previousEmittedStep))
+      if (skipPolicy.shouldSkipRepeatStep({ step, steps: segmentSteps, index, previousEmittedStep }))
         continue;
       if (hooks.isPlaceholderSelectOptionClick(step)) {
         if (!segmentHasNonPlaceholderStep)

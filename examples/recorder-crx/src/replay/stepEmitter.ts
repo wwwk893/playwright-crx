@@ -52,6 +52,7 @@ import {
   parameterizeLine as parameterizeRepeatLine,
   type RepeatRendererHooks,
 } from './repeatRenderer';
+import { createReplaySkipPolicy, type ReplaySkipMode, type ReplaySkipPolicyHooks } from './replaySkipPolicy';
 import { applySafetyPreflightToSource } from './safetyGuard';
 import { renderRepeatAssertionTemplate } from './terminalAssertions';
 import {
@@ -104,6 +105,28 @@ const inputFieldLocatorHooks: InputFieldLocatorHooks = {
   globalTestIdLocator,
   looksLikeStructuralContainerTestId,
 };
+
+const replaySkipPolicyHooks: ReplaySkipPolicyHooks = {
+  isPlaceholderSelectOptionClick,
+  nextEffectiveStepForRedundantAction,
+  isIntermediateSameFieldFill,
+  isRedundantFieldFocusClick,
+  isRedundantExportedSelectFieldAction,
+  isRedundantParserSafeSelectFieldAction,
+  isRedundantSelectSearchClear,
+  isRedundantDropdownEscape,
+  isRedundantExplicitPopoverConfirmStep,
+  isRedundantExplicitDialogConfirmStep,
+  isHiddenDialogContainerClickAfterConfirm,
+  isTruncatedSelectedValueDisplayEchoClick,
+  isDuplicateSyntheticEchoClick,
+  dropdownOptionEmitIdentity,
+  dropdownOptionEmitCompactIdentity,
+};
+
+export function createStepReplaySkipPolicy(mode: ReplaySkipMode) {
+  return createReplaySkipPolicy(mode, replaySkipPolicyHooks);
+}
 
 export function createEffectiveReplayFlow(flow: BusinessFlow): BusinessFlow {
   return buildEffectiveReplayFlow(flow, effectiveReplayFlowHooks);
@@ -308,17 +331,7 @@ export type EmitStepOptions = {
 
 const repeatRendererHooks: RepeatRendererHooks = {
   emitStep,
-  isPlaceholderSelectOptionClick,
-  nextEffectiveStepForRedundantAction,
-  isIntermediateSameFieldFill,
-  isRedundantFieldFocusClick,
-  isRedundantExportedSelectFieldAction,
-  isRedundantParserSafeSelectFieldAction,
-  isRedundantSelectSearchClear,
-  isRedundantExplicitPopoverConfirmStep,
-  isRedundantExplicitDialogConfirmStep,
-  isHiddenDialogContainerClickAfterConfirm,
-  isTruncatedSelectedValueDisplayEchoClick,
+  ...replaySkipPolicyHooks,
   renderRepeatAssertionTemplate,
   activePopupOptionDispatchSource,
 };
