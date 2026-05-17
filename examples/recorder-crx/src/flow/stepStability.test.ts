@@ -1584,7 +1584,7 @@ const tests: TestCase[] = [
     },
   },
   {
-    name: 'recorded opener test id ending with modal keeps page-level test id source',
+    name: 'locator contract keeps custom popup select out of active popup executable replay',
     run: () => {
       const flow: BusinessFlow = {
         ...createNamedFlow(),
@@ -1592,32 +1592,83 @@ const tests: TestCase[] = [
           id: 's001',
           order: 1,
           kind: 'recorded',
-          action: 'click',
-          target: {
-            testId: 'open-user-modal',
-            text: '新建用户',
-            displayName: '新建用户',
-          },
+          action: 'select',
+          target: { label: 'Custom select' },
+          value: 'Custom Option',
           context: {
-            eventId: 'ctx-open-user-modal',
+            eventId: 'ctx-custom-select-option',
             capturedAt: 1000,
             before: {
-              target: { tag: 'button', role: 'button', testId: 'open-user-modal', text: '新建用户', normalizedText: '新建用户', controlType: 'button' },
+              form: { label: 'Custom select', name: 'customSelect' },
+              dialog: { type: 'dropdown', visible: true },
+              target: {
+                tag: 'div',
+                role: 'option',
+                framework: 'custom',
+                controlType: 'select-option',
+                text: 'Custom Option',
+                normalizedText: 'Custom Option',
+              },
+              ui: { library: 'custom', component: 'select', form: { label: 'Custom select', name: 'customSelect' } },
             } as any,
-            after: {
-              openedDialog: { type: 'modal', title: '新建用户', visible: true },
-            },
           },
-          rawAction: { action: { name: 'click', selector: 'internal:testid=[data-testid="open-user-modal"s]' } },
-          sourceCode: 'await page.getByTestId("open-user-modal").click();',
+          rawAction: { action: { name: 'selectOption', selector: 'select[name="customSelect"]', options: ['Custom Option'] } },
+          sourceCode: 'await page.locator("select[name=\\"customSelect\\"]").selectOption("Custom Option");',
           assertions: [],
         }],
       };
-      const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+      const recipe = buildRecipeForStep(flow.steps[0]);
+      const exported = generateBusinessFlowPlaywrightCode(flow);
+      const parserSafe = generateBusinessFlowPlaybackCode(flow);
 
-      assert(code.includes('await page.getByTestId("open-user-modal").click();'), 'recorded opener test id should stay page-level');
-      assert(!code.includes('filter({ hasText: "新建用户" }).getByTestId("open-user-modal")'), 'opener test id should not be scoped into the dialog it opens');
-      assert(!code.includes('page.getByRole("button"') && !code.includes("page.getByRole('button'"), 'opener test id should not be widened to role/text');
+      assertEqual(recipe?.operation, 'selectOption');
+      assertEqual(recipe?.framework, 'generic');
+      assertEqual(recipe?.locatorContract?.primaryDiagnostic?.kind, 'active-popup-option');
+      assertEqual(recipe?.locatorContract?.primaryExecutable, undefined);
+      for (const code of [exported, parserSafe]) {
+        assert(code.includes('.selectOption("Custom Option")'), 'custom/native select should keep Playwright selectOption replay');
+        assert(!code.includes('.ant-select-dropdown'), 'custom select must not use AntD active popup replay');
+        assert(!code.includes('active popup option'), 'custom select must not emit active popup bridge comments');
+      }
+    },
+  },
+  {
+    name: 'recorded opener test ids ending with overlay nouns keep page-level test id source',
+    run: () => {
+      for (const testId of ['open-user-modal', 'create-user-dialog', 'edit-device-drawer']) {
+        const flow: BusinessFlow = {
+          ...createNamedFlow(),
+          steps: [{
+            id: 's001',
+            order: 1,
+            kind: 'recorded',
+            action: 'click',
+            target: {
+              testId,
+              text: '新建用户',
+              displayName: '新建用户',
+            },
+            context: {
+              eventId: `ctx-${testId}`,
+              capturedAt: 1000,
+              before: {
+                target: { tag: 'button', role: 'button', testId, text: '新建用户', normalizedText: '新建用户', controlType: 'button' },
+              } as any,
+              after: {
+                openedDialog: { type: testId.endsWith('drawer') ? 'drawer' : 'modal', title: '新建用户', visible: true },
+              },
+            },
+            rawAction: { action: { name: 'click', selector: `internal:testid=[data-testid="${testId}"s]` } },
+            sourceCode: `await page.getByTestId("${testId}").click();`,
+            assertions: [],
+          }],
+        };
+        const code = stepCodeBlock(generateBusinessFlowPlaywrightCode(flow), 's001');
+
+        assert(code.includes(`await page.getByTestId("${testId}").click();`), `${testId}: recorded opener test id should stay page-level`);
+        assert(!code.includes(`filter({ hasText: "新建用户" }).getByTestId("${testId}")`), `${testId}: opener test id should not be scoped into the dialog it opens`);
+        assert(!code.includes('page.getByRole("button"') && !code.includes("page.getByRole('button'"), `${testId}: opener test id should not be widened to role/text`);
+      }
     },
   },
   {

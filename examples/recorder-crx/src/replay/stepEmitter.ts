@@ -18,6 +18,7 @@ import { actionLabel, summarizeStepSubject } from '../flow/display';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import { isRecipeBackedAntdSelectOption, recipeOptionSearchText, recipeOptionText } from './antDRecipeRenderers';
 import type { LocatorCandidate } from './locatorTypes';
+import { looksLikeDialogOpenerTestId, looksLikeStructuralDialogTargetTestId } from './dialogLocatorGuards';
 import { buildRecipeForStep } from './recipeBuilder';
 import { applySafetyPreflightToSource } from './safetyGuard';
 import { renderRepeatAssertionTemplate } from './terminalAssertions';
@@ -1357,13 +1358,6 @@ function contractDialogScopedLocator(candidate: LocatorCandidate, step: FlowStep
   return name ? `${root}.getByRole(${stringLiteral(role)}, ${roleNameOptionsSource(step, role, name)})` : undefined;
 }
 
-function looksLikeStructuralDialogTargetTestId(testId: string, dialogTestId?: string) {
-  if (dialogTestId && testId === dialogTestId)
-    return true;
-  return /(^|[-_])(modal|dialog|drawer|form|container|wrapper|root)$/i.test(testId) ||
-    /(^|[-_])(section|card|content|region)$/i.test(testId);
-}
-
 function isDialogOpenerTestIdClick(step: FlowStep, testId: string) {
   if (step.action !== 'click' || !looksLikeDialogOpenerTestId(testId))
     return false;
@@ -1465,7 +1459,7 @@ function shouldPreserveRecordedOpenerTestIdSource(sourceCode: string[], step: Fl
     return false;
   const testId = step.target?.testId || step.context?.before.target?.testId || testIdFromSource(JSON.stringify(rawAction(step.rawAction))) || testIdFromSource(sourceCode.join('\n')) || '';
   const dialog = step.target?.scope?.dialog || step.context?.before.dialog;
-  if (looksLikeStructuralDialogTargetTestId(testId, dialog?.testId) && !isDialogOpenerTestIdClick(step, testId))
+  if (looksLikeStructuralDialogTargetTestId(testId, dialog?.testId, { isDialogOpener: isDialogOpenerTestIdClick(step, testId) }))
     return false;
   if (!looksLikeDialogOpenerTestId(testId))
     return false;
@@ -1592,10 +1586,6 @@ function looksLikeStructuralContainerTestId(testId: string) {
 
 function looksLikeActionTestId(testId: string) {
   return /(^|[-_])(button|btn|link|tab|switch|checkbox|radio|select|input|create|add|new|save|delete|remove|edit|confirm|cancel|submit|ok|option|menu)([-_]|$)/i.test(testId);
-}
-
-function looksLikeDialogOpenerTestId(testId: string) {
-  return /(^|[-_])(create|add|new|open|edit)([-_]|$)|新建|创建|添加|新增|打开|编辑/i.test(testId);
 }
 
 function renderRawActionSource(step: FlowStep, options: EmitStepOptions = {}) {
